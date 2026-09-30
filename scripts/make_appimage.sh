@@ -21,7 +21,7 @@
 #   /usr/lib                              <- libmpv.so.2 + its transitive deps that are not "system" libs
 #   /usr/share/{icons,metainfo}
 #
-# Deliberately NOT bundled: GTK3, glibc, libstdc++, mesa/GL, X11/xcb, wayland, ALSA/JACK/PipeWire
+# Deliberately NOT bundled: GTK3 + its GLib/pango/cairo stack, glibc, libstdc++, mesa/GL, X11/xcb, wayland, ALSA/JACK/PipeWire
 # (see the AppImage excludelist) - the host provides them, exactly like the .tar.gz build does.
 # The bundle should therefore be built on the OLDEST glibc you want to support (CI uses ubuntu-24.04).
 
@@ -98,6 +98,12 @@ libasound.so.2 libjack.so.0 libpipewire-0.3.so.0 libfontconfig.so.1 libfreetype.
 libfribidi.so.0 libcom_err.so.2 libexpat.so.1 libgpg-error.so.0 libICE.so.6 libSM.so.6 libusb-1.0.so.0
 libuuid.so.1 libz.so.1 libgmp.so.10"
 fi
+# the GTK3 stack comes from the host like GTK itself. a bundled (older) copy shadows the one that host GTK,
+# its IM/GIO modules and webkit2gtk were built against, ex: libsecret: undefined symbol g_variant_builder_init_static
+EXCLUDES+="
+libglib-2.0.so.0 libgobject-2.0.so.0 libgio-2.0.so.0 libgmodule-2.0.so.0 libgthread-2.0.so.0 libffi.so.8
+libpcre2-8.so.0 libpango-1.0.so.0 libpangocairo-1.0.so.0 libpangoft2-1.0.so.0 libcairo.so.2 libcairo-gobject.so.2
+libpixman-1.so.0 libgdk_pixbuf-2.0.so.0 libepoxy.so.0"
 # one soname per line
 EXCLUDES="$(tr -s ' \t' '\n' <<< "$EXCLUDES" | grep -v '^$')"
 # libraries the flutter bundle already ships in lib/ must not be duplicated
