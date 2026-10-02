@@ -118,14 +118,34 @@ cp -L "$LIBMPV" "$APPDIR/usr/lib/libmpv.so.2"
 ln -sf libmpv.so.2 "$APPDIR/usr/lib/libmpv.so" # media_kit tries plain libmpv.so first
 echo "   bundle libmpv.so.2 ($LIBMPV)"
 
-# ldd prints the full transitive closure, so one pass is enough
-ldd "$LIBMPV" | awk '/=> \//{print $1" "$3}' | sort -u | while read -r soname sopath; do
-  if is_excluded "$soname"; then
-    echo "   skip   $soname"
-  else
+declare -A SONAME_PATHS
+while read -r soname sopath; do
+  SONAME_PATHS[$soname]="$sopath"
+done < <(ldd "$LIBMPV" | awk '/=> \//{print $1" "$3}')
+
+# walks direct deps instead of ldd's flat closure: deps reachable only through an excluded lib come from the host
+# along with it, ex: a bundled libmount shadows the newer one host libgio needs (MOUNT_2_40 not found)
+declare -A VISITED_SONAMES
+PENDING_PATHS=("$LIBMPV")
+while [ ${#PENDING_PATHS[@]} -gt 0 ]; do
+  current_path="${PENDING_PATHS[-1]}"
+  unset 'PENDING_PATHS[-1]'
+  for soname in $(objdump -p "$current_path" | awk '$1=="NEEDED"{print $2}'); do
+    [ -n "${VISITED_SONAMES[$soname]:-}" ] && continue
+    VISITED_SONAMES[$soname]=1
+    if is_excluded "$soname"; then
+      echo "   skip   $soname"
+      continue
+    fi
+    sopath="${SONAME_PATHS[$soname]:-}"
+    if [ -z "$sopath" ]; then
+      echo "error: $soname (needed by $current_path) is not resolvable on this machine" >&2
+      exit 1
+    fi
     cp -L "$sopath" "$APPDIR/usr/lib/$soname"
     echo "   bundle $soname"
-  fi
+    PENDING_PATHS+=("$sopath")
+  done
 done
 
 # ---------------------------------------------------------------------------
