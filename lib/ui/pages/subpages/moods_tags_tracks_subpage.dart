@@ -9,10 +9,14 @@ import 'package:namida/base/tracks_search_widget_mixin.dart';
 import 'package:namida/class/route.dart';
 import 'package:namida/class/track.dart';
 import 'package:namida/controller/indexer_controller.dart';
+import 'package:namida/controller/search_sort_controller.dart';
+import 'package:namida/controller/settings_controller.dart';
 import 'package:namida/core/dimensions.dart';
 import 'package:namida/core/enums.dart';
 import 'package:namida/core/extensions.dart';
 import 'package:namida/core/namida_converter_ext.dart';
+import 'package:namida/ui/dialogs/common_dialogs.dart';
+import 'package:namida/ui/widgets/artwork.dart';
 import 'package:namida/ui/widgets/custom_widgets.dart';
 import 'package:namida/ui/widgets/library/multi_artwork_container.dart';
 import 'package:namida/ui/widgets/library/track_tile.dart';
@@ -81,6 +85,33 @@ class _MoodsTagsTracksPage extends StatefulWidget with NamidaRouteWidget {
 
 class _MoodsTagsTracksPageState extends State<_MoodsTagsTracksPage> with PortsProvider<TracksSearchParams>, TracksSearchWidgetMixin<_MoodsTagsTracksPage> {
   @override
+  void initState() {
+    _sortTracks();
+    settings.mediaItemsTrackSorting.addListener(_onSortingChanged);
+    settings.mediaItemsTrackSortingReverse.addListener(_onSortingChanged);
+    super.initState();
+  }
+
+  @override
+  void dispose() {
+    settings.mediaItemsTrackSorting.removeListener(_onSortingChanged);
+    settings.mediaItemsTrackSortingReverse.removeListener(_onSortingChanged);
+    super.dispose();
+  }
+
+  void _sortTracks() {
+    final mediaType = widget.mediaType;
+    final comparables = SearchSortController.inst.getMediaTracksSortingComparables(mediaType);
+    final reverse = settings.mediaItemsTrackSortingReverse.value[mediaType] ?? false;
+    widget.tracks.sortByAltsPrecomputed(comparables, reverse: reverse);
+  }
+
+  void _onSortingChanged() {
+    _sortTracks();
+    setState(() {});
+  }
+
+  @override
   Iterable<TrackExtended> getTracksExtended() {
     return widget.tracks.map((e) => e.toTrackExt());
   }
@@ -89,6 +120,19 @@ class _MoodsTagsTracksPageState extends State<_MoodsTagsTracksPage> with PortsPr
   RxBaseCore<dynamic> listChangesListenerRx() => Indexer.inst.trackStatsMap;
   @override
   RxBaseCore<dynamic> listChangesListenerAltRx() => Indexer.inst.tracksInfoList;
+
+  void _openMenu() {
+    final name = widget.name;
+    final tracks = widget.tracks;
+    switch (widget.mediaType) {
+      case MediaType.tag:
+        NamidaDialogs.inst.showTagDialog(name, tracks);
+      case MediaType.rating:
+        NamidaDialogs.inst.showRatingDialog(name, tracks);
+      default:
+        NamidaDialogs.inst.showMoodDialog(name, tracks);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -109,10 +153,11 @@ class _MoodsTagsTracksPageState extends State<_MoodsTagsTracksPage> with PortsPr
               ].join(' - '),
               type: widget.mediaType,
               pageTitle: widget.name,
-              disableSort: true,
             ),
             infoBox: (maxWidth) => SubpageInfoContainer(
               maxWidth: maxWidth,
+              type: widget.mediaType,
+              onOpenMenu: _openMenu,
               source: widget.queueSource,
               title: widget.name,
               subtitle: [
@@ -127,6 +172,12 @@ class _MoodsTagsTracksPageState extends State<_MoodsTagsTracksPage> with PortsPr
                 fallbackIcon: widget.icon,
               ),
               tracksFn: () => tracks,
+              bannerBuilder: (width, height) => ArtworkStripBanner(
+                tracks: tracks,
+                width: width,
+                height: height,
+                fallbackIcon: widget.icon,
+              ),
             ),
             itemCount: searchResults?.length ?? tracks.length,
             itemExtent: Dimensions.inst.trackTileItemExtent,

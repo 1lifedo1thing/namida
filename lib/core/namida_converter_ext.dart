@@ -114,6 +114,13 @@ extension MediaTypeUtils on MediaType {
       MediaType.playlist => LibraryTab.playlists,
     };
   }
+
+  MediaType toSubpageInfoType() => switch (this) {
+    MediaType.album => MediaType.album,
+    MediaType.artist || MediaType.albumArtist || MediaType.composer => MediaType.artist,
+    MediaType.genre || MediaType.style || MediaType.mood || MediaType.tag || MediaType.rating => MediaType.genre,
+    MediaType.track || MediaType.playlist || MediaType.folder || MediaType.folderMusic || MediaType.folderVideo => MediaType.playlist,
+  };
 }
 
 extension LibraryTabsListUtils on List<LibraryTab> {
@@ -1137,49 +1144,7 @@ extension PerformanceModeUtils on PerformanceMode {
 }
 
 extension QueueInsertionTypeToQI on QueueInsertionType {
-  QueueInsertion toQueueInsertion() => settings.queueInsertion.value[this] ?? const QueueInsertion(numberOfTracks: 0, insertNext: true, sortBy: InsertionSortingType.none);
-
-  /// NOTE: Modifies the original list.
-  List<Selectable> shuffleOrSort(List<Selectable> tracks) {
-    final sortBy = toQueueInsertion().sortBy;
-
-    switch (sortBy) {
-      case InsertionSortingType.listenCount:
-        if (this == QueueInsertionType.algorithm || this == QueueInsertionType.algorithmDiscoverDate || this == QueueInsertionType.algorithmTimeRange) {
-          // already sorted by repeated times inside [NamidaGenerator.generateRecommendedTrack].
-        } else {
-          tracks.sortByReverse((e) => HistoryController.inst.topTracksMapListens.value[e.track]?.length ?? 0);
-        }
-      case InsertionSortingType.rating:
-        tracks.sortByReverse((e) => e.track.effectiveRating);
-      case InsertionSortingType.random:
-        tracks.shuffle();
-      case InsertionSortingType.none: // do nothing
-    }
-
-    return tracks;
-  }
-
-  /// NOTE: Modifies the original list.
-  List<YoutubeID> shuffleOrSortYT(List<YoutubeID> videos) {
-    final sortBy = toQueueInsertion().sortBy;
-
-    switch (sortBy) {
-      case InsertionSortingType.listenCount:
-        if (this == QueueInsertionType.algorithm) {
-          // already sorted by repeated times inside [NamidaGenerator.generateRecommendedTrack].
-        } else {
-          videos.sortByReverse((e) => YoutubeHistoryController.inst.topTracksMapListens.value[e.id]?.length ?? 0);
-        }
-      case InsertionSortingType.random:
-        videos.shuffle();
-
-      case InsertionSortingType.rating: // no ratings yet
-      case InsertionSortingType.none: // do nothing
-    }
-
-    return videos;
-  }
+  QueueInsertion toQueueInsertion() => settings.queueInsertion.value[this] ?? const QueueInsertion(numberOfTracks: 0, insertNext: true);
 }
 
 extension SponsorBlockCategoryExt on SponsorBlockCategory {
@@ -1366,14 +1331,10 @@ extension RouteUtils on NamidaRoute {
             },
           ),
           RouteType.SUBPAGE_queueTracks => _registerAndReturn(name?.getQueue()?.tracks, () => QueueController.inst.queuesMap.valueR),
-          RouteType.SUBPAGE_smartPlaylistTracks => _registerAndReturn(
-            SmartPlaylistsController.inst.smartPlaylistsMap.value[name]?.resolve(),
-            () => SmartPlaylistsController.inst.smartPlaylistsMap.valueR,
-          ),
+          RouteType.SUBPAGE_smartPlaylistTracks => SmartPlaylistsController.inst.smartPlaylistsMap.valueR[name]?.resolve(),
           RouteType.SUBPAGE_playlistTracks =>
             name == null ? null : _registerAndReturn(PlaylistController.inst.getPlaylist(name!)?.tracks, () => PlaylistController.inst.playlistsMap.valueR),
-          RouteType.SUBPAGE_favPlaylistTracks =>
-            name == null ? null : _registerAndReturn(PlaylistController.inst.favouritesPlaylist.value.tracks, () => PlaylistController.inst.favouritesPlaylist.valueR),
+          RouteType.SUBPAGE_favPlaylistTracks => name == null ? null : PlaylistController.inst.favouritesPlaylist.valueR.tracks,
           RouteType.SUBPAGE_historyTracks => HistoryController.inst.historyTracksR,
           // RouteType.SUBPAGE_mostPlayedTracks => HistoryController.inst.currentMostPlayedTracks,
           RouteType.SUBPAGE_recentlyAddedTracks => _registerAndReturn(Indexer.inst.recentlyAddedTracksSorted(), () => Indexer.inst.tracksInfoList.valueR),
@@ -2008,6 +1969,46 @@ extension MediaTypeL10n on MediaType {
   };
 }
 
+extension SubpageInfoStyleL10n on SubpageInfoStyle {
+  String toText() => switch (this) {
+    SubpageInfoStyle.compact => 'Compact',
+    SubpageInfoStyle.banner => 'Banner',
+    SubpageInfoStyle.heroBanner => 'Hero Banner',
+    SubpageInfoStyle.overlay => 'Overlay',
+    SubpageInfoStyle.blurBackdrop => 'Blur Backdrop',
+  };
+
+  IconData toIcon() => switch (this) {
+    SubpageInfoStyle.compact => Broken.element_3,
+    SubpageInfoStyle.banner => Broken.card,
+    SubpageInfoStyle.heroBanner => Broken.maximize_4,
+    SubpageInfoStyle.overlay => Broken.layer,
+    SubpageInfoStyle.blurBackdrop => Broken.blur,
+  };
+}
+
+extension ArtworkCollageStyleL10n on ArtworkCollageStyle {
+  String toText() => switch (this) {
+    ArtworkCollageStyle.grid => 'Grid',
+    ArtworkCollageStyle.denseGrid => 'Dense Grid',
+    ArtworkCollageStyle.mosaic => 'Mosaic',
+    ArtworkCollageStyle.fanStack => 'Fan Stack',
+    ArtworkCollageStyle.flow => 'Flow',
+    ArtworkCollageStyle.stack => 'Stack',
+    ArtworkCollageStyle.collage => 'Collage',
+  };
+
+  IconData toIcon() => switch (this) {
+    ArtworkCollageStyle.grid => Broken.grid_2,
+    ArtworkCollageStyle.denseGrid => Broken.grid_1,
+    ArtworkCollageStyle.mosaic => Broken.element_4,
+    ArtworkCollageStyle.fanStack => Broken.note,
+    ArtworkCollageStyle.flow => Broken.slider_horizontal,
+    ArtworkCollageStyle.stack => Broken.cards,
+    ArtworkCollageStyle.collage => Broken.picture_frame,
+  };
+}
+
 extension AlbumIdentifierL10n on AlbumIdentifier {
   String toText() => switch (this) {
     AlbumIdentifier.albumName => lang.name,
@@ -2040,6 +2041,7 @@ extension SortTypeL10n on SortType {
     SortType.size => lang.size,
     SortType.year => lang.year,
     SortType.rating => lang.rating,
+    SortType.favourite => lang.favourites,
     SortType.shuffle => lang.random,
     SortType.shuffleDaily => '${lang.random} (${lang.daily})',
     SortType.mostPlayed => lang.mostPlayed,
@@ -2066,6 +2068,7 @@ extension SortTypeL10n on SortType {
     SortType.dateAdded => Broken.calendar_add,
     SortType.dateModified => Broken.calendar_edit,
     SortType.rating => Broken.grammerly,
+    SortType.favourite => Broken.heart,
     SortType.bitrate => Broken.voice_cricle,
     SortType.filename => Broken.quote_up_circle,
     SortType.path => Broken.location,
@@ -2137,6 +2140,7 @@ extension GroupSortTypeL10n on GroupSortType {
     GroupSortType.dateModified => lang.dateModified,
     GroupSortType.duration => lang.duration,
     GroupSortType.numberOfTracks => lang.numberOfTracks,
+    GroupSortType.lastPlayed => lang.lastPlayed,
     GroupSortType.playCount => '${lang.totalListens} (${lang.tracks})',
     GroupSortType.firstListen => '${lang.firstListen} (${lang.tracks})',
     GroupSortType.latestPlayed => '${lang.recentListens} (${lang.tracks})',
@@ -2149,6 +2153,7 @@ extension GroupSortTypeL10n on GroupSortType {
     GroupSortType.artistSort => '${lang.artist} (${lang.sortBy})',
     GroupSortType.composerSort => '${lang.composer} (${lang.sortBy})',
     GroupSortType.shuffle => lang.random,
+    GroupSortType.shuffleDaily => '${lang.random} (${lang.daily})',
     GroupSortType.custom => lang.custom,
   };
 
@@ -2172,6 +2177,8 @@ extension GroupSortTypeL10n on GroupSortType {
     GroupSortType.albumsCount => Broken.cards,
     GroupSortType.custom => Broken.format_circle,
     GroupSortType.shuffle => Broken.shuffle,
+    GroupSortType.shuffleDaily => Broken.calendar_tick,
+    GroupSortType.lastPlayed => Broken.play_circle,
     GroupSortType.playCount => Broken.award,
     GroupSortType.latestPlayed => Broken.clock,
     GroupSortType.firstListen => Broken.calendar_search,
@@ -2462,22 +2469,6 @@ extension TrackPlayModeL10n on TrackPlayMode {
   };
 }
 
-extension InsertionSortingTypeL10n on InsertionSortingType {
-  String toText() => switch (this) {
-    InsertionSortingType.listenCount => lang.totalListens,
-    InsertionSortingType.random => lang.random,
-    InsertionSortingType.rating => lang.rating,
-    InsertionSortingType.none => lang.defaultLabel,
-  };
-
-  IconData toIcon() => switch (this) {
-    InsertionSortingType.listenCount => Broken.award,
-    InsertionSortingType.random => Broken.format_circle,
-    InsertionSortingType.rating => Broken.grammerly,
-    InsertionSortingType.none => Broken.cd,
-  };
-}
-
 extension MostPlayedTimeRangeL10n on MostPlayedTimeRange {
   String toText() => switch (this) {
     MostPlayedTimeRange.custom => lang.custom,
@@ -2511,6 +2502,7 @@ extension HomePageItemsL10n on HomePageItems {
     HomePageItems.recentArtists => lang.recentArtists,
     HomePageItems.topRecentAlbums => lang.topRecentAlbums,
     HomePageItems.topRecentArtists => lang.topRecentArtists,
+    HomePageItems.pinnedPlaylists => lang.pinnedPlaylists,
   };
 
   IconData toMainIcon() => switch (this) {
@@ -2524,6 +2516,7 @@ extension HomePageItemsL10n on HomePageItems {
     HomePageItems.recentArtists => Broken.undo,
     HomePageItems.topRecentAlbums => Broken.crown_1,
     HomePageItems.topRecentArtists => Broken.crown_1,
+    HomePageItems.pinnedPlaylists => Broken.paperclip,
   };
 
   IconData? toIcon() => switch (this) {
@@ -2537,6 +2530,7 @@ extension HomePageItemsL10n on HomePageItems {
     HomePageItems.topRecentAlbums => Broken.music_dashboard,
     HomePageItems.recentArtists => Broken.user,
     HomePageItems.topRecentArtists => Broken.user,
+    HomePageItems.pinnedPlaylists => Broken.music_playlist,
   };
 }
 
@@ -2783,16 +2777,19 @@ extension AudioOutputForcedOffCauseUtils on AudioOutputForcedOffCause {
   String toText() => switch (this) {
     AudioOutputForcedOffCause.bitPerfect => lang.bitPerfect,
     AudioOutputForcedOffCause.usbDirect => lang.usbDirect,
+    AudioOutputForcedOffCause.exclusiveMode => lang.exclusiveMode,
   };
 
   IconData toIcon() => switch (this) {
     AudioOutputForcedOffCause.bitPerfect => Broken.flash,
     AudioOutputForcedOffCause.usbDirect => Broken.cpu,
+    AudioOutputForcedOffCause.exclusiveMode => Broken.lock,
   };
 
   bool isAvailable() => switch (this) {
     AudioOutputForcedOffCause.bitPerfect => true,
     AudioOutputForcedOffCause.usbDirect => Platform.isAndroid,
+    AudioOutputForcedOffCause.exclusiveMode => !Platform.isAndroid,
   };
 }
 

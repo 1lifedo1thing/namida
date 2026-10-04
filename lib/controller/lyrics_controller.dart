@@ -92,6 +92,43 @@ class Lyrics {
     }
   }
 
+  static final _lengthSplitRegex = RegExp(r'[:.]');
+
+  /// timestamps multiplier for spedup/slowed/nightcore versions, 0 means no stretching.
+  double getStretchMultiplier(Lrc lrc) {
+    if (!settings.stretchLyricsDuration.value) return 0.0;
+    final lengthText = lrc.length;
+    if (lengthText == null || lengthText.isEmpty) return 0.0;
+    final lyricsDurationMicro = _parseLengthMicro(lengthText);
+    if (lyricsDurationMicro == null || lyricsDurationMicro <= 0) return 0.0;
+    final itemDurationMS = _getCurrentItemDurationMS();
+    return itemDurationMS * 1000 / lyricsDurationMicro;
+  }
+
+  static int? _parseLengthMicro(String lengthText) {
+    final parts = lengthText.split(_lengthSplitRegex);
+    if (parts.length < 2) return null;
+    final minutes = int.tryParse(parts[0]);
+    final seconds = int.tryParse(parts[1]);
+    if (minutes == null || seconds == null) return null;
+    int fractionMicro = 0;
+    if (parts.length >= 3) {
+      final fractionText = parts[2].padRight(6, '0');
+      fractionMicro = int.tryParse(fractionText) ?? 0;
+    }
+    final lyricsDuration = Duration(minutes: minutes, seconds: seconds, microseconds: fractionMicro);
+    return lyricsDuration.inMicroseconds;
+  }
+
+  int _getCurrentItemDurationMS() {
+    final playerDurationMS = Player.inst.currentItemDuration.value?.inMilliseconds ?? 0;
+    if (playerDurationMS != 0) return playerDurationMS;
+    final current = Player.inst.currentItem.value;
+    if (current is Selectable) return current.track.durationMS;
+    if (current is YoutubeID) return Player.inst.getCurrentVideoDuration.inMilliseconds;
+    return 0;
+  }
+
   Future<void> updateLyrics(Playable item) async {
     await _updateLyrics(item);
     if (!settings.tutorial.lyricsFullscreenTipSeen.value) {
@@ -154,11 +191,14 @@ class Lyrics {
     if (checkInterrupted()) return null;
 
     final embedded = lrcUtils.embeddedLyrics;
-    if (embedded.startsWith('IGNORE')) return _noLyrics;
+    if (LrcSearchUtils.isIgnoreMarker(embedded)) return _noLyrics;
 
     final local = await pickLocalLyrics(lrcUtils, embedded);
     final localLyrics = local.isEmbedded ? embedded : await local.file?.readLrcString();
-    if (localLyrics != null) return _parseLocalLyrics(localLyrics);
+    if (localLyrics != null) {
+      if (LrcSearchUtils.isIgnoreMarker(localLyrics)) return _unavailableLyrics;
+      return _parseLocalLyrics(localLyrics);
+    }
 
     final source = _lyricsSource;
     final lookupKey = _onlineLookupKey(item);
@@ -202,7 +242,7 @@ class Lyrics {
   /// 3. track embedded
   /// 4. cached/device txt
   Future<LocalLyricsPick> pickLocalLyrics(LrcSearchUtils lrcUtils, String embedded) async {
-    if (embedded.startsWith('IGNORE')) return _noLocalLyrics;
+    if (LrcSearchUtils.isIgnoreMarker(embedded)) return _noLocalLyrics;
     final hasEmbedded = embedded != '';
     if (hasEmbedded && _lyricsPrioritizeEmbedded) return _embeddedLocalLyrics;
     if (_lyricsSource == LyricsSource.internet) return _noLocalLyrics;

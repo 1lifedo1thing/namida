@@ -10,6 +10,7 @@ import 'package:namida/class/video.dart';
 import 'package:namida/controller/navigator_controller.dart';
 import 'package:namida/controller/player_controller.dart';
 import 'package:namida/controller/queue_controller.dart';
+import 'package:namida/controller/search_sort_controller.dart';
 import 'package:namida/controller/settings_controller.dart';
 import 'package:namida/core/constants.dart';
 import 'package:namida/core/enums.dart';
@@ -179,8 +180,14 @@ class YoutubePlaylistController extends PlaylistManager<YoutubeID, String, YTSor
       case GroupSortType.latestPlayed:
         sortThis((e) => -(e.value.tracks.getLatestListen() ?? 0));
         break;
+      case GroupSortType.lastPlayed:
+        sortThis((e) => -(QueueController.latestPlayedForSourceManager.latestPlayedTime(QueueSourceYoutubeID.ytPlaylist(e.key)) ?? 0));
+        break;
       case GroupSortType.shuffle:
         playlistList.shuffle();
+        break;
+      case GroupSortType.shuffleDaily:
+        sortThis(SearchSortController.createDailyShuffleComparable<MapEntry<String, YoutubePlaylist>>((p) => p.key));
         break;
       case GroupSortType.custom:
         final indices = <String, int>{};
@@ -338,8 +345,10 @@ class YoutubePlaylistController extends PlaylistManager<YoutubeID, String, YTSor
     GroupSortType.playCount => (p) => p.tracks.getTotalListenCount().toString(),
     GroupSortType.firstListen => (p) => p.tracks.getFirstListen()?.dateFormattedOriginal ?? '',
     GroupSortType.latestPlayed => (p) => p.tracks.getLatestListen()?.dateFormattedOriginal ?? '',
+    GroupSortType.lastPlayed => (p) => QueueController.latestPlayedForSourceManager.latestPlayedTime(QueueSourceYoutubeID.ytPlaylist(p.name))?.dateFormattedOriginal ?? '',
     GroupSortType.duration => null,
     GroupSortType.shuffle => null,
+    GroupSortType.shuffleDaily => null,
     GroupSortType.custom => null,
 
     // -- local tracks

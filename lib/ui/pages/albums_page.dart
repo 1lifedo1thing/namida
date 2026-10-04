@@ -129,7 +129,7 @@ class AlbumsPage extends StatelessWidget with NamidaRouteWidget {
                       onReverseIconTap: () => SearchSortController.inst.sortMedia(MediaType.album, reverse: !settings.albumSortReversed.value),
                     ),
                     textField: CustomTextField(
-                      textFieldController: libraryTab.textSearchControllerUI,
+                      textFieldController: libraryTab.textSearchControllerR,
                       textFieldHintText: lang.filterAlbums,
                       onTextFieldValueChanged: (value) => SearchSortController.inst.searchMedia(value, MediaType.album),
                     ),
@@ -142,7 +142,7 @@ class AlbumsPage extends StatelessWidget with NamidaRouteWidget {
                   SliverToBoxAdapter(child: listHeader),
                   Obx(
                     (context) {
-                      settings.albumListTileHeight.valueR;
+                      final albumTileExtent = settings.albumListTileHeight.valueR + 4.0 * 5;
 
                       final sort = settings.albumSorts.valueR.first;
                       final sortTextIsUseless =
@@ -152,7 +152,7 @@ class AlbumsPage extends StatelessWidget with NamidaRouteWidget {
                           sort == GroupSortType.numberOfTracks ||
                           sort == GroupSortType.duration;
 
-                      final extraTextResolver = sortTextIsUseless ? null : SearchSortController.inst.getGroupSortExtraTextResolver(sort);
+                      final extraTextResolver = sortTextIsUseless ? null : SearchSortController.inst.getAlbumsExtraTextResolver(sort);
                       final useStaggeredGrid = settings.useAlbumStaggeredGridView.valueR;
 
                       return ObxPrefer(
@@ -161,7 +161,7 @@ class AlbumsPage extends StatelessWidget with NamidaRouteWidget {
                         builder: (context, _) => countPerRowResolved == 1
                             ? SliverFixedExtentList.builder(
                                 itemCount: finalAlbums.length,
-                                itemExtent: settings.albumListTileHeight.valueR + 4.0 * 5,
+                                itemExtent: albumTileExtent,
                                 itemBuilder: (context, i) {
                                   final albumId = finalAlbums[i];
                                   final tracks = albumId.getAlbumTracks();
@@ -172,7 +172,7 @@ class AlbumsPage extends StatelessWidget with NamidaRouteWidget {
                                     child: AlbumTile(
                                       identifier: albumId,
                                       album: tracks,
-                                      extraText: extraTextResolver?.call(tracks),
+                                      extraText: extraTextResolver?.call(albumId, tracks),
                                     ),
                                   );
                                 },
@@ -198,7 +198,7 @@ class AlbumsPage extends StatelessWidget with NamidaRouteWidget {
                                             identifier: albumId,
                                             album: tracks,
                                             staggered: true,
-                                            extraInfo: extraTextResolver?.call(tracks),
+                                            extraInfo: extraTextResolver?.call(albumId, tracks),
                                             width: cardWidth,
                                             height: null,
                                           ),
@@ -227,7 +227,7 @@ class AlbumsPage extends StatelessWidget with NamidaRouteWidget {
                                           identifier: albumId,
                                           album: tracks,
                                           staggered: false,
-                                          extraInfo: extraTextResolver?.call(tracks),
+                                          extraInfo: extraTextResolver?.call(albumId, tracks),
                                           width: cardWidth,
                                           height: cardHeight,
                                         ),

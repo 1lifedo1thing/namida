@@ -339,7 +339,7 @@ class VideoController {
   }
 
   void holdVideoFrameFor(Playable item) {
-    if (settings.extra.keepVideoFrameOnSwitch.value != true) return;
+    if (settings.keepVideoFrameOnSwitch.value != true) return;
     if (_displayedVideoInfo.value?.isInitialized != true || !_hasReadyVideoFor(item)) return dropVideoFrameHold();
     _videoFrameHoldTimer?.cancel();
     _videoFrameHoldTimer = Timer(_kVideoFrameHoldTimeout, dropVideoFrameHold);
@@ -561,7 +561,7 @@ class VideoController {
     YoutubeController.inst.stopLatestSingleDownload();
   }
 
-  bool isStreamCurrentlySelected(VideoStream stream, File? cacheFile) {
+  bool isStreamCurrentlySelectedR(VideoStream stream, File? cacheFile) {
     final current = currentVideo.valueR;
     if (current == null) return false;
     if (cacheFile != null) return current.path == cacheFile.path;

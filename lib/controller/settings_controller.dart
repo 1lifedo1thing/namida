@@ -120,6 +120,17 @@ class _SettingsController extends _SettingsKeysWriter {
     key: LibraryTab.values.asCodec(),
     value: const _CountPerRowCodec(),
   );
+  late final subpageInfoStyles = _keyMap<MediaType, SubpageInfoStyle>(
+    'subpageInfoStyles',
+    const {
+      MediaType.album: SubpageInfoStyle.heroBanner,
+      MediaType.genre: SubpageInfoStyle.blurBackdrop,
+      MediaType.playlist: SubpageInfoStyle.banner,
+    },
+    key: MediaType.values.asCodec(),
+    value: SubpageInfoStyle.values.asCodec(),
+  );
+  late final artworkCollageStyle = _keyEnum('artworkCollageStyle', ArtworkCollageStyle.grid, ArtworkCollageStyle.values);
   late final activeAlbumTypes = _keyMap<AlbumType, bool>(
     'activeAlbumTypes',
     const {AlbumType.single: true, AlbumType.normal: true},
@@ -145,12 +156,29 @@ class _SettingsController extends _SettingsKeysWriter {
   late final tracksSortSearch = _keyEnum('tracksSortSearch', isKuru ? SortType.mostPlayed : SortType.title, SortType.values);
   late final tracksSortSearchReversed = _key('tracksSortSearchReversed', false);
   late final tracksSortSearchIsAuto = _key('tracksSortSearchIsAuto_v2', true);
-  late final albumSorts = _keyList('albumSorts', isKuru ? const [GroupSortType.numberOfTracks] : const [GroupSortType.album], item: GroupSortType.values.asCodec(), isUnique: true, isNonEmpty: true);
+  late final tracksSearchShowLessRelevant = _key('tracksSearchShowLessRelevant', false);
+  late final albumSorts = _keyList(
+    'albumSorts',
+    isKuru ? const [GroupSortType.numberOfTracks] : const [GroupSortType.album],
+    item: GroupSortType.values.asCodec(),
+    isUnique: true,
+    isNonEmpty: true,
+  );
   late final albumSortReversed = _key('albumSortReversed', isKuru ? true : false);
-  late final artistSorts = _keyList('artistSorts', isKuru ? const [GroupSortType.numberOfTracks] : const [GroupSortType.artistsList], item: GroupSortType.values.asCodec(), isUnique: true, isNonEmpty: true);
+  late final artistSorts = _keyList(
+    'artistSorts',
+    isKuru ? const [GroupSortType.numberOfTracks] : const [GroupSortType.artistsList],
+    item: GroupSortType.values.asCodec(),
+    isUnique: true,
+    isNonEmpty: true,
+  );
   late final artistSortReversed = _key('artistSortReversed', isKuru ? true : false);
   late final genreSorts = _keyList('genreSorts', const [GroupSortType.genresList], item: GroupSortType.values.asCodec(), isUnique: true, isNonEmpty: true);
   late final genreSortReversed = _key('genreSortReversed', false);
+  late final moodSorts = _keyList('moodSorts', const [GroupSortType.title], item: GroupSortType.values.asCodec(), isUnique: true, isNonEmpty: true);
+  late final moodSortReversed = _key('moodSortReversed', false);
+  late final tagSorts = _keyList('tagSorts', const [GroupSortType.title], item: GroupSortType.values.asCodec(), isUnique: true, isNonEmpty: true);
+  late final tagSortReversed = _key('tagSortReversed', false);
   late final playlistSorts = _keyList('playlistSorts', const [GroupSortType.dateModified], item: GroupSortType.values.asCodec(), isUnique: true, isNonEmpty: true);
   late final playlistSortReversed = _key('playlistSortReversed', false);
   late final playlistsGroupByTags = _key('playlistsGroupByTags', false);
@@ -177,6 +205,7 @@ class _SettingsController extends _SettingsKeysWriter {
   late final enableFoldersHierarchy = _key('enableFoldersHierarchy', true);
   late final enableFoldersHierarchyTracks = _key('enableFoldersHierarchyTracks', true);
   late final enableFoldersHierarchyVideos = _key('enableFoldersHierarchyVideos', true);
+  late final foldersSkipSingleSubfolder = _key('foldersSkipSingleSubfolder', true);
   late final displayArtistBeforeTitle = _key('displayArtistBeforeTitle', true);
   late final heatmapListensView = _key('heatmapListensView', false);
   late final reverseListensView = _key('reverseListensView', true);
@@ -213,14 +242,14 @@ class _SettingsController extends _SettingsKeysWriter {
   late final effectsOverlay = _keyEnum('effectsOverlay', EffectTheme.none, EffectTheme.values, sync: false);
   late final playerBackground = _keyEnum('playerBackground', PlayerBackground.none, PlayerBackground.values, sync: false);
   late final playerBackgroundImage = _key<String?>('playerBackgroundImage', null, sync: false);
-  late final playerBackgroundBlur = _key('playerBackgroundBlur', 40, sync: false);
-  late final playerBackgroundDim = _key('playerBackgroundDim', 60, sync: false);
+  late final playerBackgroundBlur = _key('playerBackgroundBlur_v2', 4, sync: false);
+  late final playerBackgroundDim = _key('playerBackgroundDim_v2', 5, sync: false);
   late final playerBackgroundVignette = _key('playerBackgroundVignette', true, sync: false);
   late final playerBackgroundAnimated = _key('playerBackgroundAnimated', true, sync: false);
   late final playerColorWhenExpanded = _key('playerColorWhenExpanded', true, sync: false);
   late final appWallpaper = _key<String?>('appWallpaper', null, sync: false);
-  late final appWallpaperBlur = _key('appWallpaperBlur', 15, sync: false);
-  late final appWallpaperDim = _key('appWallpaperDim', 75, sync: false);
+  late final appWallpaperBlur = _key('appWallpaperBlur_v2', 4, sync: false);
+  late final appWallpaperDim = _key('appWallpaperDim_v2', 5, sync: false);
   late final enableMiniplayerParallaxEffect = _key('enableMiniplayerParallaxEffect', true, sync: false);
   late final forceMiniplayerTrackColor = _key('forceMiniplayerTrackColor', false);
   late final isTrackPlayedSecondsCount = _key('isTrackPlayedSecondsCount', isKuru ? 25 : 40);
@@ -286,9 +315,6 @@ class _SettingsController extends _SettingsKeysWriter {
   late final shuffleExcludeCount = _key('shuffleExcludeCount', 0);
   late final shuffleExcludeSort = _keyEnum('shuffleExcludeSort', SortType.latestPlayed, SortType.values);
   late final shuffleExcludeSortReverse = _key('shuffleExcludeSortReverse', false);
-  late final advancedPlaySorts = _keyList<SortType>('advancedPlaySorts', const [], item: SortType.values.asCodec());
-  late final advancedPlaySortReverse = _key('advancedPlaySortReverse', false);
-  late final advancedPlayMinimums = _keyMap<SortType, int>('advancedPlayMinimums', const {SortType.rating: 75}, key: SortType.values.asCodec());
 
   late final mostPlayedTimeRange = _keyEnum('mostPlayedTimeRange', MostPlayedTimeRange.allTime, MostPlayedTimeRange.values);
   late final mostPlayedCustomDateRange = _keyObject('mostPlayedCustomDateRange', DateRange.dummy(), DateRange.fromJson, (v) => v.toJson());
@@ -311,6 +337,16 @@ class _SettingsController extends _SettingsKeysWriter {
   late final trackTileSeparator = _key('trackTileSeparator', '•');
   late final displayFavouriteIconInListTile = _key('displayFavouriteIconInListTile', true);
   late final gradientTiles = _key('gradientTiles', true);
+  late final preferredSearchType = _keyEnum('preferredSearchType', SearchType.auto, SearchType.values);
+  late final resumeUIEnabled = _key('resumeUIEnabled', true);
+  late final ytStyleButtonSwitcher = _key<bool?>('ytStyleButtonSwitcher', null);
+  late final keepVideoFrameOnSwitch = _key<bool?>('keepVideoFrameOnSwitch', null, sync: false);
+  late final scrollbarThumbLabel = _key<bool?>('scrollbarThumbLabel', null, sync: false);
+  late final tapToScroll = _key<bool?>('tapToScroll', null, sync: false);
+  late final enhancedDragToScroll = _key<bool?>('enhancedDragToScroll', null, sync: false);
+  late final smoothScrolling = _key<bool?>('smoothScrolling', null, sync: false);
+  late final mediaWaveHaptic = _key<bool?>('mediaWaveHaptic', null, sync: false);
+  late final backgroundImages = _key<bool?>('backgroundImages', null, sync: false);
 
   late final editTagsKeepFileDates = _key('editTagsKeepFileDates', true);
   late final downloadFilesWriteUploadDate = _key('downloadFilesWriteUploadDate', false);
@@ -348,18 +384,20 @@ class _SettingsController extends _SettingsKeysWriter {
   late final queueInsertion = _keyMap<QueueInsertionType, QueueInsertion>(
     'queueInsertion',
     const {
-      QueueInsertionType.moreAlbum: QueueInsertion(numberOfTracks: 10, insertNext: false, sortBy: InsertionSortingType.random),
-      QueueInsertionType.moreArtist: QueueInsertion(numberOfTracks: 10, insertNext: false, sortBy: InsertionSortingType.random),
-      QueueInsertionType.moreFolder: QueueInsertion(numberOfTracks: 10, insertNext: false, sortBy: InsertionSortingType.random),
-      QueueInsertionType.random: QueueInsertion(numberOfTracks: 10, insertNext: false, sortBy: InsertionSortingType.none),
-      QueueInsertionType.listenTimeRange: QueueInsertion(numberOfTracks: 0, insertNext: true, sortBy: InsertionSortingType.none),
-      QueueInsertionType.mood: QueueInsertion(numberOfTracks: 20, insertNext: true, sortBy: InsertionSortingType.listenCount),
-      QueueInsertionType.rating: QueueInsertion(numberOfTracks: 20, insertNext: false, sortBy: InsertionSortingType.rating),
-      QueueInsertionType.sameReleaseDate: QueueInsertion(numberOfTracks: 30, insertNext: true, sortBy: InsertionSortingType.listenCount),
-      QueueInsertionType.algorithm: QueueInsertion(numberOfTracks: 20, insertNext: true, sortBy: InsertionSortingType.none),
-      QueueInsertionType.algorithmDiscoverDate: QueueInsertion(numberOfTracks: 20, insertNext: true, sortBy: InsertionSortingType.listenCount),
-      QueueInsertionType.algorithmTimeRange: QueueInsertion(numberOfTracks: 20, insertNext: true, sortBy: InsertionSortingType.none),
-      QueueInsertionType.mix: QueueInsertion(numberOfTracks: 0, insertNext: true, sortBy: InsertionSortingType.none),
+      QueueInsertionType.moreAlbum: QueueInsertion(numberOfTracks: 10, insertNext: false, shuffle: true),
+      QueueInsertionType.moreArtist: QueueInsertion(numberOfTracks: 10, insertNext: false, shuffle: true),
+      QueueInsertionType.moreFolder: QueueInsertion(numberOfTracks: 10, insertNext: false, shuffle: true),
+      QueueInsertionType.random: QueueInsertion(numberOfTracks: 10, insertNext: false),
+      QueueInsertionType.listenTimeRange: QueueInsertion(numberOfTracks: 0, insertNext: true),
+      QueueInsertionType.mood: QueueInsertion(numberOfTracks: 20, insertNext: true, sorts: [SortType.mostPlayed]),
+      QueueInsertionType.rating: QueueInsertion(numberOfTracks: 20, insertNext: false, sorts: [SortType.rating], sortReverse: true),
+      QueueInsertionType.sameReleaseDate: QueueInsertion(numberOfTracks: 30, insertNext: true, sorts: [SortType.mostPlayed]),
+      QueueInsertionType.algorithm: QueueInsertion(numberOfTracks: 20, insertNext: true),
+      QueueInsertionType.algorithmDiscoverDate: QueueInsertion(numberOfTracks: 20, insertNext: true),
+      QueueInsertionType.algorithmTimeRange: QueueInsertion(numberOfTracks: 20, insertNext: true),
+      QueueInsertionType.mix: QueueInsertion(numberOfTracks: 0, insertNext: true),
+      QueueInsertionType.advancedPlay: QueueInsertion(numberOfTracks: 0, insertNext: false),
+      QueueInsertionType.advancedShuffle: QueueInsertion(numberOfTracks: 0, insertNext: false, shuffle: true),
     },
     key: QueueInsertionType.values.asCodec(),
     value: _ObjectCodec(QueueInsertion.fromJson, (v) => v.toJson()),
@@ -402,6 +440,9 @@ class _SettingsController extends _SettingsKeysWriter {
       MediaType.composer: [SortType.year, SortType.title],
       MediaType.genre: [SortType.year, SortType.title],
       MediaType.style: [SortType.year, SortType.title],
+      MediaType.mood: [SortType.title],
+      MediaType.tag: [SortType.title],
+      MediaType.rating: [SortType.title],
       MediaType.folder: [SortType.filename],
       MediaType.folderMusic: [SortType.filename],
       MediaType.folderVideo: [SortType.filename],
@@ -418,6 +459,9 @@ class _SettingsController extends _SettingsKeysWriter {
       MediaType.artist: false,
       MediaType.genre: false,
       MediaType.style: false,
+      MediaType.mood: false,
+      MediaType.tag: false,
+      MediaType.rating: false,
       MediaType.folder: false,
       MediaType.folderMusic: false,
       MediaType.folderVideo: false,
@@ -459,6 +503,9 @@ class _SettingsController extends _SettingsKeysWriter {
     _dropKey('defaultBackupLocation');
     _dropKey('backupItemslist');
     _legacyWindowBounds = const _RectCodec().decode(_dropKey('windowBounds'));
+    _dropKey('advancedPlaySorts');
+    _dropKey('advancedPlaySortReverse');
+    _dropKey('advancedPlayMinimums');
 
     final tracksSort = _dropKey('tracksSort');
     if (tracksSort is String) {
@@ -517,12 +564,16 @@ class _SettingsController extends _SettingsKeysWriter {
     return (sorts: sortsKey.value, isReverse: reverseKey.value);
   }
 
+  (Rx<List<GroupSortType>>, Rx<bool>)? groupSortingRxOf(MediaType media) => _groupSortingKeysOf(media);
+
   (_SettingsListKey<GroupSortType>, _SettingsKey<bool>)? _groupSortingKeysOf(MediaType media) => switch (media) {
     MediaType.album => (albumSorts, albumSortReversed),
     MediaType.artist || MediaType.albumArtist || MediaType.composer => (artistSorts, artistSortReversed),
     MediaType.genre || MediaType.style => (genreSorts, genreSortReversed),
     MediaType.playlist => (playlistSorts, playlistSortReversed),
-    MediaType.track || MediaType.folder || MediaType.folderMusic || MediaType.folderVideo || MediaType.mood || MediaType.tag || MediaType.rating => null,
+    MediaType.mood => (moodSorts, moodSortReversed),
+    MediaType.tag => (tagSorts, tagSortReversed),
+    MediaType.track || MediaType.folder || MediaType.folderMusic || MediaType.folderVideo || MediaType.rating => null,
   };
 
   void updateActiveTrSearch({required bool tracks, required bool videos}) {

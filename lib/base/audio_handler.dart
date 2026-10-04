@@ -17,6 +17,7 @@ import 'package:youtipie/core/enum.dart' show LikeStatus;
 import 'package:namida/base/yt_video_like_manager.dart';
 import 'package:namida/class/audio_cache_detail.dart';
 import 'package:namida/class/custom_mpv_player.dart';
+import 'package:namida/class/eggs_data.dart';
 import 'package:namida/class/func_execute_limiter.dart';
 import 'package:namida/class/replay_gain_data.dart';
 import 'package:namida/class/track.dart';
@@ -58,6 +59,7 @@ import 'package:namida/core/translations/language.dart';
 import 'package:namida/core/utils.dart';
 import 'package:namida/main.dart';
 import 'package:namida/ui/dialogs/common_dialogs.dart';
+import 'package:namida/ui/widgets/eggs/eggs.dart';
 import 'package:namida/youtube/class/youtube_id.dart';
 import 'package:namida/youtube/controller/sponsorblock_controller.dart';
 import 'package:namida/youtube/controller/youtube_account_controller.dart';
@@ -882,7 +884,7 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> {
         return await item.execute(
           selectable: (finalItem) async {
             final qs = finalItem.trackWithDate?.queueSource;
-            if (qs != null && qs.supportResuming) {
+            if (qs != null && qs.tracksLatestPlayed) {
               QueueController.latestPlayedForSourceManager.update(qs, finalItem);
             }
             if (QueueSourceEnum.queuePage.supportResuming && QueueSourceBase.resumingEnabled) {
@@ -893,7 +895,7 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> {
           },
           youtubeID: (finalItem) async {
             final qs = finalItem.queueSource;
-            if (qs != null && qs.supportResuming) {
+            if (qs != null && qs.tracksLatestPlayed) {
               QueueController.latestPlayedForSourceManager.update(qs, finalItem);
             }
 
@@ -2308,6 +2310,9 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> {
   }
 
   @override
+  void onSleepTimerEnd() => EggHunt.collect(NamidaEgg.goodnight);
+
+  @override
   void onPlaybackEventStream(PlaybackEvent event) {
     final item = currentItem.value;
     item?.execute(
@@ -2875,7 +2880,13 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> {
       exoplayerCreator: () => _createAndroidPlayer(preferSWDecoders: false),
       exoplayerSWCreator: () => _createAndroidPlayer(preferSWDecoders: true),
     );
-    player.setAudioOutput(settings.player.audioOutputDevice.value, bitPerfect: settings.player.bitPerfect.value, mono: settings.player.monoAudio.value);
+    final playerSettings = settings.player;
+    player.setAudioOutput(
+      playerSettings.audioOutputDevice.value,
+      bitPerfect: playerSettings.bitPerfect.value,
+      exclusive: playerSettings.exclusiveMode.value,
+      mono: playerSettings.monoAudio.value,
+    );
     return player;
   }
 

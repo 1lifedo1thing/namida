@@ -28,6 +28,7 @@ import 'package:namida/controller/platform/namida_channel/namida_channel.dart';
 import 'package:namida/controller/platform/tags_extractor/tags_extractor.dart';
 import 'package:namida/controller/player_controller.dart';
 import 'package:namida/controller/playlist_controller.dart';
+import 'package:namida/controller/queue_controller.dart';
 import 'package:namida/controller/scroll_search_controller.dart';
 import 'package:namida/controller/search_sort_controller.dart';
 import 'package:namida/controller/settings_controller.dart';
@@ -47,6 +48,7 @@ import 'package:namida/ui/widgets/library/track_tile.dart';
 import 'package:namida/ui/widgets/settings/indexer_settings.dart';
 
 part 'indexer_artwork_extract_strategies.dart';
+part 'indexer_favourites_sorting.dart';
 
 class Indexer<T extends Track> {
   static Indexer get inst => _instance;
@@ -261,6 +263,10 @@ class Indexer<T extends Track> {
           oldtr.composer,
           config: splitConfig.artistsConfig,
         ),
+        albumArtistsList: Indexer.splitAlbumArtist(
+          oldtr.albumArtist,
+          config: splitConfig.artistsConfig,
+        ),
         genresList: Indexer.splitGenre(
           oldtr.originalGenre,
           config: splitConfig.genresConfig,
@@ -416,6 +422,7 @@ class Indexer<T extends Track> {
   Future<void> _afterIndexing() async {
     final mediaSorters = {for (final e in MediaType.values) e: SearchSortController.inst.getMediaTracksSortingComparables(e)};
     this.mainMapsGroup.fillAll(tracksInfoList.value, (tr) => tr.toTrackExt(), settings.albumIdentifiers.value);
+    QueueController.latestPlayedForSourceManager.migrateLegacyAlbumSources();
     this.mainMapsGroup.sortAllSync(mediaSorters, settings.mediaItemsTrackSortingReverse.value, tracksInfoList.value);
     this.mainMapsGroup.refreshAll();
     FoldersController.tracksAndVideos.onMapChanged(mainMapFoldersTracksAndVideos.value);
@@ -466,6 +473,14 @@ class Indexer<T extends Track> {
     return requiredToSort;
   }
 
+  late final _favouritesSorting = _FavouritesSorting<T>(this);
+
+  /// null [tracks] means the favourites were replaced as a whole.
+  void onFavouritesChanged(Iterable<T>? tracks) => _favouritesSorting.onChanged(tracks);
+
+  /// [track] keeps its position in lists sorted by favourites until the current page changes.
+  void deferFavouriteSorting(T track) => _favouritesSorting.defer(track);
+
   /// re-sorts media subtracks that depend on history.
   Future<void> sortMediaTracksAndSubListsAfterHistoryPrepared() async {
     if (HistoryController.inst.isHistoryLoaded && this.mainMapsGroup.didFill) {
@@ -512,7 +527,9 @@ class Indexer<T extends Track> {
     for (var artist in trExt.artistsList) {
       removeAndDeleteEmpty(mainMapArtists.value, artist);
     }
-    removeAndDeleteEmpty(mainMapAlbumArtists.value, trExt.albumArtist);
+    for (var albumArtist in trExt.albumArtistsList) {
+      removeAndDeleteEmpty(mainMapAlbumArtists.value, albumArtist);
+    }
     for (var composer in trExt.composersList) {
       removeAndDeleteEmpty(mainMapComposer.value, composer);
     }
@@ -614,7 +631,15 @@ class Indexer<T extends Track> {
       for (final arOld in newOldArtists.$2) {
         removeCustom(MediaType.artist, mainMapArtists, arOld, oldTrack);
       }
-      addCustom(MediaType.albumArtist, mainMapAlbumArtists, oldTrack?.albumArtist, newTrack.albumArtist, newTrack);
+
+      // -- Assigning Album Artists
+      final newOldAlbumArtists = oldtr == null ? (newtr.albumArtistsList, const []) : differenceLists(newtr.albumArtistsList, oldtr.albumArtistsList);
+      for (final aaNew in newOldAlbumArtists.$1) {
+        addCustom(MediaType.albumArtist, mainMapAlbumArtists, null, aaNew, newTrack);
+      }
+      for (final aaOld in newOldAlbumArtists.$2) {
+        removeCustom(MediaType.albumArtist, mainMapAlbumArtists, aaOld, oldTrack);
+      }
 
       // -- Assigning Composers
       final newOldComposers = oldtr == null ? (newtr.composersList, const []) : differenceLists(newtr.composersList, oldtr.composersList);
@@ -783,6 +808,7 @@ class Indexer<T extends Track> {
         originalAlbum: UnknownTags.ALBUM,
         albumsList: [UnknownTags.ALBUM],
         albumArtist: UnknownTags.ALBUMARTIST,
+        albumArtistsList: const [UnknownTags.ALBUMARTIST],
         originalGenre: UnknownTags.GENRE,
         genresList: [UnknownTags.GENRE],
         originalStyle: UnknownTags.STYLE,
@@ -859,6 +885,12 @@ class Indexer<T extends Track> {
           config: splittersConfigs.artistsConfig,
         );
 
+        // -- Split Album Artists
+        final albumArtists = splitAlbumArtist(
+          albumArtist,
+          config: splittersConfigs.artistsConfig,
+        );
+
         // -- Split Genres
         final genres = splitGenre(
           tags.genre,
@@ -897,6 +929,7 @@ class Indexer<T extends Track> {
           originalAlbum: doMagic(tags.album),
           albumsList: albums,
           albumArtist: doMagic(tags.albumArtist),
+          albumArtistsList: albumArtists,
           originalGenre: doMagic(tags.genre),
           genresList: genres,
           originalStyle: doMagic(tags.style),
@@ -1049,6 +1082,7 @@ class Indexer<T extends Track> {
       if (didRemove && tr.isNetwork) networkTracksRemoved++;
       SearchSortController.inst.trackSearchList.value.remove(tr);
       SearchSortController.inst.trackSearchTemp.value.remove(tr);
+      SearchSortController.inst.trackSearchTempLessRelevant.value.remove(tr);
       allTracksMappedByPath.remove(tr.path);
       unawaited(_tracksDBManager.delete(tr.path));
       TrackTileManager.rebuildTrackInfo(tr);
@@ -1060,6 +1094,7 @@ class Indexer<T extends Track> {
     this.mainMapsGroup.refreshAll();
     SearchSortController.inst.trackSearchList.refresh();
     SearchSortController.inst.trackSearchTemp.refresh();
+    SearchSortController.inst.trackSearchTempLessRelevant.refresh();
     FoldersController.tracksAndVideos.currentFolder.refresh();
     FoldersController.tracks.currentFolder.refresh();
     FoldersController.videos.currentFolder.refresh();
@@ -2098,6 +2133,7 @@ class Indexer<T extends Track> {
                     ),
                 settings.albumIdentifiers.value,
               );
+              QueueController.latestPlayedForSourceManager.migrateLegacyAlbumSources();
 
               mainMapsGroup.sortAllSync(
                 mediaSorters,
@@ -2240,6 +2276,16 @@ class Indexer<T extends Track> {
     return config.splitText(
       originalComposer,
       fallback: UnknownTags.COMPOSER,
+    );
+  }
+
+  static List<String> splitAlbumArtist(
+    String? originalAlbumArtist, {
+    required ArtistsSplitConfig config,
+  }) {
+    return config.splitText(
+      originalAlbumArtist,
+      fallback: UnknownTags.ALBUMARTIST,
     );
   }
 
@@ -2438,6 +2484,10 @@ class Indexer<T extends Track> {
         originalAlbum: album ?? UnknownTags.ALBUM,
         albumsList: albums,
         albumArtist: albumArtist ?? UnknownTags.ALBUMARTIST,
+        albumArtistsList: Indexer.splitAlbumArtist(
+          albumArtist,
+          config: splitConfig.artistsConfig,
+        ),
         originalGenre: e.genre ?? UnknownTags.GENRE,
         genresList: genres,
         originalStyle: UnknownTags.STYLE,

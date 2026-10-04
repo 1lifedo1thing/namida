@@ -471,6 +471,7 @@ Future<void> showDownloadVideoBottomSheet({
                                         children: [
                                           ShimmerWrapper(
                                             shimmerEnabled: isLoadingInfo,
+                                            alignment: AlignmentDirectional.centerStart,
                                             child: NamidaDummyContainer(
                                               borderRadius: 6.0,
                                               width: maxWidth,
@@ -485,6 +486,7 @@ Future<void> showDownloadVideoBottomSheet({
                                           const SizedBox(height: 2.0),
                                           ShimmerWrapper(
                                             shimmerEnabled: isLoadingInfo,
+                                            alignment: AlignmentDirectional.centerStart,
                                             child: NamidaDummyContainer(
                                               borderRadius: 4.0,
                                               width: maxWidth - 24.0,
@@ -630,10 +632,10 @@ Future<void> showDownloadVideoBottomSheet({
                                               ),
                                       ),
                                       getDivider(),
-                                      ObxO(
-                                        rx: selectedVideoOnlyStream,
-                                        builder: (context, vostream) {
+                                      Obx(
+                                        (context) {
                                           final webmIconEnabled = showVideoWebm.valueR;
+                                          final vostream = selectedVideoOnlyStream.valueR;
                                           final subtitle = vostream == null ? null : "${vostream.qualityLabel} • ${vostream.sizeInBytes.fileSizeFormatted}";
                                           return getTextWidget(
                                             hasWebm: hasVideoWebm,

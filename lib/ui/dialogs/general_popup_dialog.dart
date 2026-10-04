@@ -41,6 +41,7 @@ import 'package:namida/ui/dialogs/add_to_playlist_dialog.dart';
 import 'package:namida/ui/dialogs/common_dialogs.dart';
 import 'package:namida/ui/dialogs/create_smart_playlist_dialog.dart';
 import 'package:namida/ui/dialogs/edit_tags_dialog.dart';
+import 'package:namida/ui/dialogs/queue_insertion_dialogs.dart';
 import 'package:namida/ui/dialogs/set_lrc_dialog.dart';
 import 'package:namida/ui/dialogs/track_advanced_dialog.dart';
 import 'package:namida/ui/dialogs/track_info_dialog.dart';
@@ -80,6 +81,7 @@ Future<void> showGeneralPopupDialog(
   bool comingFromPlaylistMenu = false,
   bool showPlayAllReverse = false,
   SmartPlaylistWrapper? smartPlaylistWrapper,
+  Folder? folder,
 }) async {
   final isSingle = tracks.length == 1;
   forceSingleArtwork ??= isSingle;
@@ -138,7 +140,7 @@ Future<void> showGeneralPopupDialog(
   /// name, identifier
   final Set<AlbumIdentifierWrapper> availableAlbums = tracks.toUniqueAlbums();
   final List<String> availableArtists = tracks.mappedUniquedList((e) => e.toTrackExt().artistsList);
-  final List<Folder> availableFolders = tracks.mapAsPhysical().mappedUniqued((e) => e.folder);
+  final List<Folder> availableFolders = folder != null ? [folder] : tracks.mapAsPhysical().mappedUniqued((e) => e.folder);
 
   final Iterable<YoutubeID> availableYoutubeIDs = tracks.map((e) => YoutubeID(id: e.youtubeID, playlistID: null)).where((element) => element.id.isNotEmpty);
   final String? firstVideolId = availableYoutubeIDs.firstOrNull?.id;
@@ -279,62 +281,22 @@ Future<void> showGeneralPopupDialog(
     );
   }
 
+  void renamePlaylist() {
+    if (!shoulShowPlaylistUtils()) return;
+    cancelSkipTimer();
+    showRenamePlaylistDialog(
+      manager: PlaylistController.inst,
+      playlistName: playlistName!,
+      colorScheme: colorDelightened.value,
+    );
+  }
+
   void togglePlaylistPin() {
     if (!shoulShowPlaylistUtils()) return;
     final pl = PlaylistController.inst.getPlaylist(playlistName!);
     if (pl == null) return;
     NamidaNavigator.inst.closeDialog();
     PlaylistController.inst.updatePlaylistMetadata(playlistName, isPinned: !pl.isPinned);
-  }
-
-  void renamePlaylist() async {
-    // function button won't be visible if playlistName == null.
-    if (!shoulShowPlaylistUtils()) return;
-    cancelSkipTimer();
-
-    final controller = TextEditingController(text: playlistName);
-    final GlobalKey<FormState> formKey = GlobalKey<FormState>();
-    await openDialog(
-      onDisposing: () {
-        controller.dispose();
-      },
-      (theme) => Form(
-        key: formKey,
-        child: CustomBlurryDialog(
-          title: lang.renamePlaylist,
-          actions: [
-            const CancelButton(),
-            NamidaButton(
-              text: lang.save,
-              onTap: () async {
-                if (formKey.currentState!.validate()) {
-                  final didRename = await PlaylistController.inst.renamePlaylist(playlistName!, controller.text);
-                  if (didRename) {
-                    NamidaNavigator.inst.closeAllDialogs();
-                  } else {
-                    snackyy(title: lang.error, message: lang.couldntRenamePlaylist);
-                  }
-                }
-              },
-            ),
-          ],
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(
-                height: 20.0,
-              ),
-              CustomTagTextField(
-                controller: controller,
-                hintText: playlistName!,
-                labelText: lang.name,
-                validator: (value) => PlaylistController.inst.validatePlaylistName(value),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 
   Future<void> deletePlaylist({bool deleteM3uFileOnly = false}) async {
@@ -580,7 +542,7 @@ Future<void> showGeneralPopupDialog(
                     builder: (context, cleanup) => NamidaIconButton(
                       tooltip: () => shouldCleanUp.value ? lang.disableSearchCleanup : lang.enableSearchCleanup,
                       icon: cleanup ? Broken.shield_cross : Broken.shield_search,
-                      onPressed: () => shouldCleanUp.value = !shouldCleanUp.value,
+                      onPressed: () => shouldCleanUp.toggle(),
                     ),
                   ),
                 ],
@@ -717,10 +679,17 @@ Future<void> showGeneralPopupDialog(
               const SizedBox(
                 width: 8.0,
               ),
-              if (!playlistIsReadOnly) ...[
-                Expanded(child: bigIcon(Broken.edit_2, () => lang.renamePlaylist, renamePlaylist)),
-                const SizedBox(width: 8.0),
-              ],
+              // allow editing description
+              Expanded(
+                child: bigIcon(
+                  Broken.edit_2,
+                  () => lang.edit,
+                  renamePlaylist,
+                ),
+              ),
+              const SizedBox(
+                width: 8.0,
+              ),
               Expanded(child: bigIcon(Broken.trash, () => lang.deletePlaylist, deletePlaylist)),
               if (playlistIsReadOnly)
                 Expanded(
@@ -1125,14 +1094,15 @@ Future<void> showGeneralPopupDialog(
                                   subtitle: availableAlbums.first.displayAlbumName,
                                   icon: Broken.music_dashboard,
                                   onTap: () => NamidaOnTaps.inst.onAlbumTap(availableAlbums.first),
-                                  trailing: IconButton(
-                                    tooltip: lang.addMoreFromThisAlbum,
+                                  trailing: NamidaIconButton(
+                                    tooltip: () => lang.addMoreFromThisAlbum,
+                                    icon: Broken.add,
                                     onPressed: () {
                                       NamidaNavigator.inst.closeDialog();
                                       final tracks = availableAlbums.first.getAlbumTracks();
                                       Player.inst.addToQueue(tracks, insertNext: true, insertionType: QueueInsertionType.moreAlbum);
                                     },
-                                    icon: const Icon(Broken.add),
+                                    onLongPress: () => showQueueInsertionConfigDialog(QueueInsertionType.moreAlbum, title: lang.addMoreFromThisAlbum),
                                   ),
                                 ),
                               if (availableAlbums.length == 1 && albumToAddFrom != null)
@@ -1145,6 +1115,7 @@ Future<void> showGeneralPopupDialog(
                                     final tracks = albumToAddFrom.getAlbumTracks();
                                     Player.inst.addToQueue(tracks, insertNext: true, insertionType: QueueInsertionType.moreAlbum);
                                   },
+                                  onLongPress: () => showQueueInsertionConfigDialog(QueueInsertionType.moreAlbum, title: lang.addMoreFromThisAlbum),
                                   trailing: IgnorePointer(
                                     child: IconButton(
                                       onPressed: () {},
@@ -1163,6 +1134,23 @@ Future<void> showGeneralPopupDialog(
                                   titleText: lang.goToAlbum,
                                   textColorScheme: colorDelightened,
                                   childrenPadding: const EdgeInsets.only(left: 20.0, right: 20.0, bottom: 12.0, top: 0),
+                                  trailingBuilder: (iconWidget) => Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      _AddMoreFromPicker(
+                                        insertionType: QueueInsertionType.moreAlbum,
+                                        tooltip: lang.addMoreFromThisAlbum,
+                                        items: () => availableAlbums.map(
+                                          (e) => NamidaPopupItem(
+                                            icon: Broken.music_dashboard,
+                                            title: e.displayAlbumName,
+                                            onTap: () => Player.inst.addToQueue(e.getAlbumTracks(), insertNext: true, insertionType: QueueInsertionType.moreAlbum),
+                                          ),
+                                        ),
+                                      ),
+                                      iconWidget,
+                                    ],
+                                  ),
                                   children: [
                                     Wrap(
                                       alignment: WrapAlignment.start,
@@ -1172,6 +1160,7 @@ Future<void> showGeneralPopupDialog(
                                             text: e.displayAlbumName,
                                             textTheme: theme.textTheme,
                                             onTap: () => NamidaOnTaps.inst.onAlbumTap(e),
+                                            onLongPress: () => Player.inst.addToQueue(e.getAlbumTracks(), insertNext: true, insertionType: QueueInsertionType.moreAlbum),
                                           ),
                                         ),
                                       ],
@@ -1189,6 +1178,7 @@ Future<void> showGeneralPopupDialog(
                                     final tracks = artistToAddFrom.getArtistTracks();
                                     Player.inst.addToQueue(tracks, insertNext: true, insertionType: QueueInsertionType.moreArtist);
                                   },
+                                  onLongPress: () => showQueueInsertionConfigDialog(QueueInsertionType.moreArtist, title: lang.addMoreFromThisArtist),
                                   trailing: IgnorePointer(
                                     child: IconButton(
                                       onPressed: () {},
@@ -1204,13 +1194,14 @@ Future<void> showGeneralPopupDialog(
                                   subtitle: availableArtists.first,
                                   icon: Broken.microphone,
                                   onTap: () => NamidaOnTaps.inst.onArtistTap(availableArtists.first, MediaType.artist),
-                                  trailing: IconButton(
-                                    tooltip: lang.addMoreFromThisArtist,
+                                  trailing: NamidaIconButton(
+                                    tooltip: () => lang.addMoreFromThisArtist,
+                                    icon: Broken.add,
                                     onPressed: () {
                                       final tracks = availableArtists.first.getArtistTracks();
                                       Player.inst.addToQueue(tracks, insertNext: true, insertionType: QueueInsertionType.moreArtist);
                                     },
-                                    icon: const Icon(Broken.add),
+                                    onLongPress: () => showQueueInsertionConfigDialog(QueueInsertionType.moreArtist, title: lang.addMoreFromThisArtist),
                                   ),
                                 ),
 
@@ -1224,6 +1215,23 @@ Future<void> showGeneralPopupDialog(
                                   titleText: lang.goToArtist,
                                   textColorScheme: colorDelightened,
                                   childrenPadding: const EdgeInsets.only(left: 20.0, right: 20.0, bottom: 12.0, top: 0),
+                                  trailingBuilder: (iconWidget) => Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      _AddMoreFromPicker(
+                                        insertionType: QueueInsertionType.moreArtist,
+                                        tooltip: lang.addMoreFromThisArtist,
+                                        items: () => availableArtists.map(
+                                          (e) => NamidaPopupItem(
+                                            icon: Broken.microphone,
+                                            title: e,
+                                            onTap: () => Player.inst.addToQueue(e.getArtistTracks(), insertNext: true, insertionType: QueueInsertionType.moreArtist),
+                                          ),
+                                        ),
+                                      ),
+                                      iconWidget,
+                                    ],
+                                  ),
                                   children: [
                                     Wrap(
                                       alignment: WrapAlignment.start,
@@ -1233,6 +1241,7 @@ Future<void> showGeneralPopupDialog(
                                             text: e,
                                             textTheme: theme.textTheme,
                                             onTap: () => NamidaOnTaps.inst.onArtistTap(e, MediaType.artist),
+                                            onLongPress: () => Player.inst.addToQueue(e.getArtistTracks(), insertNext: true, insertionType: QueueInsertionType.moreArtist),
                                           ),
                                         ),
                                       ],
@@ -1250,32 +1259,35 @@ Future<void> showGeneralPopupDialog(
                                   icon: availableFolders.first is VideoFolder ? Broken.video_play : Broken.folder,
                                   onTap: () {
                                     NamidaNavigator.inst.closeDialog();
-                                    NamidaOnTaps.inst.onFolderTapNavigate(availableFolders.first, null, trackToScrollTo: tracks.first);
+                                    NamidaOnTaps.inst.onFolderTapNavigate(availableFolders.first, null, trackToScrollTo: tracks.firstOrNull);
                                   },
                                   trailing: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      if (NamidaChannel.inst.canOpenFileInExplorer && tracksExisting.isNotEmpty)
+                                      if (NamidaChannel.inst.canOpenFileInExplorer && (tracksExisting.isNotEmpty || folder != null))
                                         IconButton(
                                           tooltip: lang.openInFileExplorer,
                                           onPressed: () {
-                                            final path = tracksExisting.firstOrNull?.asPhysical()?.path ?? availableFolders.first.path;
-                                            NamidaChannel.inst.openFileInExplorer(path);
+                                            final existingTrackPath = tracksExisting.firstOrNull?.asPhysical()?.path;
+                                            if (existingTrackPath != null) {
+                                              NamidaChannel.inst.openFileInExplorer(existingTrackPath);
+                                            } else {
+                                              NamidaChannel.inst.openFileInExplorer(availableFolders.first.path, isDirectory: true);
+                                            }
                                           },
                                           icon: const Icon(
                                             Broken.export_1,
                                             size: 20.0,
                                           ),
                                         ),
-                                      IconButton(
-                                        tooltip: lang.addMoreFromThisFolder,
+                                      NamidaIconButton(
+                                        tooltip: () => lang.addMoreFromThisFolder,
+                                        icon: Broken.add,
                                         onPressed: () {
                                           final tracks = availableFolders.first.tracksDedicated();
                                           Player.inst.addToQueue(tracks, insertNext: true, insertionType: QueueInsertionType.moreFolder);
                                         },
-                                        icon: const Icon(
-                                          Broken.add,
-                                        ),
+                                        onLongPress: () => showQueueInsertionConfigDialog(QueueInsertionType.moreFolder, title: lang.addMoreFromThisFolder),
                                       ),
                                     ],
                                   ),
@@ -1313,14 +1325,14 @@ Future<void> showGeneralPopupDialog(
                                       IconButton(
                                         tooltip: "${lang.playAll} (${lang.sortBy})",
                                         icon: Icon(
-                                          Broken.sort,
+                                          Broken.setting_4,
                                           size: 20.0,
-                                          color: iconColor,
+                                          color: context.defaultIconColor(),
                                         ),
                                         iconSize: 20.0,
                                         onPressed: () {
                                           NamidaNavigator.inst.closeDialog();
-                                          SubpageInfoContainer.openAdvancedPlayDialog(() => tracks, source);
+                                          showAdvancedPlayDialog(() => tracks, source);
                                         },
                                       ),
                                     ],
@@ -1339,8 +1351,21 @@ Future<void> showGeneralPopupDialog(
                                   },
                                   onLongPress: () {
                                     NamidaNavigator.inst.closeDialog();
-                                    SubpageInfoContainer.openAdvancedShuffleDialog(() => tracks, source);
+                                    showAdvancedShuffleDialog(() => tracks, source);
                                   },
+                                  trailing: IconButton(
+                                    tooltip: "${lang.shuffle} (${lang.filterBy})",
+                                    icon: Icon(
+                                      Broken.setting_4,
+                                      size: 20.0,
+                                      color: context.defaultIconColor(),
+                                    ),
+                                    iconSize: 20.0,
+                                    onPressed: () {
+                                      NamidaNavigator.inst.closeDialog();
+                                      showAdvancedShuffleDialog(() => tracks, source);
+                                    },
+                                  ),
                                 ),
 
                               if (!isSingle)
@@ -1619,11 +1644,13 @@ Future<void> showGeneralPopupDialog(
 class _SmallUnderlinedChip extends StatelessWidget {
   final String text;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
   final TextTheme textTheme;
 
   const _SmallUnderlinedChip({
     required this.text,
     required this.onTap,
+    this.onLongPress,
     required this.textTheme,
   });
 
@@ -1634,6 +1661,7 @@ class _SmallUnderlinedChip extends StatelessWidget {
       child: NamidaInkWell(
         borderRadius: 6.0,
         onTap: onTap,
+        onLongPress: onLongPress,
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 3.0, horizontal: 3.0),
           child: Text(
@@ -1649,196 +1677,226 @@ class _SmallUnderlinedChip extends StatelessWidget {
   }
 }
 
+class _AddMoreFromPicker extends StatelessWidget {
+  final QueueInsertionType insertionType;
+  final String tooltip;
+  final Iterable<NamidaPopupItem> Function() items;
+
+  const _AddMoreFromPicker({
+    required this.insertionType,
+    required this.tooltip,
+    required this.items,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return NamidaPopupWrapper(
+      openOnLongPress: false,
+      childrenDefault: items,
+      child: NamidaIconButton(
+        tooltip: () => tooltip,
+        icon: Broken.add,
+        iconSize: 20.0,
+        onLongPress: () => showQueueInsertionConfigDialog(insertionType, title: tooltip),
+      ),
+    );
+  }
+}
+
 class _ArtworkManager extends StatelessWidget {
   final CustomArtworkManager customArtworkManager;
   const _ArtworkManager({required this.customArtworkManager});
 
-  static final _lastfmImageSizeRegex = RegExp(r'\/i\/u\/(.+)\/');
-
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
     return NamidaIconButton(
       icon: Broken.gallery_edit,
-      onPressed: () async {
-        final alreadySetArtworkPossible = customArtworkManager.getArtworkFile();
-        final alreadySetArtworkGood = await alreadySetArtworkPossible.exists() && ((await alreadySetArtworkPossible.fileSize() ?? 0) > 0);
-        final alreadySetArtworkExisting = alreadySetArtworkGood ? alreadySetArtworkPossible : null;
+      onPressed: customArtworkManager.showEditDialog,
+    );
+  }
+}
 
-        void showSnackInfo([dynamic error]) {
-          if (error == null) {
-            snackyy(icon: Broken.gallery_edit, message: lang.succeeded, borderColor: Colors.green);
-          } else {
-            snackyy(icon: Broken.gallery_edit, message: "${lang.failed}:$error", borderColor: Colors.red);
-          }
+extension CustomArtworkManagerDialog on CustomArtworkManager {
+  static final _lastfmImageSizeRegex = RegExp(r'\/i\/u\/(.+)\/');
+
+  Future<void> showEditDialog() async {
+    final alreadySetArtworkPossible = getArtworkFile();
+    final alreadySetArtworkGood = await alreadySetArtworkPossible.exists() && ((await alreadySetArtworkPossible.fileSize() ?? 0) > 0);
+    final alreadySetArtworkExisting = alreadySetArtworkGood ? alreadySetArtworkPossible : null;
+
+    void showSnackInfo([dynamic error]) {
+      if (error == null) {
+        snackyy(icon: Broken.gallery_edit, message: lang.succeeded, borderColor: Colors.green);
+      } else {
+        snackyy(icon: Broken.gallery_edit, message: "${lang.failed}:$error", borderColor: Colors.red);
+      }
+    }
+
+    Future<void> onEdit() async {
+      final artworkFile = await NamidaFileBrowser.pickFile(memeType: NamidaStorageFileMemeType.image);
+      if (artworkFile != null) {
+        try {
+          await setArtworkFile(artworkFile, null);
+          showSnackInfo();
+        } catch (e) {
+          showSnackInfo(e);
         }
+      }
+    }
 
-        Future<void> onEdit() async {
-          final artworkFile = await NamidaFileBrowser.pickFile(memeType: NamidaStorageFileMemeType.image);
-          if (artworkFile != null) {
-            try {
-              await customArtworkManager.setArtworkFile(artworkFile, null);
-              showSnackInfo();
-            } catch (e) {
-              showSnackInfo(e);
-            }
-          }
-        }
+    Future<void> onDelete() async {
+      try {
+        await setArtworkFile(null, null);
+        showSnackInfo();
+      } catch (e) {
+        showSnackInfo(e);
+      }
+    }
 
-        Future<void> onDelete() async {
-          try {
-            await customArtworkManager.setArtworkFile(null, null);
-            showSnackInfo();
-          } catch (e) {
-            showSnackInfo(e);
-          }
-        }
+    final fetchPossibleArtworksFn = fetchPossibleArtworks;
+    if (alreadySetArtworkExisting != null || fetchPossibleArtworksFn != null) {
+      final possibleArtworks = Rxn<List<String>>();
+      CancelToken? cancelToken;
+      final possibleArtworksLoading = false.obs;
 
-        final fetchPossibleArtworksFn = customArtworkManager.fetchPossibleArtworks;
-        if (alreadySetArtworkExisting != null || fetchPossibleArtworksFn != null) {
-          final possibleArtworks = Rxn<List<String>>();
-          CancelToken? cancelToken;
-          final possibleArtworksLoading = false.obs;
+      if (fetchPossibleArtworksFn != null) {
+        possibleArtworksLoading.value = true;
+        cancelToken = CancelToken();
+        fetchPossibleArtworksFn(cancelToken).catchError((_) => null).then(
+          (value) {
+            possibleArtworks.value = value;
+            possibleArtworksLoading.value = false;
+          },
+        );
+      }
 
-          if (fetchPossibleArtworksFn != null) {
-            possibleArtworksLoading.value = true;
-            cancelToken = CancelToken();
-            fetchPossibleArtworksFn(cancelToken).catchError((_) => null).then(
-              (value) {
-                possibleArtworks.value = value;
-                possibleArtworksLoading.value = false;
+      NamidaNavigator.inst.navigateDialog(
+        onDisposing: () {
+          cancelToken?.cancel();
+          possibleArtworks.close();
+          possibleArtworksLoading.close();
+        },
+        dialog: CustomBlurryDialog(
+          title: lang.configure,
+          actions: [
+            NamidaButton(
+              colorScheme: Colors.red,
+              text: lang.delete.toUpperCase(),
+              onTap: () async {
+                await onDelete();
+                NamidaNavigator.inst.closeDialog();
               },
-            );
-          }
-
-          NamidaNavigator.inst.navigateDialog(
-            onDisposing: () {
-              cancelToken?.cancel();
-              possibleArtworks.close();
-              possibleArtworksLoading.close();
-            },
-            dialog: CustomBlurryDialog(
-              title: lang.configure,
-              actions: [
-                NamidaButton(
-                  colorScheme: Colors.red,
-                  text: lang.delete.toUpperCase(),
-                  onTap: () async {
-                    await onDelete();
-                    NamidaNavigator.inst.closeDialog();
-                  },
-                ),
-                NamidaButton(
-                  text: lang.pickFromStorage.toUpperCase(),
-                  onTap: () async {
-                    await onEdit();
-                    NamidaNavigator.inst.closeDialog();
-                  },
-                ),
-              ],
-              child: ObxO(
-                rx: possibleArtworks,
-                builder: (context, urls) {
-                  final extraCountText = fetchPossibleArtworksFn == null ? '' : " (${urls?.length ?? 0})";
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.all(12.0),
-                        child: Text(
-                          lang.choose + extraCountText,
-                          style: textTheme.displayMedium,
-                        ),
-                      ),
-                      ObxO(
-                        rx: possibleArtworksLoading,
-                        builder: (context, loading) => SizedBox(
-                          height: fetchPossibleArtworksFn == null ? null : context.height * 0.4,
-                          width: context.width,
-                          child: loading
-                              ? Center(
-                                  child: ThreeArchedCircle(
-                                    color: theme.colorScheme.onSurface.withOpacityExt(0.5),
-                                    size: 32.0,
-                                  ),
-                                )
-                              : fetchPossibleArtworksFn == null
-                              ? null
-                              : urls == null || urls.isEmpty
-                              ? const Center(
-                                  child: NoResultsWidget(),
-                                )
-                              : SmoothGridView.builder(
-                                  padding: EdgeInsets.zero,
-                                  shrinkWrap: true,
-                                  scrollCacheExtent: ScrollCacheExtent.viewport(3),
-                                  itemCount: urls.length,
-                                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                                    crossAxisCount: 3,
-                                    mainAxisSpacing: 6.0,
-                                    crossAxisSpacing: 4.0,
-                                  ),
-                                  itemBuilder: (context, index) {
-                                    final url = urls[index];
-                                    return BorderRadiusClip(
-                                      borderRadius: BorderRadius.circular(8.0.multipliedRadius),
-                                      child: FutureBuilder(
-                                        future: Rhttp.getBytes(url),
-                                        builder: (context, snapshot) {
-                                          final bytes = snapshot.data?.body;
-                                          return CustomAnimatedSwitcher(
-                                            layoutBuilder: (currentChild, previousChildren) {
-                                              return Stack(
-                                                alignment: Alignment.center,
-                                                children: <Widget>[
-                                                  ...previousChildren,
-                                                  if (currentChild != null) Positioned.fill(child: currentChild),
-                                                ],
-                                              );
-                                            },
-                                            duration: const Duration(milliseconds: 200),
-                                            child: bytes == null
-                                                ? ColoredBox(
-                                                    color: theme.cardColor,
-                                                  )
-                                                : TapDetector(
-                                                    onTap: () async {
-                                                      NamidaNavigator.inst.closeDialog();
-                                                      Uint8List? fullResbytes;
-                                                      try {
-                                                        final fullResUrl = url.replaceAll(_lastfmImageSizeRegex, '/i/u/ar0/');
-                                                        final res = await Rhttp.getBytes(fullResUrl);
-                                                        fullResbytes = res.body;
-                                                      } catch (_) {}
-
-                                                      try {
-                                                        await customArtworkManager.setArtworkFile(null, fullResbytes ?? bytes);
-                                                        showSnackInfo();
-                                                      } catch (e) {
-                                                        showSnackInfo(e);
-                                                      }
-                                                    },
-                                                    child: Image.memory(bytes),
-                                                  ),
+            ),
+            NamidaButton(
+              text: lang.pickFromStorage.toUpperCase(),
+              onTap: () async {
+                await onEdit();
+                NamidaNavigator.inst.closeDialog();
+              },
+            ),
+          ],
+          child: ObxO(
+            rx: possibleArtworks,
+            builder: (context, urls) {
+              final theme = context.theme;
+              final textTheme = theme.textTheme;
+              final extraCountText = fetchPossibleArtworksFn == null ? '' : " (${urls?.length ?? 0})";
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.all(12.0),
+                    child: Text(
+                      lang.choose + extraCountText,
+                      style: textTheme.displayMedium,
+                    ),
+                  ),
+                  ObxO(
+                    rx: possibleArtworksLoading,
+                    builder: (context, loading) => SizedBox(
+                      height: fetchPossibleArtworksFn == null ? null : context.height * 0.4,
+                      width: context.width,
+                      child: loading
+                          ? Center(
+                              child: ThreeArchedCircle(
+                                color: theme.colorScheme.onSurface.withOpacityExt(0.5),
+                                size: 32.0,
+                              ),
+                            )
+                          : fetchPossibleArtworksFn == null
+                          ? null
+                          : urls == null || urls.isEmpty
+                          ? const Center(
+                              child: NoResultsWidget(),
+                            )
+                          : SmoothGridView.builder(
+                              padding: EdgeInsets.zero,
+                              shrinkWrap: true,
+                              scrollCacheExtent: ScrollCacheExtent.viewport(3),
+                              itemCount: urls.length,
+                              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 3,
+                                mainAxisSpacing: 6.0,
+                                crossAxisSpacing: 4.0,
+                              ),
+                              itemBuilder: (context, index) {
+                                final url = urls[index];
+                                return BorderRadiusClip(
+                                  borderRadius: BorderRadius.circular(8.0.multipliedRadius),
+                                  child: FutureBuilder(
+                                    future: Rhttp.getBytes(url),
+                                    builder: (context, snapshot) {
+                                      final bytes = snapshot.data?.body;
+                                      return CustomAnimatedSwitcher(
+                                        layoutBuilder: (currentChild, previousChildren) {
+                                          return Stack(
+                                            alignment: Alignment.center,
+                                            children: <Widget>[
+                                              ...previousChildren,
+                                              if (currentChild != null) Positioned.fill(child: currentChild),
+                                            ],
                                           );
                                         },
-                                      ),
-                                    );
-                                  },
-                                ),
-                        ),
-                      ),
-                    ],
-                  );
-                },
-              ),
-            ),
-          );
-        } else {
-          await onEdit();
-        }
-      },
-    );
+                                        duration: const Duration(milliseconds: 200),
+                                        child: bytes == null
+                                            ? ColoredBox(
+                                                color: theme.cardColor,
+                                              )
+                                            : TapDetector(
+                                                onTap: () async {
+                                                  NamidaNavigator.inst.closeDialog();
+                                                  Uint8List? fullResbytes;
+                                                  try {
+                                                    final fullResUrl = url.replaceAll(_lastfmImageSizeRegex, '/i/u/ar0/');
+                                                    final res = await Rhttp.getBytes(fullResUrl);
+                                                    fullResbytes = res.body;
+                                                  } catch (_) {}
+
+                                                  try {
+                                                    await setArtworkFile(null, fullResbytes ?? bytes);
+                                                    showSnackInfo();
+                                                  } catch (e) {
+                                                    showSnackInfo(e);
+                                                  }
+                                                },
+                                                child: Image.memory(bytes),
+                                              ),
+                                      );
+                                    },
+                                  ),
+                                );
+                              },
+                            ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      );
+    } else {
+      await onEdit();
+    }
   }
 }

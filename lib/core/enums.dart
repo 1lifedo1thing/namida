@@ -38,6 +38,7 @@ enum SortType {
   bpm,
   size,
   rating,
+  favourite,
   shuffle,
   shuffleDaily,
   mostPlayed,
@@ -73,6 +74,7 @@ enum SortType {
     SortType.bpm,
     SortType.size,
     SortType.rating,
+    SortType.favourite,
     SortType.latestPlayed,
     SortType.mostPlayed,
     SortType.firstListen,
@@ -112,6 +114,7 @@ enum GroupSortType {
   numberOfTracks,
   playCount,
   latestPlayed,
+  lastPlayed,
   firstListen,
   albumsCount,
   creationDate,
@@ -121,6 +124,7 @@ enum GroupSortType {
   artistSort,
   composerSort,
   shuffle,
+  shuffleDaily,
   custom,
   ;
 
@@ -133,6 +137,7 @@ enum GroupSortType {
     GroupSortType.year,
     GroupSortType.duration,
     GroupSortType.numberOfTracks,
+    GroupSortType.lastPlayed,
     GroupSortType.playCount,
     GroupSortType.firstListen,
     GroupSortType.latestPlayed,
@@ -144,6 +149,7 @@ enum GroupSortType {
     GroupSortType.releaseType,
     GroupSortType.bpm,
     GroupSortType.shuffle,
+    GroupSortType.shuffleDaily,
   ];
 
   static List<GroupSortType> forArtists(MediaType artistType) => [
@@ -160,6 +166,7 @@ enum GroupSortType {
     GroupSortType.duration,
     GroupSortType.numberOfTracks,
     GroupSortType.albumsCount,
+    GroupSortType.lastPlayed,
     GroupSortType.playCount,
     GroupSortType.firstListen,
     GroupSortType.latestPlayed,
@@ -170,12 +177,14 @@ enum GroupSortType {
     GroupSortType.dateModified,
     GroupSortType.bpm,
     GroupSortType.shuffle,
+    GroupSortType.shuffleDaily,
   ];
 
   static List<GroupSortType> forGenres() => [
     GroupSortType.genresList,
     GroupSortType.duration,
     GroupSortType.numberOfTracks,
+    GroupSortType.lastPlayed,
     GroupSortType.playCount,
     GroupSortType.firstListen,
     GroupSortType.latestPlayed,
@@ -188,6 +197,22 @@ enum GroupSortType {
     GroupSortType.composer,
     GroupSortType.bpm,
     GroupSortType.shuffle,
+    GroupSortType.shuffleDaily,
+  ];
+
+  static List<GroupSortType> forMoodsTags() => [
+    GroupSortType.title,
+    GroupSortType.numberOfTracks,
+    GroupSortType.duration,
+    GroupSortType.lastPlayed,
+    GroupSortType.playCount,
+    GroupSortType.firstListen,
+    GroupSortType.latestPlayed,
+    GroupSortType.year,
+    GroupSortType.dateAdded,
+    GroupSortType.dateModified,
+    GroupSortType.shuffle,
+    GroupSortType.shuffleDaily,
   ];
 
   static List<GroupSortType> forPlaylists() => [
@@ -196,11 +221,13 @@ enum GroupSortType {
     GroupSortType.modifiedDate,
     GroupSortType.duration,
     GroupSortType.numberOfTracks,
+    GroupSortType.lastPlayed,
     GroupSortType.playCount,
     GroupSortType.firstListen,
     GroupSortType.latestPlayed,
     GroupSortType.bpm,
     GroupSortType.shuffle,
+    GroupSortType.shuffleDaily,
     GroupSortType.custom,
   ];
 
@@ -212,7 +239,9 @@ enum GroupSortType {
     GroupSortType.playCount,
     GroupSortType.firstListen,
     GroupSortType.latestPlayed,
+    GroupSortType.lastPlayed,
     GroupSortType.shuffle,
+    GroupSortType.shuffleDaily,
     GroupSortType.custom,
   ];
 }
@@ -366,13 +395,13 @@ enum TrackPlayMode {
 enum QueueSourceEnum {
   allTracksAll(false, supportResuming: true),
   allTracks(false, supportResuming: true),
-  album(false, supportResuming: true),
-  artist(false, supportResuming: true),
-  albumArtist(false, supportResuming: true),
-  composer(false, supportResuming: true),
-  genre(false, supportResuming: true),
-  style(false, supportResuming: true),
-  playlist(true, supportResuming: true),
+  album(false, supportResuming: true, lastPlayedSortMedia: MediaType.album),
+  artist(false, supportResuming: true, lastPlayedSortMedia: MediaType.artist),
+  albumArtist(false, supportResuming: true, lastPlayedSortMedia: MediaType.albumArtist),
+  composer(false, supportResuming: true, lastPlayedSortMedia: MediaType.composer),
+  genre(false, supportResuming: true, lastPlayedSortMedia: MediaType.genre),
+  style(false, supportResuming: true, lastPlayedSortMedia: MediaType.style),
+  playlist(true, supportResuming: true, lastPlayedSortMedia: MediaType.playlist),
   folder(false),
   folderMusic(false),
   folderVideos(false),
@@ -397,7 +426,10 @@ enum QueueSourceEnum {
 
   final bool canHaveDuplicates;
   final bool supportResuming;
-  const QueueSourceEnum(this.canHaveDuplicates, {this.supportResuming = false});
+  final MediaType? lastPlayedSortMedia;
+  const QueueSourceEnum(this.canHaveDuplicates, {this.supportResuming = false, this.lastPlayedSortMedia});
+
+  bool get hasLastPlayedSort => lastPlayedSortMedia != null;
 }
 
 enum QueueSourceYoutubeIDEnum {
@@ -405,7 +437,7 @@ enum QueueSourceYoutubeIDEnum {
   // -- so that name matching works properly (workaround but sheshh)
 
   ytChannel(true),
-  ytPlaylist(true, supportResuming: true),
+  ytPlaylist(true, supportResuming: true, hasLastPlayedSort: true),
   ytSearch(false),
   ytPlayerQueue(true),
   ytMostPlayed(false),
@@ -431,17 +463,22 @@ enum QueueSourceYoutubeIDEnum {
 
   final bool canHaveDuplicates;
   final bool supportResuming;
-  const QueueSourceYoutubeIDEnum(this.canHaveDuplicates, {this.supportResuming = false});
+  final bool hasLastPlayedSort;
+  const QueueSourceYoutubeIDEnum(this.canHaveDuplicates, {this.supportResuming = false, this.hasLastPlayedSort = false});
 }
 
 sealed class QueueSourceBase<E extends Enum> {
   final E s;
   bool get canHaveDuplicates;
   bool get supportResuming;
+
+  /// sources with a last played sort keep tracking even when [resumingEnabled] is off.
+  bool get tracksLatestPlayed;
   String toText();
 
-  /// disabling it hides the resume fab, the highlighted item & stops tracking the latest played per source.
-  static bool get resumingEnabled => settings.extra.resumeUIEnabled.value;
+  /// disabling it hides the resume fab, the highlighted item & stops tracking the latest played per source,
+  /// except for sources that have a last played sort.
+  static bool get resumingEnabled => settings.resumeUIEnabled.value;
 
   final String? title;
   const QueueSourceBase._(this.s, {required this.title});
@@ -456,13 +493,18 @@ class QueueSource extends QueueSourceBase<QueueSourceEnum> {
   @override
   bool get supportResuming => s.supportResuming && QueueSourceBase.resumingEnabled;
   @override
+  bool get tracksLatestPlayed => s.supportResuming && (s.hasLastPlayedSort || QueueSourceBase.resumingEnabled);
+  @override
   String toText() => s.toText();
 
-  const QueueSource._(super.s, {super.title}) : super._();
+  final AlbumIdentifierWrapper? albumIdentifier;
+
+  const QueueSource._(super.s, {super.title, this.albumIdentifier}) : super._();
 
   static const allTracksAll = QueueSource._(QueueSourceEnum.allTracksAll);
   static const allTracks = QueueSource._(QueueSourceEnum.allTracks);
-  static QueueSource album(AlbumIdentifierWrapper? identifier, String? name) => QueueSource._(QueueSourceEnum.album, title: identifier?.displayAlbumName ?? name);
+  static QueueSource album(AlbumIdentifierWrapper? identifier, String? name) =>
+      QueueSource._(QueueSourceEnum.album, title: identifier?.displayAlbumName ?? name, albumIdentifier: identifier);
   static QueueSource artist(String? name) => QueueSource._(QueueSourceEnum.artist, title: name);
   static QueueSource albumArtist(String? name) => QueueSource._(QueueSourceEnum.albumArtist, title: name);
   static QueueSource composer(String? name) => QueueSource._(QueueSourceEnum.composer, title: name);
@@ -494,9 +536,12 @@ class QueueSource extends QueueSourceBase<QueueSourceEnum> {
   static QueueSource? fromJson(dynamic value) {
     String? sourceString;
     String? title;
+    AlbumIdentifierWrapper? albumIdentifier;
     if (value is Map) {
       sourceString = value['s'];
       title = value['t'];
+      final albumIdentifierMap = value['a'];
+      if (albumIdentifierMap is Map) albumIdentifier = AlbumIdentifierWrapper.fromMap(albumIdentifierMap.cast());
     } else if (value is String) {
       sourceString = value;
     }
@@ -504,7 +549,7 @@ class QueueSource extends QueueSourceBase<QueueSourceEnum> {
     if (sourceString != null) {
       final v = QueueSourceEnum.values.getEnum(sourceString);
       if (v != null) {
-        return QueueSource._(v, title: title);
+        return QueueSource._(v, title: title, albumIdentifier: albumIdentifier);
       }
     }
 
@@ -513,26 +558,28 @@ class QueueSource extends QueueSourceBase<QueueSourceEnum> {
 
   @override
   dynamic toJson() {
-    if (title == null) {
+    final albumIdentifier = this.albumIdentifier;
+    if (title == null && albumIdentifier == null) {
       return s.name;
     }
     return {
       't': title,
       's': s.name,
+      if (albumIdentifier != null) 'a': albumIdentifier.toMap(),
     };
   }
 
   @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
-    return other is QueueSource && other.s == s && other.title == title;
+    return other is QueueSource && other.s == s && other.title == title && other.albumIdentifier == albumIdentifier;
   }
 
   @override
-  int get hashCode => s.hashCode ^ title.hashCode;
+  int get hashCode => s.hashCode ^ title.hashCode ^ albumIdentifier.hashCode;
 
   @override
-  String toString() => 'QueueSource(s: $s, title: $title)';
+  String toString() => 'QueueSource(s: $s, title: $title, albumIdentifier: $albumIdentifier)';
 }
 
 class QueueSourceYoutubeID extends QueueSourceBase<QueueSourceYoutubeIDEnum> {
@@ -540,6 +587,8 @@ class QueueSourceYoutubeID extends QueueSourceBase<QueueSourceYoutubeIDEnum> {
   bool get canHaveDuplicates => s.canHaveDuplicates;
   @override
   bool get supportResuming => s.supportResuming && QueueSourceBase.resumingEnabled;
+  @override
+  bool get tracksLatestPlayed => s.supportResuming && (s.hasLastPlayedSort || QueueSourceBase.resumingEnabled);
   @override
   String toText() => s.toText();
 
@@ -790,6 +839,8 @@ enum QueueInsertionType {
   algorithmDiscoverDate,
   algorithmTimeRange,
   mix,
+  advancedPlay,
+  advancedShuffle,
   ;
 
   int? get recommendedSampleCount => switch (this) {
@@ -805,20 +856,6 @@ enum QueueInsertionType {
     QueueInsertionType.algorithmTimeRange => 7,
     _ => null,
   };
-}
-
-enum InsertionSortingType {
-  /// random sort
-  random,
-
-  /// total listen count
-  listenCount,
-
-  /// sort by user rating
-  rating,
-
-  /// default implementation. can be slected listens count or no sorting.
-  none,
 }
 
 enum LocalVideoMatchingType {
@@ -839,6 +876,7 @@ enum HomePageItems {
   recentArtists,
   topRecentAlbums,
   topRecentArtists,
+  pinnedPlaylists,
 }
 
 enum MixesItems {
@@ -1163,6 +1201,28 @@ enum ReplayGainType {
     }
     return newList;
   }
+}
+
+enum SubpageInfoStyle {
+  compact,
+  banner,
+  heroBanner,
+  overlay,
+  blurBackdrop,
+}
+
+enum ArtworkCollageStyle {
+  grid(4),
+  denseGrid(16),
+  mosaic(6),
+  fanStack(5),
+  flow(7),
+  stack(4),
+  collage(3),
+  ;
+
+  final int maxImages;
+  const ArtworkCollageStyle(this.maxImages);
 }
 
 enum LibraryImageSource {

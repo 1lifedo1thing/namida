@@ -1234,9 +1234,9 @@ class _ExtrasFlagsOptions extends StatelessWidget {
       (e) => NamidaPopupItem(
         icon: Broken.cd,
         title: e.name,
-        selected: e == settings.extra.preferredSearchType.value,
+        selected: e == settings.preferredSearchType.value,
         onTap: () {
-          settings.extra.preferredSearchType.save(e);
+          settings.preferredSearchType.save(e);
           onSave?.call();
         },
       ),
@@ -1292,6 +1292,8 @@ class _ExtrasFlagsOptions extends StatelessWidget {
                     subtitle: "${lang.performanceNote}.\nMight affect battery usage.",
                   ),
                 ),
+              const _SubpageInfoStyleTile(),
+              const _ArtworkCollageStyleTile(),
               // ObxO(
               //   rx: settings.extra.reduceAnimations,
               //   builder: (context, reduceAnimations) => CustomSwitchListTile(
@@ -1304,11 +1306,11 @@ class _ExtrasFlagsOptions extends StatelessWidget {
               // ),
               if (NamidaFeaturesVisibility.mediaWaveHaptic)
                 ObxO(
-                  rx: settings.extra.mediaWaveHaptic,
+                  rx: settings.mediaWaveHaptic,
                   builder: (context, mediaWaveHaptic) => CustomSwitchListTile(
                     icon: Broken.watch_status,
                     value: mediaWaveHaptic ?? false,
-                    onChanged: (isTrue) => settings.extra.mediaWaveHaptic.save(!isTrue),
+                    onChanged: (isTrue) => settings.mediaWaveHaptic.save(!isTrue),
                     title: 'media_wave_haptic'.toUpperCase(),
                     subtitle: 'Haptic feedback following the rhythm.\nMight affect battery usage.',
                   ),
@@ -1316,17 +1318,17 @@ class _ExtrasFlagsOptions extends StatelessWidget {
               divider,
               if (NamidaFeaturesVisibility.smoothScrolling)
                 ObxO(
-                  rx: settings.extra.smoothScrolling,
+                  rx: settings.smoothScrolling,
                   builder: (context, smoothScrolling) => CustomSwitchListTile(
                     icon: Broken.coin,
                     rotateIcon: 2,
                     value: smoothScrolling ?? true,
-                    onChanged: (isTrue) => settings.extra.smoothScrolling.save(!isTrue),
+                    onChanged: (isTrue) => settings.smoothScrolling.save(!isTrue),
                     title: 'smooth_scrolling'.toUpperCase(),
                   ),
                 ),
               ObxO(
-                rx: settings.extra.scrollbarThumbLabel,
+                rx: settings.scrollbarThumbLabel,
                 builder: (context, scrollbarThumbLabel) => CustomSwitchListTile(
                   leading: const StackedIcon(
                     baseIcon: Broken.row_vertical,
@@ -1334,13 +1336,13 @@ class _ExtrasFlagsOptions extends StatelessWidget {
                     secondaryIconSize: 12.0,
                   ),
                   value: scrollbarThumbLabel ?? false,
-                  onChanged: (isTrue) => settings.extra.scrollbarThumbLabel.save(!isTrue),
+                  onChanged: (isTrue) => settings.scrollbarThumbLabel.save(!isTrue),
                   title: 'scrollbar_thumb_label'.toUpperCase(),
                   subtitle: 'show the current letter/section next to the scrollbar while dragging it',
                 ),
               ),
               ObxO(
-                rx: settings.extra.enhancedDragToScroll,
+                rx: settings.enhancedDragToScroll,
                 builder: (context, enhancedDragToScroll) => CustomSwitchListTile(
                   leading: const StackedIcon(
                     baseIcon: Broken.row_vertical,
@@ -1348,13 +1350,13 @@ class _ExtrasFlagsOptions extends StatelessWidget {
                     secondaryIconSize: 12.0,
                   ),
                   value: enhancedDragToScroll ?? true,
-                  onChanged: (isTrue) => settings.extra.enhancedDragToScroll.save(!isTrue),
+                  onChanged: (isTrue) => settings.enhancedDragToScroll.save(!isTrue),
                   title: 'enhanced_drag_to_scroll'.toUpperCase(),
                   subtitle: 'drag anywhere on the scroll track to scroll',
                 ),
               ),
               ObxO(
-                rx: settings.extra.tapToScroll,
+                rx: settings.tapToScroll,
                 builder: (context, tapToScroll) => CustomSwitchListTile(
                   leading: const StackedIcon(
                     baseIcon: Broken.row_vertical,
@@ -1362,7 +1364,7 @@ class _ExtrasFlagsOptions extends StatelessWidget {
                     secondaryIconSize: 12.0,
                   ),
                   value: tapToScroll ?? false,
-                  onChanged: (isTrue) => settings.extra.tapToScroll.save(!isTrue),
+                  onChanged: (isTrue) => settings.tapToScroll.save(!isTrue),
                   title: 'tap_to_scroll'.toUpperCase(),
                   subtitle: 'tap anywhere on the scroll track to scroll',
                 ),
@@ -1417,11 +1419,11 @@ class _ExtrasFlagsOptions extends StatelessWidget {
                 ),
               ),
               ObxO(
-                rx: settings.extra.resumeUIEnabled,
+                rx: settings.resumeUIEnabled,
                 builder: (context, resumeUIEnabled) => CustomSwitchListTile(
                   icon: Broken.play_circle,
                   value: resumeUIEnabled,
-                  onChanged: (isTrue) => settings.extra.resumeUIEnabled.save(!isTrue),
+                  onChanged: (isTrue) => settings.resumeUIEnabled.save(!isTrue),
                   title: 'resume_ui'.toUpperCase(),
                   subtitle: 'shows the resume button & highlights the last played item in pages like albums & playlists',
                 ),
@@ -1444,7 +1446,7 @@ class _ExtrasFlagsOptions extends StatelessWidget {
                   trailing: NamidaPopupWrapper(
                     childrenDefault: _getSearchTypeChildren,
                     child: ObxO(
-                      rx: settings.extra.preferredSearchType,
+                      rx: settings.preferredSearchType,
                       builder: (context, type) => Text(
                         type.name,
                         style: context.textTheme.displayMedium,
@@ -1455,21 +1457,21 @@ class _ExtrasFlagsOptions extends StatelessWidget {
                 ),
               ),
               ObxO(
-                rx: settings.extra.ytStyleButtonSwitcher,
+                rx: settings.ytStyleButtonSwitcher,
                 builder: (context, ytStyleButtonSwitcher) => CustomSwitchListTile(
                   icon: Broken.video_octagon,
                   value: ytStyleButtonSwitcher ?? false,
-                  onChanged: (isTrue) => settings.extra.ytStyleButtonSwitcher.save(!isTrue),
+                  onChanged: (isTrue) => settings.ytStyleButtonSwitcher.save(!isTrue),
                   title: 'yt_style_player_button_switcher'.toUpperCase(),
                   subtitle: 'shows a button to switch between local style player and youtube style player',
                 ),
               ),
               ObxO(
-                rx: settings.extra.keepVideoFrameOnSwitch,
+                rx: settings.keepVideoFrameOnSwitch,
                 builder: (context, keepVideoFrameOnSwitch) => CustomSwitchListTile(
                   icon: Broken.video_play,
                   value: keepVideoFrameOnSwitch ?? false,
-                  onChanged: (isTrue) => settings.extra.keepVideoFrameOnSwitch.save(!isTrue),
+                  onChanged: (isTrue) => settings.keepVideoFrameOnSwitch.save(!isTrue),
                   title: 'keep_video_frame_on_switch'.toUpperCase(),
                   subtitle: 'Keep the last video frame while switching to an item whose video is already downloaded, instead of flashing the artwork in between.',
                 ),
@@ -1501,6 +1503,188 @@ class _ExtrasFlagsOptions extends StatelessWidget {
                 },
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SubpageInfoStyleTile extends StatelessWidget {
+  const _SubpageInfoStyleTile();
+
+  static const _kTypes = [MediaType.album, MediaType.artist, MediaType.genre, MediaType.playlist];
+
+  void _openDialog() {
+    NamidaNavigator.inst.navigateDialog(
+      dialog: CustomBlurryDialog(
+        title: 'Subpage Header Style',
+        normalTitleStyle: true,
+        icon: Broken.gallery,
+        actions: const [
+          DoneButton(),
+        ],
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final type in _kTypes) _SubpageInfoStyleRow(type: type),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ObxO(
+      rx: settings.subpageInfoStyles,
+      builder: (context, styles) {
+        final customizedCount = styles.values.where((style) => style != SubpageInfoStyle.compact).length;
+        return CustomListTile(
+          icon: Broken.gallery,
+          title: 'subpage_header_style'.toUpperCase(),
+          subtitle: 'Album, artist, genre & playlist pages.',
+          trailingText: '$customizedCount',
+          onTap: _openDialog,
+        );
+      },
+    );
+  }
+}
+
+class _SubpageInfoStyleRow extends StatelessWidget {
+  final MediaType type;
+
+  const _SubpageInfoStyleRow({
+    required this.type,
+  });
+
+  void _save(SubpageInfoStyle style) {
+    settings.subpageInfoStyles.update((styles) => styles[type] = style);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = context.textTheme;
+    return ObxO(
+      rx: settings.subpageInfoStyles,
+      builder: (context, styles) {
+        final current = styles[type] ?? SubpageInfoStyle.compact;
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 6.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6.0),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        type.toText(),
+                        style: textTheme.displayMedium,
+                      ),
+                    ),
+                    Text(
+                      current.toText(),
+                      style: textTheme.displaySmall,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 6.0),
+              Row(
+                children: [
+                  for (final style in SubpageInfoStyle.values) ...[
+                    if (style != SubpageInfoStyle.values.first) const SizedBox(width: 4.0),
+                    Expanded(
+                      child: _StyleOptionCard(
+                        icon: style.toIcon(),
+                        title: style.toText(),
+                        active: style == current,
+                        onTap: () => _save(style),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _StyleOptionCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final bool active;
+  final VoidCallback onTap;
+
+  const _StyleOptionCard({
+    required this.icon,
+    required this.title,
+    required this.active,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = context.theme;
+    final tileAlpha = context.isDarkMode ? 5 : 20;
+    final onSurfaceTint = theme.colorScheme.onSurface.withAlpha(tileAlpha);
+    final inactiveColor = Color.alphaBlend(onSurfaceTint, theme.cardTheme.color!);
+    final bgColor = active ? theme.colorScheme.secondaryContainer : inactiveColor;
+    return NamidaTooltip(
+      message: () => title,
+      child: NamidaInkWell(
+        borderRadius: 10.0,
+        padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 10.0),
+        animationDurationMS: 200,
+        bgColor: bgColor,
+        onTap: onTap,
+        child: Icon(
+          icon,
+          size: 20.0,
+        ),
+      ),
+    );
+  }
+}
+
+class _ArtworkCollageStyleTile extends StatelessWidget {
+  const _ArtworkCollageStyleTile();
+
+  static Iterable<NamidaPopupItem> _getChildren() {
+    final current = settings.artworkCollageStyle.value;
+    return ArtworkCollageStyle.values.map(
+      (e) => NamidaPopupItem(
+        icon: e.toIcon(),
+        title: e.toText(),
+        selected: e == current,
+        onTap: () => settings.artworkCollageStyle.save(e),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return NamidaPopupWrapper(
+      childrenDefault: _getChildren,
+      child: CustomListTile(
+        icon: Broken.picture_frame,
+        title: 'artwork_collage_style'.toUpperCase(),
+        subtitle: 'Covers built from several tracks.',
+        trailing: NamidaPopupWrapper(
+          childrenDefault: _getChildren,
+          child: ObxO(
+            rx: settings.artworkCollageStyle,
+            builder: (context, style) => Text(
+              style.toText(),
+              style: context.textTheme.displayMedium,
+              textAlign: TextAlign.end,
+            ),
           ),
         ),
       ),

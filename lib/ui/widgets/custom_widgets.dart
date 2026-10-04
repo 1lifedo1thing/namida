@@ -32,14 +32,12 @@ import 'package:namida/class/track.dart';
 import 'package:namida/class/version_wrapper.dart';
 import 'package:namida/controller/connectivity.dart';
 import 'package:namida/controller/current_color.dart';
-import 'package:namida/controller/history_controller.dart';
 import 'package:namida/controller/miniplayer_controller.dart';
 import 'package:namida/controller/navigator_controller.dart';
 import 'package:namida/controller/platform/namida_channel/namida_channel.dart';
 import 'package:namida/controller/platform/shortcuts_manager/shortcuts_manager.dart';
 import 'package:namida/controller/player_controller.dart';
 import 'package:namida/controller/playlist_controller.dart';
-import 'package:namida/controller/search_sort_controller.dart';
 import 'package:namida/controller/settings_controller.dart';
 import 'package:namida/controller/shortcuts_controller.dart';
 import 'package:namida/controller/time_ago_controller.dart';
@@ -60,13 +58,17 @@ import 'package:namida/core/utils.dart';
 import 'package:namida/packages/scroll_physics_modified.dart';
 import 'package:namida/packages/smooth_scroll_controller.dart';
 import 'package:namida/ui/dialogs/edit_tags_dialog.dart';
+import 'package:namida/ui/dialogs/general_popup_dialog.dart';
+import 'package:namida/ui/dialogs/queue_insertion_dialogs.dart';
 import 'package:namida/ui/pages/about_page.dart';
 import 'package:namida/ui/pages/settings_page.dart';
 import 'package:namida/ui/widgets/animated_widgets.dart';
 import 'package:namida/ui/widgets/custom_tooltip.dart';
 import 'package:namida/ui/widgets/effects/effects.dart';
+import 'package:namida/ui/widgets/library/multi_artwork_container.dart';
 import 'package:namida/ui/widgets/library/track_tile.dart';
 import 'package:namida/ui/widgets/namida_markdown.dart';
+import 'package:namida/ui/widgets/network_artwork.dart';
 import 'package:namida/ui/widgets/popup_wrapper.dart';
 import 'package:namida/ui/widgets/settings/extra_settings.dart';
 import 'package:namida/ui/widgets/zoomable_image.dart';
@@ -192,6 +194,7 @@ class CustomSwitchListTile extends StatelessWidget {
   final Color? bgColor;
   final bool dense;
   final bool extraDense;
+  final Widget? trailingBeforeSwitch;
 
   const CustomSwitchListTile({
     super.key,
@@ -210,6 +213,7 @@ class CustomSwitchListTile extends StatelessWidget {
     this.bgColor,
     this.dense = true,
     this.extraDense = false,
+    this.trailingBeforeSwitch,
   });
 
   @override
@@ -228,16 +232,17 @@ class CustomSwitchListTile extends StatelessWidget {
       onTap: () => onChanged(value),
       dense: dense,
       extraDense: extraDense,
-      trailing: IgnorePointer(
-        child: FittedBox(
-          child: Row(
-            children: [
-              const SizedBox(
-                width: 12.0,
-              ),
-              CustomSwitch(active: value, passedColor: passedColor),
-            ],
-          ),
+      trailing: FittedBox(
+        child: Row(
+          children: [
+            ?trailingBeforeSwitch,
+            const SizedBox(
+              width: 12.0,
+            ),
+            IgnorePointer(
+              child: CustomSwitch(active: value, passedColor: passedColor),
+            ),
+          ],
         ),
       ),
     );
@@ -2628,7 +2633,7 @@ class NamidaLocalLikeButton extends StatelessWidget {
         disabledColor: color,
         isLiked: favouritesPlaylist.isSubItemFavourite(track),
         removeConfirmationAction: lang.removeFromFavourites,
-        onTap: (isLiked) async => PlaylistController.inst.favouriteButtonOnPressed(track),
+        onTap: (isLiked) async => PlaylistController.inst.favouriteButtonOnPressed(track, deferListsSorting: true),
       ),
     );
   }
@@ -2883,26 +2888,36 @@ class _PartyPaletteBox extends StatelessWidget {
 
 class SubpageInfoContainer extends StatelessWidget {
   final double maxWidth;
+  final MediaType type;
   final String title;
   final String subtitle;
   final String thirdLineText;
+  final String description;
   final double? height;
   final double topPadding;
   final double bottomPadding;
   final Widget Function(double size) imageBuilder;
+  final Widget Function(double width, double height) bannerBuilder;
   final Iterable<Selectable> Function() tracksFn;
   final QueueSource source;
   final String heroTag;
+  final VoidCallback? onOpenMenu;
+  final CustomArtworkManager? customArtworkManager;
 
   const SubpageInfoContainer({
     super.key,
     required this.maxWidth,
+    required this.type,
     required this.title,
     required this.subtitle,
     this.thirdLineText = '',
+    this.description = '',
     this.height,
     required this.imageBuilder,
+    required this.bannerBuilder,
     required this.tracksFn,
+    this.onOpenMenu,
+    this.customArtworkManager,
     this.topPadding = 16.0,
     this.bottomPadding = 16.0,
     required this.source,
@@ -2910,427 +2925,458 @@ class SubpageInfoContainer extends StatelessWidget {
   });
 
   void _openAdvancedShuffleDialog() {
-    return openAdvancedShuffleDialog(tracksFn, source);
+    return showAdvancedShuffleDialog(tracksFn, source);
   }
 
   void _openAdvancedPlayDialog() {
-    return openAdvancedPlayDialog(tracksFn, source);
-  }
-
-  static void openAdvancedShuffleDialog(Iterable<Selectable> Function() tracksFn, QueueSourceBase source) {
-    final minimumCounter = _MinimumCounter(tracksFn);
-    final minimumSortRx = SortType.rating.obs;
-    final minimumValueRx = 0.obs;
-    final countRx = Rxn<int>();
-
-    List<Selectable> buildPool() {
-      final minimum = _TrackMinimum.of(minimumSortRx.value)!;
-      return minimum.filter(tracksFn(), minimumValueRx.value);
-    }
-
-    void shufflePlay() {
-      final pool = buildPool();
-      final count = countRx.value;
-      if (settings.shuffleExcludeCount.value > 0) {
-        final queue = _buildShuffledQueue(pool, count);
-        Player.inst.playOrPause(0, queue, source);
-      } else {
-        final tracks = count == null || count >= pool.length ? pool : pool.getRandomSample(count);
-        Player.inst.playOrPause(0, tracks, source, shuffle: true);
-      }
-    }
-
-    List<Selectable> buildShuffledQueue() => _buildShuffledQueue(buildPool(), countRx.value);
-
-    int poolCountR() {
-      final minimumSort = minimumSortRx.valueR;
-      final minimum = _TrackMinimum.of(minimumSort)!;
-      return minimumCounter.countAtLeast(minimumSort, minimum, minimumValueRx.valueR);
-    }
-
-    Iterable<Widget> buildMinimumSortChoices() => _TrackMinimum.supportedSorts.map(
-      (sort) => SmallListTile(
-        borderRadius: 12.0,
-        visualDensity: const VisualDensity(horizontal: -4.0, vertical: -4.0),
-        title: sort.toText(),
-        trailingIcon: sort.toIcon(),
-        active: sort == minimumSortRx.value,
-        onTap: () {
-          minimumSortRx.value = sort;
-          minimumValueRx.value = _TrackMinimum.of(sort)!.min;
-          NamidaNavigator.inst.popMenu();
-        },
-      ),
-    );
-
-    Track? playAfterTrack;
-    if (Player.inst.currentItem.value is Selectable && Player.inst.latestInsertedIndex > Player.inst.currentIndex.value) {
-      playAfterTrack = (Player.inst.currentQueue.value[Player.inst.latestInsertedIndex] as Selectable).track;
-    }
-
-    NamidaNavigator.inst.navigateDialog(
-      onDisposing: () {
-        minimumSortRx.close();
-        minimumValueRx.close();
-        countRx.close();
-      },
-      dialog: CustomBlurryDialog(
-        title: lang.shuffle,
-        actions: const [
-          DoneButton(),
-        ],
-        child: Column(
-          children: [
-            const SizedBox(height: 32.0),
-            Obx(
-              (context) {
-                final poolCount = poolCountR();
-                final count = countRx.valueR;
-                final effectiveCount = count == null ? poolCount : count.withMaximum(poolCount);
-                final isAll = effectiveCount == poolCount;
-                return NamidaWheelSlider(
-                  initValue: effectiveCount - 1,
-                  min: 0,
-                  max: (poolCount - 1).withMinimum(1),
-                  onValueChanged: (val) {
-                    final newCount = val + 1;
-                    countRx.value = newCount >= poolCount ? null : newCount;
-                  },
-                  text: isAll ? lang.all : effectiveCount.displayTrackKeyword,
-                  topText: lang.tracks,
-                  textPadding: 8.0,
-                );
-              },
-            ),
-            const SizedBox(height: 12.0),
-            Obx(
-              (context) {
-                final minimumSort = minimumSortRx.valueR;
-                return _MinimumTile(
-                  sort: minimumSort,
-                  minimum: _TrackMinimum.of(minimumSort)!,
-                  value: minimumValueRx.valueR,
-                  matchingCount: poolCountR(),
-                  onChanged: (value) => minimumValueRx.value = value,
-                  sortChoices: buildMinimumSortChoices,
-                );
-              },
-            ),
-            const _ShuffleExclusionTile(),
-            CustomListTile(
-              icon: Broken.shuffle,
-              title: lang.shuffle,
-              onTap: () {
-                shufflePlay();
-                NamidaNavigator.inst.closeDialog();
-              },
-            ),
-            CustomListTile(
-              icon: Broken.next,
-              title: "${lang.playNext} (${lang.shuffle})",
-              onTap: () {
-                Player.inst.addToQueue(buildShuffledQueue(), insertNext: true);
-                NamidaNavigator.inst.closeDialog();
-              },
-            ),
-            if (playAfterTrack != null)
-              CustomListTile(
-                icon: Broken.hierarchy_square,
-                title: "${lang.playAfter} (${lang.shuffle})",
-                subtitle: [playAfterTrack.artistsList.firstOrNull, playAfterTrack.title].joinText(separator: ' - '),
-                onTap: () {
-                  Player.inst.addToQueue(buildShuffledQueue(), insertAfterLatest: true);
-                  NamidaNavigator.inst.closeDialog();
-                },
-              ),
-            CustomListTile(
-              icon: Broken.play_cricle,
-              title: "${lang.playLast} (${lang.shuffle})",
-              onTap: () {
-                Player.inst.addToQueue(buildShuffledQueue());
-                NamidaNavigator.inst.closeDialog();
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// shuffled, with the tracks excluded by [settings.shuffleExcludeCount] going last, only reached when [count] exceeds the rest.
-  static List<Selectable> _buildShuffledQueue(List<Selectable> pool, int? count) {
-    final poolLength = pool.length;
-    final requiredCount = count == null ? poolLength : count.withMaximum(poolLength);
-    final excludeCount = settings.shuffleExcludeCount.value.withMaximum(poolLength);
-    if (excludeCount <= 0) {
-      final sample = pool.getRandomSample(requiredCount);
-      if (requiredCount < poolLength) sample.shuffle();
-      return sample;
-    }
-
-    final sortKey = SearchSortController.inst.getTracksSortingComparables(settings.shuffleExcludeSort.value);
-    final indices = List<int>.generate(poolLength, (i) => i, growable: false);
-    final orderedIndices = indices.lazySortedByAltsPrecomputed([(i) => sortKey(pool[i].track)], reverse: settings.shuffleExcludeSortReverse.value);
-    final isExcluded = List<bool>.filled(poolLength, false);
-    for (final i in orderedIndices.take(excludeCount)) {
-      isExcluded[i] = true;
-    }
-
-    final included = <Selectable>[];
-    final excluded = <Selectable>[];
-    for (int i = 0; i < poolLength; i++) {
-      final item = pool[i];
-      if (isExcluded[i]) {
-        excluded.add(item);
-      } else {
-        included.add(item);
-      }
-    }
-
-    included.shuffle();
-    final missingCount = requiredCount - included.length;
-    if (missingCount <= 0) {
-      included.length = requiredCount;
-      return included;
-    }
-    excluded.shuffle();
-    included.addAll(excluded.take(missingCount));
-    return included;
-  }
-
-  static void openAdvancedPlayDialog(Iterable<Selectable> Function() tracksFn, QueueSourceBase source) {
-    final minimumCounter = _MinimumCounter(tracksFn);
-
-    List<Selectable> buildTracks() {
-      final sorts = settings.advancedPlaySorts.value;
-      final isReverse = settings.advancedPlaySortReverse.value;
-      final primarySort = sorts.firstOrNull;
-      final minimum = primarySort == null ? null : _TrackMinimum.of(primarySort);
-      final allTracks = tracksFn();
-      List<Selectable> tracks;
-      if (minimum == null) {
-        tracks = allTracks.toList();
-      } else {
-        final minimumValue = settings.advancedPlayMinimums.value[primarySort] ?? minimum.min;
-        tracks = minimum.filter(allTracks, minimumValue);
-      }
-      if (sorts.isEmpty) return isReverse ? tracks.reversed.toList() : tracks;
-      final comparables = sorts.map(_selectableSortingComparable).toFixedList();
-      tracks.sortByAltsPrecomputed(comparables, reverse: isReverse);
-      return tracks;
-    }
-
-    Track? playAfterTrack;
-    if (Player.inst.currentItem.value is Selectable && Player.inst.latestInsertedIndex > Player.inst.currentIndex.value) {
-      playAfterTrack = (Player.inst.currentQueue.value[Player.inst.latestInsertedIndex] as Selectable).track;
-    }
-
-    NamidaNavigator.inst.navigateDialog(
-      dialog: CustomBlurryDialog(
-        title: lang.play,
-        actions: const [
-          DoneButton(),
-        ],
-        child: Column(
-          children: [
-            const SizedBox(height: 12.0),
-            const _AdvancedPlaySortTile(),
-            Obx(
-              (context) {
-                final primarySort = settings.advancedPlaySorts.valueR.firstOrNull;
-                final minimum = primarySort == null ? null : _TrackMinimum.of(primarySort);
-                if (primarySort == null || minimum == null) return const SizedBox();
-                final value = settings.advancedPlayMinimums.valueR[primarySort] ?? minimum.min;
-                return _MinimumTile(
-                  sort: primarySort,
-                  minimum: minimum,
-                  value: value,
-                  matchingCount: minimumCounter.countAtLeast(primarySort, minimum, value),
-                  onChanged: (value) => settings.advancedPlayMinimums.update((minimums) => minimums[primarySort] = value),
-                  sortChoices: null,
-                );
-              },
-            ),
-            CustomListTile(
-              icon: Broken.play,
-              title: lang.play,
-              onTap: () {
-                Player.inst.playOrPause(0, buildTracks(), source);
-                NamidaNavigator.inst.closeDialog();
-              },
-            ),
-            CustomListTile(
-              icon: Broken.shuffle,
-              title: lang.shuffle,
-              onTap: () {
-                Player.inst.playOrPause(0, buildTracks(), source, shuffle: true);
-                NamidaNavigator.inst.closeDialog();
-              },
-            ),
-            CustomListTile(
-              icon: Broken.next,
-              title: lang.playNext,
-              onTap: () {
-                Player.inst.addToQueue(buildTracks(), insertNext: true);
-                NamidaNavigator.inst.closeDialog();
-              },
-            ),
-            if (playAfterTrack != null)
-              CustomListTile(
-                icon: Broken.hierarchy_square,
-                title: lang.playAfter,
-                subtitle: [playAfterTrack.artistsList.firstOrNull, playAfterTrack.title].joinText(separator: ' - '),
-                onTap: () {
-                  Player.inst.addToQueue(buildTracks(), insertAfterLatest: true);
-                  NamidaNavigator.inst.closeDialog();
-                },
-              ),
-            CustomListTile(
-              icon: Broken.play_cricle,
-              title: lang.playLast,
-              onTap: () {
-                Player.inst.addToQueue(buildTracks());
-                NamidaNavigator.inst.closeDialog();
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  static Comparable Function(Selectable e) _selectableSortingComparable(SortType sort) {
-    final trackComparable = SearchSortController.inst.getTracksSortingComparables(sort);
-    return (e) => trackComparable(e.track);
+    return showAdvancedPlayDialog(tracksFn, source);
   }
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = context.textTheme;
+    final theme = context.theme;
+    final textTheme = theme.textTheme;
     const textHeroEnabled = false;
     const pauseHero = 'kururing';
     final showSubpageInfoAtSide = Dimensions.inst.showSubpageInfoAtSideContext(context);
+    final subpageInfoType = type.toSubpageInfoType();
 
-    return Container(
-      alignment: Alignment.topCenter,
-      padding: const EdgeInsets.only(top: 12.0, left: 12.0, right: 12.0, bottom: 4.0),
-      margin: EdgeInsets.only(top: topPadding, bottom: bottomPadding),
-      height: height,
-      child: LayoutWidthHeightProvider(
-        builder: (context, maxWidth, maxHeight) {
-          maxWidth = maxWidth.withMaximum(this.maxWidth);
+    return ObxO(
+      rx: settings.subpageInfoStyles,
+      builder: (context, styles) {
+        final style = styles[subpageInfoType] ?? SubpageInfoStyle.compact;
+        final isBanner = style == SubpageInfoStyle.banner;
+        final isHeroBanner = style == SubpageInfoStyle.heroBanner;
+        final isSingleArtworkType = subpageInfoType == MediaType.album || subpageInfoType == MediaType.artist;
+        final isOverlay = style == SubpageInfoStyle.overlay;
+        final isBlurBackdrop = style == SubpageInfoStyle.blurBackdrop;
+        final isImageFullWidth = showSubpageInfoAtSide || isOverlay || isHeroBanner;
+        final isEdgeToEdge = isBanner || isHeroBanner;
+        final contentPadding = isEdgeToEdge ? EdgeInsets.zero : const EdgeInsets.only(top: 12.0, left: 12.0, right: 12.0, bottom: 4.0);
+        final topMargin = style == SubpageInfoStyle.compact ? topPadding : 0.0;
 
-          double imageMaxWidth;
-          double infoMaxWidth;
+        Widget content = Padding(
+          padding: contentPadding,
+          child: LayoutWidthHeightProvider(
+            builder: (context, maxWidth, maxHeight) {
+              maxWidth = maxWidth.withMaximum(this.maxWidth);
 
-          if (showSubpageInfoAtSide) {
-            imageMaxWidth = maxWidth;
-            infoMaxWidth = maxWidth;
-          } else {
-            imageMaxWidth = (maxWidth * 0.4).withMaximum(maxHeight * 0.3);
-            infoMaxWidth = maxWidth - imageMaxWidth;
-          }
+              double imageMaxWidth;
+              double infoMaxWidth;
+              double thumbnailSize = 0.0;
+              double bannerHeight = 0.0;
+              bool isBannerTextBelow = false;
 
-          final imageWidget = imageBuilder(imageMaxWidth);
+              if (isHeroBanner) {
+                imageMaxWidth = maxWidth;
+                infoMaxWidth = maxWidth - 24.0;
+              } else if (isBanner) {
+                bannerHeight = (maxWidth * 0.34).clampDouble(96.0, maxHeight * 0.25);
+                final besideThumbnailSize = (maxWidth * _kBannerThumbnailPercentage).clampDouble(88.0, 176.0);
+                final besideInfoWidth = maxWidth - besideThumbnailSize - _kBannerThumbnailInsets;
+                isBannerTextBelow = showSubpageInfoAtSide || besideInfoWidth < _kBannerMinBesideTextWidth;
+                thumbnailSize = isBannerTextBelow ? (maxWidth * _kBannerStackedThumbnailPercentage).clampDouble(88.0, 240.0) : besideThumbnailSize;
+                imageMaxWidth = thumbnailSize;
+                infoMaxWidth = isBannerTextBelow ? maxWidth - 24.0 : besideInfoWidth;
+              } else if (showSubpageInfoAtSide) {
+                imageMaxWidth = maxWidth;
+                infoMaxWidth = maxWidth;
+              } else if (isImageFullWidth) {
+                imageMaxWidth = maxWidth.withMaximum(maxHeight * 0.55);
+                infoMaxWidth = maxWidth;
+              } else {
+                imageMaxWidth = (maxWidth * _kThumbnailWidthPercentage).withMaximum(maxHeight * _kThumbnailHeightPercentage);
+                infoMaxWidth = maxWidth - imageMaxWidth;
+              }
 
-          double getFontSize(double p, double min, double max) => ((infoMaxWidth * 0.2).withMaximum(maxHeight * 0.1) * p).clampDouble(min, max);
+              final imageWidget = ArtworkContainerScope(
+                bareForFan: true,
+                bareFanScale: isImageFullWidth ? 1.0 : _kThumbnailFanScale,
+                frameless: isHeroBanner,
+                opensInFullscreen: true,
+                child: imageBuilder(imageMaxWidth),
+              );
 
-          final textAndButtonsWidget = Column(
-            mainAxisAlignment: MainAxisAlignment.start,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SizedBox(height: 18.0),
-              Padding(
-                padding: const EdgeInsets.only(left: 14.0),
-                child: NamidaHero(
-                  enabled: textHeroEnabled,
-                  tag: '${pauseHero}line1_$heroTag',
-                  child: showSubpageInfoAtSide
-                      ? Text(
-                          title,
-                          style: textTheme.displayLarge?.copyWith(fontSize: getFontSize(0.5, 10.0, 32.0)),
-                          softWrap: true,
-                        )
-                      : Text(
-                          title,
-                          style: textTheme.displayLarge?.copyWith(fontSize: getFontSize(0.4, 10.0, 32.0)),
-                          maxLines: 1,
-                          softWrap: false,
+              final isTextOverImage = (isOverlay || isHeroBanner) && !showSubpageInfoAtSide;
+              final fontBaseWidth = isTextOverImage ? maxWidth * _kOverlayFontWidthPercentage : infoMaxWidth;
+              final fontScale = isBannerTextBelow ? _kBannerStackedFontScale : 1.0;
+              double getFontSize(double p, double min, double max) => ((fontBaseWidth * 0.2).withMaximum(maxHeight * 0.1) * p * fontScale).clampDouble(min, max);
+
+              final int? titleMaxLines = isTextOverImage || isEdgeToEdge
+                  ? 2
+                  : isImageFullWidth
+                  ? null
+                  : 1;
+              final titleFontSize = getFontSize(isImageFullWidth || isBannerTextBelow ? 0.5 : 0.4, 10.0, 32.0);
+              final buttonsMaxWidth = isEdgeToEdge ? maxWidth - 24.0 : maxWidth;
+              final hasRoomForExtraButtons = buttonsMaxWidth >= _kExtraButtonsMinWidth;
+              final onOpenMenu = this.onOpenMenu;
+              final customArtworkManager = hasRoomForExtraButtons ? this.customArtworkManager : null;
+
+              final isCentered = isBannerTextBelow;
+              final textCrossAlignment = isCentered ? CrossAxisAlignment.center : CrossAxisAlignment.start;
+              final textAlign = isCentered ? TextAlign.center : TextAlign.start;
+              final textPadding = isCentered ? const EdgeInsets.symmetric(horizontal: 7.0) : const EdgeInsets.only(left: 14.0);
+
+              final textWidget = Column(
+                mainAxisAlignment: MainAxisAlignment.start,
+                crossAxisAlignment: textCrossAlignment,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(height: isBanner ? 6.0 : 18.0),
+                  Padding(
+                    padding: textPadding,
+                    child: NamidaHero(
+                      enabled: textHeroEnabled,
+                      tag: '${pauseHero}line1_$heroTag',
+                      child: Text(
+                        title,
+                        textAlign: textAlign,
+                        style: textTheme.displayLarge?.copyWith(fontSize: titleFontSize),
+                        maxLines: titleMaxLines,
+                        softWrap: titleMaxLines != 1,
+                        overflow: titleMaxLines == null ? null : TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                  if (subtitle.isNotEmpty) ...[
+                    const SizedBox(height: 2.0),
+                    Padding(
+                      padding: textPadding,
+                      child: NamidaHero(
+                        enabled: textHeroEnabled,
+                        tag: '${pauseHero}line2_$heroTag',
+                        child: Text(
+                          subtitle,
+                          textAlign: textAlign,
                           overflow: TextOverflow.ellipsis,
+                          maxLines: 2,
+                          style: textTheme.displayMedium?.copyWith(fontSize: getFontSize(0.28, 10.0, 24.0)),
                         ),
-                ),
-              ),
-              if (subtitle.isNotEmpty) ...[
-                const SizedBox(height: 2.0),
-                Padding(
-                  padding: const EdgeInsets.only(left: 14.0),
-                  child: NamidaHero(
-                    enabled: textHeroEnabled,
-                    tag: '${pauseHero}line2_$heroTag',
-                    child: Text(
-                      subtitle,
-                      overflow: TextOverflow.ellipsis,
-                      maxLines: 2,
-                      style: textTheme.displayMedium?.copyWith(fontSize: getFontSize(0.28, 10.0, 24.0)),
+                      ),
                     ),
-                  ),
-                ),
-              ],
-              if (thirdLineText.isNotEmpty) ...[
-                const SizedBox(height: 2.0),
-                Padding(
-                  padding: const EdgeInsets.only(left: 14.0),
-                  child: NamidaHero(
-                    enabled: textHeroEnabled,
-                    tag: '${pauseHero}line3_$heroTag',
-                    child: Text(
-                      thirdLineText,
-                      overflow: TextOverflow.ellipsis,
-                      maxLines: 1,
-                      style: textTheme.displaySmall?.copyWith(fontSize: getFontSize(0.25, 10.0, 22.0)),
+                  ],
+                  if (thirdLineText.isNotEmpty) ...[
+                    const SizedBox(height: 2.0),
+                    Padding(
+                      padding: textPadding,
+                      child: NamidaHero(
+                        enabled: textHeroEnabled,
+                        tag: '${pauseHero}line3_$heroTag',
+                        child: Text(
+                          thirdLineText,
+                          textAlign: textAlign,
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
+                          style: textTheme.displaySmall?.copyWith(fontSize: getFontSize(0.25, 10.0, 22.0)),
+                        ),
+                      ),
                     ),
+                  ],
+                  if (description.isNotEmpty) ...[
+                    const SizedBox(height: 4.0),
+                    Padding(
+                      padding: textPadding,
+                      child: Text(
+                        description,
+                        textAlign: textAlign,
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 3,
+                        style: textTheme.displaySmall?.copyWith(fontSize: getFontSize(0.22, 10.0, 18.0)),
+                      ),
+                    ),
+                  ],
+                ],
+              );
+
+              final buttonsWidget = _SubpageButtonsRow(
+                maxWidth: buttonsMaxWidth,
+                alignment: isCentered ? Alignment.center : Alignment.centerRight,
+                children: [
+                  NamidaButton(
+                    icon: Broken.shuffle,
+                    tooltip: () => lang.shuffle,
+                    onTap: () => Player.inst.playOrPause(
+                      0,
+                      tracksFn(),
+                      source,
+                      shuffle: true,
+                    ),
+                    onLongPress: _openAdvancedShuffleDialog,
                   ),
-                ),
-              ],
-              const SizedBox(height: 18.0),
-              ConstrainedBox(
-                constraints: BoxConstraints(maxWidth: infoMaxWidth * 0.85),
+                  if (hasRoomForExtraButtons)
+                    NamidaButton(
+                      icon: Broken.next,
+                      tooltip: () => lang.playNext,
+                      onTap: () => Player.inst.addToQueue(tracksFn(), insertNext: true),
+                      onLongPress: _openAdvancedPlayDialog,
+                    ),
+                  NamidaButton(
+                    icon: Broken.play_cricle,
+                    tooltip: () => lang.playLast,
+                    onTap: () => Player.inst.addToQueue(tracksFn()),
+                    onLongPress: _openAdvancedPlayDialog,
+                  ),
+                  if (customArtworkManager != null)
+                    NamidaButton(
+                      icon: Broken.gallery_edit,
+                      tooltip: () => lang.editArtwork,
+                      onTap: customArtworkManager.showEditDialog,
+                    ),
+                  if (onOpenMenu != null)
+                    NamidaButton(
+                      icon: Broken.more,
+                      tooltip: () => lang.more,
+                      onTap: onOpenMenu,
+                    ),
+                ],
+              );
+
+              final textAndButtonsWidget = Column(
+                mainAxisAlignment: MainAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  textWidget,
+                  const SizedBox(height: 18.0),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: buttonsWidget,
+                  ),
+                ],
+              );
+
+              final fittedImageWidget = ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: imageMaxWidth),
                 child: FittedBox(
                   alignment: Alignment.topLeft,
                   fit: BoxFit.scaleDown,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      const SizedBox(width: 6.0),
-                      NamidaButton(
-                        icon: Broken.shuffle,
-                        onTap: () => Player.inst.playOrPause(
-                          0,
-                          tracksFn(),
-                          source,
-                          shuffle: true,
-                        ),
-                        onLongPress: _openAdvancedShuffleDialog,
-                      ),
-                      const SizedBox(width: 6.0),
-                      NamidaButton(
-                        onTap: () => Player.inst.addToQueue(tracksFn()),
-                        icon: Broken.play_cricle,
-                        text: lang.playLast,
-                        onLongPress: _openAdvancedPlayDialog,
-                      ),
-                      const SizedBox(width: 6.0),
-                    ],
-                  ),
+                  child: imageWidget,
                 ),
-              ),
-            ],
-          );
+              );
 
-          return showSubpageInfoAtSide
-              ? Column(
+              if (isBanner) {
+                final bannerWidget = HeroMode(
+                  enabled: false, // -- the thumbnail owns the hero
+                  child: ClipRect(
+                    child: SizedBox(
+                      width: maxWidth,
+                      height: bannerHeight,
+                      child: bannerBuilder(maxWidth, bannerHeight),
+                    ),
+                  ),
+                );
+                final bannerLayoutHeight = bannerHeight - thumbnailSize * _kBannerThumbnailOverlap;
+                final thumbnailAndTextWidget = isBannerTextBelow
+                    ? SizedBox(
+                        width: infoMaxWidth,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            imageWidget,
+                            textWidget,
+                          ],
+                        ),
+                      )
+                    : Row(
+                        children: [
+                          imageWidget,
+                          Expanded(
+                            child: textWidget,
+                          ),
+                        ],
+                      );
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      width: maxWidth,
+                      height: bannerLayoutHeight,
+                      child: OverflowBox(
+                        alignment: Alignment.topCenter,
+                        maxHeight: bannerHeight,
+                        child: _BottomFeathered(
+                          featherHeight: bannerHeight * _kBannerFeatherPercentage,
+                          child: bannerWidget,
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12.0),
+                      child: thumbnailAndTextWidget,
+                    ),
+                    const SizedBox(height: 12.0),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12.0),
+                      child: buttonsWidget,
+                    ),
+                  ],
+                );
+              }
+
+              if (isHeroBanner) {
+                final coverHeight = showSubpageInfoAtSide ? maxWidth.withMaximum(maxHeight * 0.5) : (maxWidth * _kHeroBannerHeightPercentage).clampDouble(160.0, maxHeight * 0.35);
+                final coverSource = isSingleArtworkType ? bannerBuilder(maxWidth, coverHeight) : imageWidget;
+                final maxStretch = (maxWidth - coverHeight).withMinimum(0.0);
+                final topOverscroll = SubpageOverscrollScope.maybeOf(context);
+                final coverWidget = HeroMode(
+                  enabled: false,
+                  child: ClipRect(
+                    child: FittedBox(
+                      fit: BoxFit.cover,
+                      clipBehavior: Clip.hardEdge,
+                      child: coverSource,
+                    ),
+                  ),
+                );
+                final stretchingCoverWidget = topOverscroll == null
+                    ? SizedBox(
+                        width: maxWidth,
+                        height: coverHeight,
+                        child: coverWidget,
+                      )
+                    : ObxO(
+                        rx: topOverscroll,
+                        builder: (context, overscroll) {
+                          final stretch = overscroll.withMaximum(maxStretch);
+                          final isReleasing = stretch == 0.0;
+                          return AnimatedContainer(
+                            duration: isReleasing ? const Duration(milliseconds: 350) : Duration.zero,
+                            curve: Curves.easeOutCubic,
+                            width: maxWidth,
+                            height: coverHeight + stretch,
+                            child: coverWidget,
+                          );
+                        },
+                      );
+                if (showSubpageInfoAtSide) {
+                  return Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _BottomFeathered(
+                        featherHeight: coverHeight * _kSideCoverFeatherPercentage,
+                        child: stretchingCoverWidget,
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                        child: textWidget,
+                      ),
+                      const SizedBox(height: 12.0),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12.0),
+                        child: buttonsWidget,
+                      ),
+                    ],
+                  );
+                }
+                final bgColor = theme.scaffoldBackgroundColor;
+                final fadeMidColor = bgColor.withOpacityExt(0.8);
+                final textOverlayWidget = Stack(
+                  alignment: Alignment.bottomLeft,
+                  clipBehavior: Clip.none,
+                  children: [
+                    Positioned(
+                      left: 0.0,
+                      top: 0.0,
+                      right: 0.0,
+                      bottom: -_kFeatherOverdraw,
+                      child: IgnorePointer(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: const Alignment(0.0, -0.4),
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                Colors.transparent,
+                                fadeMidColor,
+                                bgColor,
+                              ],
+                              stops: const [0.0, 0.55, 1.0],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(maxWidth: infoMaxWidth),
+                        child: textWidget,
+                      ),
+                    ),
+                  ],
+                );
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        stretchingCoverWidget,
+                        Positioned.fill(
+                          child: textOverlayWidget,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12.0),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12.0),
+                      child: buttonsWidget,
+                    ),
+                  ],
+                );
+              }
+
+              if (isOverlay && !showSubpageInfoAtSide) {
+                final bgColor = theme.scaffoldBackgroundColor;
+                final overlayMidColor = bgColor.withOpacityExt(0.8);
+                final overlayWidget = Stack(
+                  alignment: Alignment.bottomLeft,
+                  children: [
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(18.0.multipliedRadius),
+                            gradient: LinearGradient(
+                              begin: const Alignment(0.0, -0.3),
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                Colors.transparent,
+                                overlayMidColor,
+                                bgColor,
+                              ],
+                              stops: const [0.0, 0.55, 1.0],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    ConstrainedBox(
+                      constraints: BoxConstraints(maxWidth: infoMaxWidth),
+                      child: textAndButtonsWidget,
+                    ),
+                  ],
+                );
+                return Stack(
+                  children: [
+                    Align(
+                      alignment: Alignment.topCenter,
+                      child: fittedImageWidget,
+                    ),
+                    Positioned.fill(
+                      child: _RouteFadeIn(
+                        child: overlayWidget,
+                      ),
+                    ),
+                  ],
+                );
+              }
+
+              if (showSubpageInfoAtSide) {
+                return Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisAlignment: MainAxisAlignment.start,
@@ -3347,303 +3393,249 @@ class SubpageInfoContainer extends StatelessWidget {
                       child: textAndButtonsWidget,
                     ),
                   ],
-                )
-              : Row(
-                  mainAxisAlignment: MainAxisAlignment.start,
-                  children: [
-                    ConstrainedBox(
-                      constraints: BoxConstraints(maxWidth: imageMaxWidth),
-                      child: FittedBox(
-                        alignment: Alignment.topLeft,
-                        fit: BoxFit.scaleDown,
-                        child: imageWidget,
-                      ),
-                    ),
-                    ConstrainedBox(
-                      constraints: BoxConstraints(maxWidth: infoMaxWidth),
-                      child: textAndButtonsWidget,
-                    ),
-                  ],
                 );
-        },
+              }
+
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      fittedImageWidget,
+                      ConstrainedBox(
+                        constraints: BoxConstraints(maxWidth: infoMaxWidth),
+                        child: textWidget,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12.0),
+                  buttonsWidget,
+                ],
+              );
+            },
+          ),
+        );
+
+        if (isBlurBackdrop) {
+          content = Stack(
+            children: [
+              Positioned.fill(
+                child: _SubpageInfoBackdrop(
+                  artwork: imageBuilder(_kBackdropArtworkSize),
+                ),
+              ),
+              content,
+            ],
+          );
+        }
+
+        return Container(
+          alignment: Alignment.topCenter,
+          margin: EdgeInsets.only(top: topMargin, bottom: bottomPadding),
+          height: height,
+          child: content,
+        );
+      },
+    );
+  }
+
+  static const _kBannerThumbnailInsets = 24.0 + 24.0 + 14.0;
+  static const _kBannerThumbnailOverlap = 0.45;
+  static const _kBannerFeatherPercentage = 0.8;
+  static const _kBannerThumbnailPercentage = 0.3;
+  static const _kBannerStackedThumbnailPercentage = 0.7;
+  static const _kBannerStackedFontScale = 1.2;
+  static const _kBannerMinBesideTextWidth = 140.0;
+  static const _kSideCoverFeatherPercentage = 0.35;
+
+  /// feathers are drawn this far past the image's bottom, an antialiased edge there would leave the last pixel row of a fractional height uncovered.
+  static const _kFeatherOverdraw = 1.0;
+  static const _kExtraButtonsMinWidth = 310.0;
+  static const _kThumbnailWidthPercentage = 0.5;
+  static const _kThumbnailHeightPercentage = 0.35;
+
+  /// a frameless fan in a thumbnail spills a little into the surrounding padding instead of leaving it empty.
+  static const _kThumbnailFanScale = 1.12;
+  static const _kOverlayFontWidthPercentage = 0.65;
+  static const _kHeroBannerHeightPercentage = 0.6;
+  static const _kBackdropArtworkSize = 200.0;
+}
+
+class _SubpageButtonsRow extends StatelessWidget {
+  final double maxWidth;
+  final Alignment alignment;
+  final List<Widget> children;
+
+  const _SubpageButtonsRow({
+    required this.maxWidth,
+    required this.alignment,
+    required this.children,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 6.0),
+      child: SizedBox(
+        width: maxWidth,
+        child: FittedBox(
+          alignment: alignment,
+          fit: BoxFit.scaleDown,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (int i = 0; i < children.length; i++) ...[
+                if (i > 0) const SizedBox(width: 6.0),
+                children[i],
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }
 }
 
-/// a threshold for the numeric sorts, tracks with an unknown value never pass it.
-///
-/// by claude
-class _TrackMinimum {
-  final int min;
-  final int max;
-  final int stepper;
-  final String Function(int value) formatter;
-  final num? Function(Track tr) valueOf;
+class _BottomFeathered extends StatelessWidget {
+  final double featherHeight;
+  final Widget child;
 
-  const _TrackMinimum({
-    required this.min,
-    required this.max,
-    required this.stepper,
-    required this.formatter,
-    required this.valueOf,
-  });
-
-  static const supportedSorts = [
-    SortType.rating, SortType.mostPlayed, SortType.duration, SortType.bitrate, //
-    SortType.bpm, SortType.size, SortType.year, //
-  ];
-
-  static _TrackMinimum? of(SortType sort) => switch (sort) {
-    SortType.rating => _TrackMinimum(min: 0, max: 100, stepper: 5, formatter: (v) => '$v%', valueOf: (tr) => tr.effectiveRating),
-    SortType.mostPlayed => _TrackMinimum(min: 0, max: 500, stepper: 1, formatter: (v) => '$v', valueOf: _listensCountOf),
-    SortType.duration => _TrackMinimum(min: 0, max: 1200, stepper: 10, formatter: (v) => v.secondsLabel, valueOf: (tr) => tr.durationMS / 1000),
-    SortType.bitrate => _TrackMinimum(min: 0, max: 1411, stepper: 1, formatter: (v) => '$v kb/s', valueOf: (tr) => tr.bitrate),
-    SortType.bpm => _TrackMinimum(min: 0, max: 300, stepper: 1, formatter: (v) => '$v BPM', valueOf: (tr) => tr.bpm),
-    SortType.size => _TrackMinimum(min: 0, max: 200, stepper: 1, formatter: (v) => '$v MB', valueOf: (tr) => tr.size / (1024 * 1024)),
-    SortType.year => _TrackMinimum(min: 1900, max: DateTime.now().year, stepper: 1, formatter: (v) => '$v', valueOf: _yearOf),
-    _ => null,
-  };
-
-  static int _listensCountOf(Track tr) => HistoryController.inst.topTracksMapListens.value[tr]?.length ?? 0;
-
-  static int? _yearOf(Track tr) {
-    final year = tr.year;
-    if (year == 0) return null;
-    return year < 10000 ? year : year ~/ 10000;
-  }
-
-  bool isActive(int value) => value > min;
-
-  List<Selectable> filter(Iterable<Selectable> tracks, int value) {
-    if (!isActive(value)) return tracks.toList();
-    return tracks.where((e) => (valueOf(e.track) ?? -1) >= value).toList();
-  }
-}
-
-/// each sort's values are sorted once, so moving the wheel is a binary search instead of a rescan.
-///
-/// by claude
-class _MinimumCounter {
-  final Iterable<Selectable> Function() tracksFn;
-  _MinimumCounter(this.tracksFn);
-
-  final _sortedValuesPerSort = <SortType, List<num>>{};
-  int? _totalCount;
-
-  int countAtLeast(SortType sort, _TrackMinimum minimum, int value) {
-    if (!minimum.isActive(value)) return _totalCount ??= tracksFn().length;
-    final sortedValues = _sortedValuesPerSort[sort] ??= _buildSortedValues(minimum);
-    int low = 0;
-    int high = sortedValues.length;
-    while (low < high) {
-      final middle = (low + high) >> 1;
-      if (sortedValues[middle] < value) {
-        low = middle + 1;
-      } else {
-        high = middle;
-      }
-    }
-    return sortedValues.length - low;
-  }
-
-  List<num> _buildSortedValues(_TrackMinimum minimum) {
-    final values = <num>[];
-    for (final e in tracksFn()) {
-      final value = minimum.valueOf(e.track);
-      if (value != null) values.add(value);
-    }
-    values.sort();
-    return values;
-  }
-}
-
-class _MinimumTile extends StatelessWidget {
-  final SortType sort;
-  final _TrackMinimum minimum;
-  final int value;
-  final int matchingCount;
-  final void Function(int value) onChanged;
-  final Iterable<Widget> Function()? sortChoices;
-
-  const _MinimumTile({
-    required this.sort,
-    required this.minimum,
-    required this.value,
-    required this.matchingCount,
-    required this.onChanged,
-    required this.sortChoices,
+  const _BottomFeathered({
+    required this.featherHeight,
+    required this.child,
   });
 
   @override
   Widget build(BuildContext context) {
-    final valueText = minimum.isActive(value) ? '≥ ${minimum.formatter(value)}' : lang.any;
-    final sortText = sort.toText();
-    final countText = matchingCount.displayTrackKeyword;
-    final sortChoices = this.sortChoices;
-    final pickerSubtitle = sortChoices == null ? null : _PickerSubtitle(pickedText: sortText, trailingText: countText);
-    final tile = CustomListTile(
-      icon: Broken.filter,
-      title: lang.minimum,
-      subtitle: '$sortText • $countText',
-      subtitleWidget: pickerSubtitle,
-      trailing: NamidaWheelSlider(
-        key: ValueKey(sort),
-        initValue: value,
-        min: minimum.min,
-        max: minimum.max,
-        stepper: minimum.stepper,
-        onValueChanged: onChanged,
-        text: valueText,
-      ),
-    );
-    if (sortChoices == null) return tile;
-    return NamidaPopupWrapper(
-      children: sortChoices,
-      child: tile,
-    );
-  }
-}
-
-class _PickerSubtitle extends StatelessWidget {
-  final String pickedText;
-  final String? trailingText;
-
-  const _PickerSubtitle({
-    required this.pickedText,
-    required this.trailingText,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final textStyle = context.textTheme.displaySmall;
-    final trailingText = this.trailingText;
-    return Row(
+    final bgColor = context.theme.scaffoldBackgroundColor;
+    const overdraw = SubpageInfoContainer._kFeatherOverdraw;
+    final overdrawnHeight = featherHeight + overdraw;
+    final solidFromStop = featherHeight / overdrawnHeight;
+    return Stack(
+      clipBehavior: Clip.none,
       children: [
-        Icon(
-          Broken.arrow_swap,
-          size: 14.0,
-          color: textStyle?.color,
-        ),
-        const SizedBox(width: 4.0),
-        Flexible(
-          child: Text(
-            pickedText,
-            style: textStyle,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+        child,
+        Positioned(
+          left: 0.0,
+          right: 0.0,
+          bottom: -overdraw,
+          height: overdrawnHeight,
+          child: IgnorePointer(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [bgColor.withAlpha(0), bgColor],
+                  stops: [0.0, solidFromStop],
+                ),
+              ),
+            ),
           ),
         ),
-        if (trailingText != null)
-          Text(
-            ' • $trailingText',
-            style: textStyle,
-            maxLines: 1,
-          ),
       ],
     );
   }
 }
 
-class _AdvancedPlaySortTile extends StatelessWidget {
-  const _AdvancedPlaySortTile();
+// by claude
+class _SubpageInfoBackdrop extends StatelessWidget {
+  final Widget artwork;
 
-  void _pickSorts() {
-    NamidaOnTaps.inst.onTracksSortIconTap(
-      currentSorts: settings.advancedPlaySorts.value,
-      currentReverse: settings.advancedPlaySortReverse.value,
-      onChanged: (sorts, reverse) {
-        settings.advancedPlaySorts.replace(sorts);
-        settings.advancedPlaySortReverse.save(reverse);
-      },
-    );
-  }
+  const _SubpageInfoBackdrop({
+    required this.artwork,
+  });
+
+  static const _kBlur = 28.0;
 
   @override
   Widget build(BuildContext context) {
-    return Obx(
-      (context) {
-        final sortText = settings.advancedPlaySorts.valueR.firstOrNull?.toText() ?? lang.auto;
-        final isReverse = settings.advancedPlaySortReverse.valueR;
-        return CustomListTile(
-          icon: Broken.sort,
-          title: lang.sortBy,
-          onTap: _pickSorts,
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
+    final theme = context.theme;
+    final bgColor = theme.scaffoldBackgroundColor;
+    final dimColorTop = bgColor.withOpacityExt(0.5);
+    return IgnorePointer(
+      child: HeroMode(
+        enabled: false, // -- the real artwork owns the hero
+        child: ClipRect(
+          child: Stack(
+            fit: StackFit.expand,
             children: [
-              Text(
-                sortText,
-                style: context.textTheme.displayMedium,
+              NamidaBlur(
+                blur: _kBlur,
+                child: FittedBox(
+                  fit: BoxFit.cover,
+                  clipBehavior: Clip.hardEdge,
+                  child: artwork,
+                ),
               ),
-              const SizedBox(width: 4.0),
-              Icon(
-                isReverse ? Broken.arrow_up_3 : Broken.arrow_down_2,
-                size: 18.0,
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      dimColorTop,
+                      bgColor,
+                    ],
+                  ),
+                ),
               ),
             ],
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 }
 
-class _ShuffleExclusionTile extends StatelessWidget {
-  const _ShuffleExclusionTile();
+/// shown only once the route has settled, hero flights paint above the route so anything drawn earlier would sit under them.
+///
+/// by claude
+class _RouteFadeIn extends StatefulWidget {
+  final Widget child;
 
-  List<Widget> _buildSortChildren() {
-    return [
-      Padding(
-        padding: const EdgeInsets.only(left: 4.0, right: 4.0, bottom: 4.0),
-        child: ListTileWithCheckMark(
-          borderRadius: 10.0,
-          activeRx: settings.shuffleExcludeSortReverse,
-          onTap: () => settings.shuffleExcludeSortReverse.save(!settings.shuffleExcludeSortReverse.value),
-        ),
-      ),
-      ...SortType.forTracks().map(
-        (sort) => ObxO(
-          rx: settings.shuffleExcludeSort,
-          builder: (context, activeSort) => SmallListTile(
-            borderRadius: 12.0,
-            visualDensity: const VisualDensity(horizontal: -4.0, vertical: -4.0),
-            title: sort.toText(),
-            trailingIcon: sort.toIcon(),
-            active: activeSort == sort,
-            onTap: () => settings.shuffleExcludeSort.save(sort),
-          ),
-        ),
-      ),
-    ];
+  const _RouteFadeIn({
+    required this.child,
+  });
+
+  @override
+  State<_RouteFadeIn> createState() => _RouteFadeInState();
+}
+
+class _RouteFadeInState extends State<_RouteFadeIn> {
+  Animation<double>? _routeAnimation;
+  bool _isSettled = true;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final routeAnimation = ModalRoute.of(context)?.animation;
+    if (routeAnimation == _routeAnimation) return;
+    _routeAnimation?.removeStatusListener(_onRouteStatusChanged);
+    _routeAnimation = routeAnimation;
+    routeAnimation?.addStatusListener(_onRouteStatusChanged);
+    _isSettled = routeAnimation == null || routeAnimation.status == AnimationStatus.completed;
+  }
+
+  void _onRouteStatusChanged(AnimationStatus status) {
+    final isSettled = status == AnimationStatus.completed;
+    if (isSettled == _isSettled) return;
+    setState(() => _isSettled = isSettled);
+  }
+
+  @override
+  void dispose() {
+    _routeAnimation?.removeStatusListener(_onRouteStatusChanged);
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Obx(
-      (context) {
-        final excludeCount = settings.shuffleExcludeCount.valueR;
-        final sort = settings.shuffleExcludeSort.valueR;
-        final isReverse = settings.shuffleExcludeSortReverse.valueR;
-        final sortText = sort.toText();
-        return NamidaPopupWrapper(
-          children: _buildSortChildren,
-          child: CustomListTile(
-            icon: Broken.forbidden_2,
-            title: lang.exclude,
-            subtitleWidget: _PickerSubtitle(
-              pickedText: isReverse ? '$sortText (${lang.reverseOrder})' : sortText,
-              trailingText: null,
-            ),
-            trailing: NamidaWheelSlider(
-              initValue: excludeCount,
-              max: 100,
-              onValueChanged: settings.shuffleExcludeCount.save,
-              text: excludeCount > 0 ? excludeCount.displayTrackKeyword : lang.none,
-            ),
-          ),
-        );
-      },
+    return AnimatedOpacity(
+      opacity: _isSettled ? 1.0 : 0.0,
+      duration: _isSettled ? const Duration(milliseconds: 250) : const Duration(milliseconds: 80),
+      child: widget.child,
     );
   }
 }
@@ -4910,6 +4902,10 @@ class NamidaListViewRaw extends StatefulWidget {
 
 class _NamidaListViewRawState extends State<NamidaListViewRaw> {
   ScrollController? _scrollController;
+  final _topOverscroll = 0.0.obs;
+
+  static const _kTopOverscrollResistance = 0.6;
+  static const _kTopOverscrollMax = 600.0;
 
   @override
   void initState() {
@@ -4920,7 +4916,21 @@ class _NamidaListViewRawState extends State<NamidaListViewRaw> {
   @override
   void dispose() {
     if (widget.scrollController == null) _scrollController?.dispose();
+    _topOverscroll.close();
     super.dispose();
+  }
+
+  bool _onScrollNotification(ScrollNotification notification) {
+    if (notification is OverscrollNotification) {
+      final isPullingPastTop = notification.overscroll < 0 && notification.metrics.pixels <= notification.metrics.minScrollExtent;
+      if (isPullingPastTop) {
+        final pulled = _topOverscroll.value - notification.overscroll * _kTopOverscrollResistance;
+        _topOverscroll.value = pulled.withMaximum(_kTopOverscrollMax);
+      }
+    } else if (notification is ScrollEndNotification || notification is ScrollUpdateNotification) {
+      if (_topOverscroll.value != 0.0) _topOverscroll.value = 0.0;
+    }
+    return false;
   }
 
   @override
@@ -4988,6 +4998,15 @@ class _NamidaListViewRawState extends State<NamidaListViewRaw> {
         ],
       ),
     );
+    if (displayInfoBoxAtTop) {
+      listW = SubpageOverscrollScope(
+        topOverscroll: _topOverscroll,
+        child: NotificationListener<ScrollNotification>(
+          onNotification: _onScrollNotification,
+          child: listW,
+        ),
+      );
+    }
     if (displayInfoBoxAtSide) {
       listW = Row(
         mainAxisSize: MainAxisSize.min,
@@ -5015,6 +5034,24 @@ class _NamidaListViewRawState extends State<NamidaListViewRaw> {
       child: widget.builder?.call(listW) ?? listW,
     );
   }
+}
+
+/// how far the list above is being pulled past its top, for headers that stretch with it.
+///
+/// by claude
+class SubpageOverscrollScope extends InheritedWidget {
+  final Rx<double> topOverscroll;
+
+  const SubpageOverscrollScope({
+    super.key,
+    required this.topOverscroll,
+    required super.child,
+  });
+
+  static Rx<double>? maybeOf(BuildContext context) => context.dependOnInheritedWidgetOfExactType<SubpageOverscrollScope>()?.topOverscroll;
+
+  @override
+  bool updateShouldNotify(SubpageOverscrollScope oldWidget) => topOverscroll != oldWidget.topOverscroll;
 }
 
 class NamidaSliverReorderableList extends StatelessWidget {
@@ -5581,11 +5618,16 @@ class NamidaHero extends StatelessWidget {
   final Widget child;
   final bool enabled;
 
+  /// rounds the flight between two heroes that both set it, going from one radius to the other.
+  /// for children whose rounding comes from a parent clip, which the flight leaves behind.
+  final double? flightBorderRadius;
+
   const NamidaHero({
     super.key,
     required this.tag,
     required this.child,
     this.enabled = true,
+    this.flightBorderRadius,
   });
 
   static final fadeAnimation2Convert = Animatable.fromCallback((value) => (value * (1 / 0.2)).clampDouble(0, 1));
@@ -5605,6 +5647,12 @@ class NamidaHero extends StatelessWidget {
       HeroFlightDirection.push => (fromHero, toHero),
       HeroFlightDirection.pop => (toHero, fromHero),
     };
+    final (BuildContext hero1Context, BuildContext hero2Context) = switch (flightDirection) {
+      HeroFlightDirection.push => (fromHeroContext, toHeroContext),
+      HeroFlightDirection.pop => (toHeroContext, fromHeroContext),
+    };
+    final hero1Radius = hero1Context.findAncestorWidgetOfExactType<NamidaHero>()?.flightBorderRadius;
+    final hero2Radius = hero2Context.findAncestorWidgetOfExactType<NamidaHero>()?.flightBorderRadius;
 
     final MediaQueryData? toMediaQueryData = MediaQuery.maybeOf(toHeroContext);
     final MediaQueryData? fromMediaQueryData = MediaQuery.maybeOf(fromHeroContext);
@@ -5637,6 +5685,14 @@ class NamidaHero extends StatelessWidget {
     return AnimatedBuilder(
       animation: animation,
       builder: (context, child) {
+        Widget flightChild = stackChild;
+        if (hero1Radius != null && hero2Radius != null) {
+          final radius = hero1Radius + (hero2Radius - hero1Radius) * animation.value;
+          flightChild = ClipRRect(
+            borderRadius: BorderRadius.circular(radius),
+            child: stackChild,
+          );
+        }
         return MediaQuery(
           data: toMediaQueryData.copyWith(
             padding: (flightDirection == HeroFlightDirection.push)
@@ -5649,7 +5705,7 @@ class NamidaHero extends StatelessWidget {
                     end: fromHeroPadding,
                   ).evaluate(animation),
           ),
-          child: stackChild,
+          child: flightChild,
         );
       },
     );
@@ -5810,6 +5866,7 @@ class ShimmerWrapper extends StatelessWidget {
   final int shimmerDelayMS;
   final int shimmerDurationMS;
   final bool transparent;
+  final AlignmentGeometry alignment;
 
   const ShimmerWrapper({
     super.key,
@@ -5819,6 +5876,7 @@ class ShimmerWrapper extends StatelessWidget {
     this.shimmerDelayMS = 400,
     this.shimmerDurationMS = 700,
     this.transparent = true,
+    this.alignment = Alignment.center,
   });
 
   @override
@@ -5826,6 +5884,7 @@ class ShimmerWrapper extends StatelessWidget {
     final color = transparent ? Colors.transparent : context.theme.cardColor.withAlpha(120);
     return CustomAnimatedSwitcher(
       duration: fadeDurationMS.ms,
+      alignment: alignment,
       child: shimmerEnabled
           ? Animate(
               onPlay: (controller) => controller.repeat(),
@@ -6185,7 +6244,7 @@ class NamidaScrollbar extends StatelessWidget {
   }
 
   ScrollbarThumbLabelResolver? _createThumbLabelIfEnabled() {
-    if (settings.extra.scrollbarThumbLabel.value != true) return null;
+    if (settings.scrollbarThumbLabel.value != true) return null;
     return thumbLabel?.call();
   }
 
@@ -6199,8 +6258,8 @@ class NamidaScrollbar extends StatelessWidget {
       thicknessWhileDragging: 8.5,
       minInteractiveSize: 60.0,
       pressDuration: isDesktop ? const Duration(milliseconds: 50) : const Duration(milliseconds: 80),
-      tapToScroll: () => settings.extra.tapToScroll.value ?? false,
-      enhancedDragToScroll: () => settings.extra.enhancedDragToScroll.value ?? true,
+      tapToScroll: () => settings.tapToScroll.value ?? false,
+      enhancedDragToScroll: () => settings.enhancedDragToScroll.value ?? true,
       onThumbLongPressStart: () => isScrollbarThumbDragging = true,
       onThumbLongPressEnd: () => isScrollbarThumbDragging = false,
       thumbLabel: thumbLabel == null ? null : _createThumbLabelIfEnabled,
@@ -7578,7 +7637,7 @@ class NamidaClearDialogExpansionTile<T> extends StatelessWidget {
                 subtitle: size.fileSizeFormatted,
                 active: false,
                 onTap: () {
-                  tempFilesDelete.value = !tempFilesDelete.value;
+                  tempFilesDelete.toggle();
                   if (tempFilesDelete.value) {
                     totalSizeToDelete.value += size;
                   } else {
@@ -7665,7 +7724,7 @@ class EnableDisablePlaylistReordering extends StatelessWidget {
             );
             return;
           }
-          playlistManager.canReorderItems.value = !playlistManager.canReorderItems.value;
+          playlistManager.canReorderItems.toggle();
         },
       ),
     );
@@ -8577,40 +8636,18 @@ class NamidaArtworkExpandableToFullscreen extends StatelessWidget {
     required this.themeColor,
   });
 
-  void openInFullscreen() async {
-    File? imgFile;
-    Uint8List? imgBytes;
-
-    imgFile = await imageFile();
-    if (imgFile != null && await imgFile.exists()) {
-      // -- good
-    } else {
-      final res = await fetchImage();
-      imgFile = res?.file;
-      imgBytes = res?.bytes;
-    }
-
-    final ImageProvider<Object>? imgProvider = imgFile != null
-        ? FileImage(imgFile)
-        : imgBytes != null
-        ? MemoryImage(imgBytes)
-        : null;
-    if (imgProvider == null) return;
-
-    NamidaNavigator.inst.navigateDialog(
-      scale: 1.0,
-      blackBg: true,
-      dialog: NamidaArtworkFullscreen(
-        title: '',
-        artwork: artwork,
-        imgProvider: imgProvider,
-        heroTag: heroTag,
-        save: () async {
-          final savePath = await onSave(imgFile, imgBytes);
-          NamidaOnTaps.inst.showSavedImageInSnack(savePath, themeColor?.call());
-        },
-        close: NamidaNavigator.inst.closeDialog,
-      ),
+  Future<void> openInFullscreen() {
+    final image = NamidaFullscreenImage(
+      imageFile: imageFile,
+      fetchImage: fetchImage,
+      onSave: onSave,
+      placeholder: artwork,
+    );
+    return NamidaArtworkFullscreen.open(
+      images: [image],
+      initialIndex: 0,
+      heroTag: heroTag,
+      themeColor: themeColor,
     );
   }
 
@@ -8624,41 +8661,95 @@ class NamidaArtworkExpandableToFullscreen extends StatelessWidget {
 }
 
 class NamidaArtworkFullscreen extends StatefulWidget {
-  final String title;
-  final Widget artwork;
-  final ImageProvider<Object> imgProvider;
+  final List<NamidaFullscreenImage> images;
+  final int initialIndex;
+  final _ResolvedFullscreenImage _initialImage;
+  final VoidCallback? _releaseInitialImage;
   final Object? heroTag;
-  final void Function() save;
-  final void Function() close;
+  final Color? Function()? themeColor;
 
-  const NamidaArtworkFullscreen({
-    super.key,
-    required this.title,
-    required this.artwork,
-    required this.imgProvider,
+  const NamidaArtworkFullscreen._({
+    required this.images,
+    required this.initialIndex,
+    required this._initialImage,
+    required this._releaseInitialImage,
     required this.heroTag,
-    required this.save,
-    required this.close,
+    required this.themeColor,
   });
+
+  static Future<void> open({
+    required List<NamidaFullscreenImage> images,
+    required int initialIndex,
+    required Object? heroTag,
+    required Color? Function()? themeColor,
+  }) async {
+    final initialImage = await images[initialIndex]._resolve();
+    if (initialImage == null) return;
+
+    final shownHeroTag = images.length == 1 ? heroTag : null;
+    final releaseInitialImage = shownHeroTag == null ? null : await ZoomableImage.preload(initialImage.provider);
+
+    NamidaNavigator.inst.navigateDialog(
+      scale: 1.0,
+      blackBg: true,
+      dialog: NamidaArtworkFullscreen._(
+        images: images,
+        initialIndex: initialIndex,
+        initialImage: initialImage,
+        releaseInitialImage: releaseInitialImage,
+        heroTag: shownHeroTag,
+        themeColor: themeColor,
+      ),
+    );
+  }
 
   @override
   State<NamidaArtworkFullscreen> createState() => _NamidaArtworkFullscreenState();
 }
 
 class _NamidaArtworkFullscreenState extends State<NamidaArtworkFullscreen> {
+  static const _kPageAnimationDuration = Duration(milliseconds: 250);
+
   bool _showTopBar = false;
   double _heighestTopPadding = 0;
+
+  late final _currentIndex = widget.initialIndex.obs;
+  late final _resolvedImages = <int, _ResolvedFullscreenImage>{widget.initialIndex: widget._initialImage};
+  late final _pageController = widget.images.length > 1 ? PageController(initialPage: widget.initialIndex) : null;
 
   @override
   void initState() {
     NamidaNavigator.setSystemUIImmersiveMode(true);
     super.initState();
+    final releaseInitialImage = widget._releaseInitialImage;
+    // -- the initial page holds its own reference once this frame is built
+    if (releaseInitialImage != null) WidgetsBinding.instance.addPostFrameCallback((_) => releaseInitialImage());
   }
 
   @override
   void dispose() {
+    _pageController?.dispose();
+    _currentIndex.close();
     MiniPlayerController.inst.setImmersiveMode(null); // let that decide
     super.dispose();
+  }
+
+  Future<_ResolvedFullscreenImage?> _resolveImage(int index) async {
+    final resolved = await widget.images[index]._resolve();
+    if (resolved != null) _resolvedImages[index] = resolved;
+    return resolved;
+  }
+
+  void _save() async {
+    final index = _currentIndex.value;
+    final resolved = _resolvedImages[index];
+    if (resolved == null) return;
+    final savePath = await widget.images[index].onSave(resolved.file, resolved.bytes);
+    NamidaOnTaps.inst.showSavedImageInSnack(savePath, widget.themeColor?.call());
+  }
+
+  void _onPageChanged(int index) {
+    _currentIndex.value = index;
   }
 
   void _toggleAppBars() {
@@ -8669,22 +8760,80 @@ class _NamidaArtworkFullscreenState extends State<NamidaArtworkFullscreen> {
     }
   }
 
+  KeyEventResult _onKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
+    final pageController = _pageController;
+    if (pageController == null) return KeyEventResult.ignored;
+    if (HardwareKeyboard.instance.isControlPressed) return KeyEventResult.ignored;
+
+    final key = event.logicalKey;
+    final isLeft = key == LogicalKeyboardKey.arrowLeft;
+    final isRight = key == LogicalKeyboardKey.arrowRight;
+    if (!isLeft && !isRight) return KeyEventResult.ignored;
+
+    final isRtl = Directionality.of(context) == TextDirection.rtl;
+    final isNext = isRight != isRtl;
+    if (isNext) {
+      pageController.nextPage(duration: _kPageAnimationDuration, curve: Curves.easeOutCubic);
+    } else {
+      pageController.previousPage(duration: _kPageAnimationDuration, curve: Curves.easeOutCubic);
+    }
+    return KeyEventResult.handled;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final heroTag = widget.heroTag;
     final topPadding = context.padding.top;
     if (topPadding > _heighestTopPadding) _heighestTopPadding = topPadding;
+
+    final images = widget.images;
+    final count = images.length;
+    final pageController = _pageController;
+    final pagingAxis = pageController == null ? null : Axis.horizontal;
+    final heroTag = widget.heroTag;
+
+    Widget buildPage(BuildContext context, int index) {
+      return _FullscreenImagePage(
+        index: index,
+        image: images[index],
+        resolved: _resolvedImages[index],
+        resolve: _resolveImage,
+        heroTag: heroTag,
+        pagingAxis: pagingAxis,
+        onTap: _toggleAppBars,
+      );
+    }
+
+    final content = pageController == null
+        ? buildPage(context, 0)
+        : Focus(
+            autofocus: true,
+            onKeyEvent: _onKeyEvent,
+            child: PageView.builder(
+              controller: pageController,
+              allowImplicitScrolling: true,
+              onPageChanged: _onPageChanged,
+              itemCount: count,
+              itemBuilder: buildPage,
+            ),
+          );
+
+    final pageIndicatorWidget = count > 1
+        ? ObxO(
+            rx: _currentIndex,
+            builder: (context, currentIndex) => Text(
+              '${currentIndex + 1}/$count',
+              style: context.textTheme.displayMedium,
+            ),
+          )
+        : null;
+
     return Stack(
       alignment: AlignmentGeometry.center,
       children: [
         LongPressDetector(
-          onLongPress: widget.save,
-          child: ZoomableImage(
-            imageProvider: widget.imgProvider,
-            placeholder: widget.artwork,
-            heroTag: heroTag,
-            onTap: _toggleAppBars,
-          ),
+          onLongPress: _save,
+          child: content,
         ),
         Positioned(
           top: 0,
@@ -8711,22 +8860,17 @@ class _NamidaArtworkFullscreenState extends State<NamidaArtworkFullscreen> {
                           alignment: Alignment.centerLeft,
                           child: NamidaIconButton(
                             icon: Broken.arrow_left_2,
-                            onPressed: widget.close,
+                            onPressed: NamidaNavigator.inst.closeDialog,
                           ),
                         ),
                         Expanded(
-                          child: widget.title.isEmpty
-                              ? const SizedBox()
-                              : Text(
-                                  widget.title,
-                                  style: context.textTheme.displayMedium,
-                                ),
+                          child: pageIndicatorWidget ?? const SizedBox(),
                         ),
                         Align(
                           alignment: Alignment.centerRight,
                           child: NamidaIconButton(
                             icon: Broken.gallery_import,
-                            onPressed: widget.save,
+                            onPressed: _save,
                           ),
                         ),
                       ],
@@ -8740,6 +8884,99 @@ class _NamidaArtworkFullscreenState extends State<NamidaArtworkFullscreen> {
       ],
     );
   }
+}
+
+class _FullscreenImagePage extends StatefulWidget {
+  final int index;
+  final NamidaFullscreenImage image;
+  final _ResolvedFullscreenImage? resolved;
+  final Future<_ResolvedFullscreenImage?> Function(int index) resolve;
+  final Object? heroTag;
+  final Axis? pagingAxis;
+  final VoidCallback onTap;
+
+  const _FullscreenImagePage({
+    required this.index,
+    required this.image,
+    required this.resolved,
+    required this.resolve,
+    required this.heroTag,
+    required this.pagingAxis,
+    required this.onTap,
+  });
+
+  @override
+  State<_FullscreenImagePage> createState() => _FullscreenImagePageState();
+}
+
+class _FullscreenImagePageState extends State<_FullscreenImagePage> {
+  late _ResolvedFullscreenImage? _resolved = widget.resolved;
+
+  @override
+  void initState() {
+    super.initState();
+    if (_resolved == null) _resolve();
+  }
+
+  Future<void> _resolve() async {
+    final resolved = await widget.resolve(widget.index);
+    if (resolved != null) refreshState(() => _resolved = resolved);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final placeholder = widget.image.placeholder;
+    final resolved = _resolved;
+    if (resolved == null) {
+      return TapDetector(
+        onTap: widget.onTap,
+        child: Center(
+          child: placeholder,
+        ),
+      );
+    }
+    return ZoomableImage(
+      imageProvider: resolved.provider,
+      placeholder: placeholder,
+      heroTag: widget.heroTag,
+      onTap: widget.onTap,
+      pagingAxis: widget.pagingAxis,
+    );
+  }
+}
+
+class NamidaFullscreenImage {
+  final FutureOr<File?> Function() imageFile;
+  final FutureOr<FArtwork?> Function() fetchImage;
+  final FutureOr<String?> Function(File? imgFile, Uint8List? bytes) onSave;
+  final Widget? placeholder;
+
+  const NamidaFullscreenImage({
+    required this.imageFile,
+    required this.fetchImage,
+    required this.onSave,
+    this.placeholder,
+  });
+
+  Future<_ResolvedFullscreenImage?> _resolve() async {
+    final file = await imageFile();
+    if (file != null && await file.exists()) return _ResolvedFullscreenImage.file(file);
+    final res = await fetchImage();
+    final fetchedFile = res?.file;
+    if (fetchedFile != null) return _ResolvedFullscreenImage.file(fetchedFile);
+    final fetchedBytes = res?.bytes;
+    if (fetchedBytes != null) return _ResolvedFullscreenImage.bytes(fetchedBytes);
+    return null;
+  }
+}
+
+class _ResolvedFullscreenImage {
+  final File? file;
+  final Uint8List? bytes;
+  final ImageProvider provider;
+
+  _ResolvedFullscreenImage.file(File this.file) : bytes = null, provider = FileImage(file);
+  _ResolvedFullscreenImage.bytes(Uint8List this.bytes) : file = null, provider = MemoryImage(bytes);
 }
 
 class ObxPrefer<T> extends StatelessWidget {

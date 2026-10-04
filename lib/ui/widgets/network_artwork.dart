@@ -14,6 +14,7 @@ import 'package:namida/class/file_parts.dart';
 import 'package:namida/class/track.dart';
 import 'package:namida/controller/connectivity.dart';
 import 'package:namida/controller/current_color.dart';
+import 'package:namida/controller/indexer_controller.dart';
 import 'package:namida/controller/playlist_controller.dart';
 import 'package:namida/controller/settings_controller.dart';
 import 'package:namida/controller/smart_playlists/smart_playlists_controller.dart';
@@ -135,6 +136,8 @@ class NetworkArtwork extends StatefulWidget {
     double borderRadius = 8.0,
     double blur = 5.0,
     double? iconSize,
+    double? width,
+    double? height,
     BoxFit fit = BoxFit.cover,
     bool displayIcon = true,
     bool forceSquared = true,
@@ -157,6 +160,8 @@ class NetworkArtwork extends StatefulWidget {
           borderRadius: borderRadius,
           blur: blur,
           iconSize: iconSize,
+          width: width,
+          height: height,
           fit: fit,
           displayIcon: displayIcon,
           forceSquared: forceSquared,
@@ -177,6 +182,8 @@ class NetworkArtwork extends StatefulWidget {
       borderRadius: borderRadius,
       blur: blur,
       iconSize: iconSize,
+      width: width,
+      height: height,
       fit: fit,
       displayIcon: displayIcon,
       forceSquared: forceSquared,
@@ -242,8 +249,10 @@ class _NetworkArtworkState extends State<NetworkArtwork> with LoadingItemsDelayM
 
   String? _getFallbackArtworkPathExisting() {
     final path = widget.fallbackPath;
-    if (path == null || !File(path).existsSync()) return null;
-    return path;
+    if (path != null && File(path).existsSync()) return path;
+    final track = widget.fallbackTrack;
+    if (track == null) return null;
+    return Indexer.inst.getFallbackFolderArtworkPath(folder: track.folder);
   }
 
   /// returns `null` on transient failures (should retry later), and empty string when no image exists.
