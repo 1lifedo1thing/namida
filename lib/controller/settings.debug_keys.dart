@@ -242,6 +242,8 @@ extension SettingsControllerDebugKeys on _SettingsController {
     artistSortReversed,
     genreSorts,
     genreSortReversed,
+    languageSorts,
+    languageSortReversed,
     moodSorts,
     moodSortReversed,
     tagSorts,
@@ -410,6 +412,11 @@ extension SettingsControllerDebugKeys on _SettingsController {
     fontScaleLRC,
     fontScaleLRCFull,
     canAskForBatteryOptimizations,
+    mediaBrowserQueue,
+    nowPlayingBroadcast,
+    scrobblerBroadcast,
+    webhookUrl,
+    webhookEvents,
     eggs,
   ];
 }

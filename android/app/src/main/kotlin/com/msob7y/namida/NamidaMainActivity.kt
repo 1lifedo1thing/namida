@@ -59,6 +59,7 @@ class NamidaMainActivity : FlutterActivity() {
   private val safUtils by lazy { SafUtils(context) }
   private var pendingSafAccessResult: MethodChannel.Result? = null
   private var pendingSafAccessPath: String? = null
+  private var pendingSafTreeResult: MethodChannel.Result? = null
 
   override fun configureFlutterEngine(@NonNull flutterEngine: FlutterEngine) {
     super.configureFlutterEngine(flutterEngine)
@@ -142,6 +143,33 @@ class NamidaMainActivity : FlutterActivity() {
               emptyList()
             }
             withContext(Dispatchers.Main) { result.success(reports) }
+          }
+        }
+        "sendBroadcast" -> {
+          val action = call.argument<String>("action")
+          val extras = call.argument<Map<String, Any?>>("extras")
+          val packages = call.argument<List<String>>("packages")
+          if (action == null) {
+            result.success(false)
+          } else {
+            val intent = Intent(action)
+            intent.addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES)
+            extras?.forEach { (key, value) ->
+              when (value) {
+                is String -> intent.putExtra(key, value)
+                is Boolean -> intent.putExtra(key, value)
+                is Int -> intent.putExtra(key, value)
+                is Long -> intent.putExtra(key, value)
+                is Double -> intent.putExtra(key, value)
+              }
+            }
+            if (packages == null) {
+              sendBroadcast(intent)
+            } else {
+              // -- manifest receivers only get explicit broadcasts since android 8
+              for (pkg in packages) sendBroadcast(Intent(intent).setPackage(pkg))
+            }
+            result.success(true)
           }
         }
         "setMulticastLock" -> {
@@ -440,6 +468,56 @@ class NamidaMainActivity : FlutterActivity() {
           }
         }
 
+        "safPickTree" -> {
+          if (pendingSafTreeResult != null) {
+            result.success(null)
+          } else {
+            val note = call.argument<String?>("note")
+            if (note != null && note != "") showToast(note, 5)
+            pendingSafTreeResult = result
+            try {
+              startActivityForResult(
+                safUtils.buildTreePickerIntent(),
+                NamidaRequestCodes.REQUEST_CODE_SAF_TREE_PICKER
+              )
+            } catch (e: Exception) {
+              pendingSafTreeResult = null
+              showToast(e.message, 3)
+              result.success(null)
+            }
+          }
+        }
+
+        "safTreeHasAccess" -> {
+          val treeUri = call.argument<String?>("treeUri")
+          result.success(treeUri != null && safUtils.hasTreeAccess(Uri.parse(treeUri)))
+        }
+
+        "safListTree" -> {
+          val treeUri = call.argument<String?>("treeUri")
+          if (treeUri == null) {
+            result.success(null)
+          } else {
+            CoroutineScope(Dispatchers.IO).launch {
+              val listing = safUtils.listTree(Uri.parse(treeUri))
+              withContext(Dispatchers.Main) { result.success(listing) }
+            }
+          }
+        }
+
+        "safCopyDocument" -> {
+          val documentUri = call.argument<String?>("documentUri")
+          val dest = call.argument<String?>("dest")
+          if (documentUri == null || dest == null) {
+            result.success("documentUri or dest parameters aren't provided")
+          } else {
+            CoroutineScope(Dispatchers.IO).launch {
+              val error = safUtils.copyDocumentToFile(Uri.parse(documentUri), dest)
+              withContext(Dispatchers.Main) { result.success(error) }
+            }
+          }
+        }
+
         else -> result.notImplemented()
       }
     }
@@ -682,6 +760,22 @@ class NamidaMainActivity : FlutterActivity() {
         }
       }
       pendingResult?.success(granted)
+    } else if (requestCode == NamidaRequestCodes.REQUEST_CODE_SAF_TREE_PICKER) {
+      val pendingResult = pendingSafTreeResult
+      pendingSafTreeResult = null
+      var treeUri: String? = null
+      if (resultCode == RESULT_OK) {
+        val uri = data?.data
+        if (uri != null) {
+          try {
+            safUtils.persistReadPermission(uri)
+            treeUri = uri.toString()
+          } catch (e: Exception) {
+            showToast(e.message, 3)
+          }
+        }
+      }
+      pendingResult?.success(treeUri)
     }
   }
 
@@ -753,6 +847,7 @@ class NamidaRequestCodes {
     val REQUEST_CODE_WRITE_SETTINGS = 9696
     val REQUEST_CODE_FILES_PICKER = 911
     val REQUEST_CODE_SAF_ACCESS_PICKER = 913
+    val REQUEST_CODE_SAF_TREE_PICKER = 914
     val REQUEST_CODE_STORAGE_READ_PERMISSION = 899
   }
 }

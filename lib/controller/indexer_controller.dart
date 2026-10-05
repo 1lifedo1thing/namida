@@ -39,6 +39,7 @@ import 'package:namida/core/constants.dart';
 import 'package:namida/core/dirs_file_filter.dart';
 import 'package:namida/core/enums.dart';
 import 'package:namida/core/extensions.dart';
+import 'package:namida/core/iso639.dart';
 import 'package:namida/core/functions.dart';
 import 'package:namida/core/namida_converter_ext.dart';
 import 'package:namida/core/translations/language.dart';
@@ -103,6 +104,7 @@ class Indexer<T extends Track> {
   LibraryItemMap get mainMapComposer => mainMapsGroup.mainMapComposer;
   LibraryItemMap get mainMapGenres => mainMapsGroup.mainMapGenres;
   LibraryItemMap get mainMapStyles => mainMapsGroup.mainMapStyles;
+  LibraryItemMap get mainMapLanguages => mainMapsGroup.mainMapLanguages;
   RxMap<Folder, List<T>> get mainMapFoldersTracksAndVideos => mainMapsGroup.mainMapFoldersTracksAndVideos;
   RxMap<Folder, List<T>> get mainMapFoldersTracks => mainMapsGroup.mainMapFoldersTracks;
   RxMap<VideoFolder, List<Video>> get mainMapFoldersVideos => mainMapsGroup.mainMapFoldersVideos;
@@ -120,6 +122,7 @@ class Indexer<T extends Track> {
     return switch (type) {
       MediaType.genre => Indexer.inst.mainMapGenres,
       MediaType.style => Indexer.inst.mainMapStyles,
+      MediaType.language => Indexer.inst.mainMapLanguages,
       _ => Indexer.inst.mainMapGenres,
     };
   }
@@ -226,7 +229,7 @@ class Indexer<T extends Track> {
     _fetchMediaStoreTracks(); // to fill ids map
 
     final tracksDBPath = AppPaths.TRACKS_DB_INFO.file.path;
-    if (await File(tracksDBPath).existsAndValid((4 + 12) * 1024) || await File(AppPaths.TRACKS_OLD).existsAndValid()) {
+    if (await File(tracksDBPath).exists() || await File(AppPaths.TRACKS_OLD).existsAndValid()) {
       isIndexing.value = true;
       // -- only block load if the track file exists..
       await _readTrackData(completer);
@@ -234,7 +237,9 @@ class Indexer<T extends Track> {
       await _sortAll();
       isIndexing.value = false;
 
-      if (settings.refreshOnStartup.value) {
+      if (tracksInfoList.value.isEmpty) {
+        refreshLibraryAndCheckForDiff(forceReIndex: true);
+      } else if (settings.refreshOnStartup.value) {
         this.refreshLibraryAndCheckForDiff(allowDeletion: false, showFinishedSnackbar: false);
       } else {
         // main reason is to refresh fallback cover
@@ -275,6 +280,7 @@ class Indexer<T extends Track> {
           oldtr.originalStyle,
           config: splitConfig.genresConfig,
         ),
+        languagesList: Iso639.splitToLabels(oldtr.language),
         moodList: Indexer.splitGeneral(
           oldtr.originalMood,
           config: splitConfig.generalConfig,
@@ -450,7 +456,8 @@ class Indexer<T extends Track> {
         MediaType.albumArtist ||
         MediaType.composer ||
         MediaType.genre ||
-        MediaType.style => () => SearchSortController.inst.searchMedia(e.toLibraryTab().textSearchController?.text ?? '', e),
+        MediaType.style ||
+        MediaType.language => () => SearchSortController.inst.searchMedia(e.toLibraryTab().textSearchController?.text ?? '', e),
         MediaType.folder => FoldersController.tracksAndVideos.refreshAfterSorting,
         MediaType.folderMusic => FoldersController.tracks.refreshAfterSorting,
         MediaType.folderVideo => FoldersController.videos.refreshAfterSorting,
@@ -493,6 +500,7 @@ class Indexer<T extends Track> {
           MediaType.album => settings.albumSorts.value.any((e) => e.requiresHistory),
           MediaType.artist || MediaType.albumArtist || MediaType.composer => settings.artistSorts.value.any((e) => e.requiresHistory),
           MediaType.genre || MediaType.style => settings.genreSorts.value.any((e) => e.requiresHistory),
+          MediaType.language => settings.languageSorts.value.any((e) => e.requiresHistory),
           MediaType.playlist => settings.playlistSorts.value.any((e) => e.requiresHistory),
           MediaType.folder => settings.mediaItemsTrackSorting.value[MediaType.folder]?.firstOrNull?.requiresHistory ?? false,
           MediaType.folderMusic => settings.mediaItemsTrackSorting.value[MediaType.folderMusic]?.firstOrNull?.requiresHistory ?? false,
@@ -539,6 +547,9 @@ class Indexer<T extends Track> {
     for (var style in trExt.stylesList) {
       removeAndDeleteEmpty(mainMapStyles.value, style);
     }
+    for (var language in trExt.languagesList) {
+      removeAndDeleteEmpty(mainMapLanguages.value, language);
+    }
 
     tr is Video ? removeAndDeleteEmpty(mainMapFoldersVideos.value, tr.folder) : removeAndDeleteEmpty(mainMapFoldersTracks.value, tr.folder);
     removeAndDeleteEmpty(mainMapFoldersTracksAndVideos.value, tr.folder);
@@ -553,6 +564,7 @@ class Indexer<T extends Track> {
     final mainMapComposer = this.mainMapComposer.value;
     final mainMapGenres = this.mainMapGenres.value;
     final mainMapStyles = this.mainMapStyles.value;
+    final mainMapLanguages = this.mainMapLanguages.value;
     final mainMapFoldersTracksAndVideos = this.mainMapFoldersTracksAndVideos.value;
     final mainMapFoldersTracks = this.mainMapFoldersTracks.value;
     final mainMapFoldersVideos = this.mainMapFoldersVideos.value;
@@ -564,6 +576,7 @@ class Indexer<T extends Track> {
       MediaType.composer: (map: mainMapComposer, newKeys: [], modifiedKeys: {}),
       MediaType.genre: (map: mainMapGenres, newKeys: [], modifiedKeys: {}),
       MediaType.style: (map: mainMapStyles, newKeys: [], modifiedKeys: {}),
+      MediaType.language: (map: mainMapLanguages, newKeys: [], modifiedKeys: {}),
       MediaType.folder: (map: mainMapFoldersTracksAndVideos, newKeys: [], modifiedKeys: {}),
       MediaType.folderMusic: (map: mainMapFoldersTracks, newKeys: [], modifiedKeys: {}),
       MediaType.folderVideo: (map: mainMapFoldersVideos, newKeys: [], modifiedKeys: {}),
@@ -666,6 +679,15 @@ class Indexer<T extends Track> {
       }
       for (final styOld in newOldStyles.$2) {
         removeCustom(MediaType.style, mainMapStyles, styOld, oldTrack);
+      }
+
+      // -- Assigning Languages
+      final newOldLanguages = oldtr == null ? (newtr.languagesList, const []) : differenceLists(newtr.languagesList, oldtr.languagesList);
+      for (final lanNew in newOldLanguages.$1) {
+        addCustom(MediaType.language, mainMapLanguages, null, lanNew, newTrack);
+      }
+      for (final lanOld in newOldLanguages.$2) {
+        removeCustom(MediaType.language, mainMapLanguages, lanOld, oldTrack);
       }
 
       // -- Assigning Folders
@@ -838,6 +860,7 @@ class Indexer<T extends Track> {
         discNo: 0,
         discTo: 0,
         language: '',
+        languagesList: const [],
         lyrics: '',
         label: '',
         releaseType: '',
@@ -847,6 +870,7 @@ class Indexer<T extends Track> {
         tagsList: [],
         gainData: null,
         sortInfo: null,
+        extraTags: null,
         albumsIdentifiersWrappers: [],
         isVideo: trackPath.isVideo(),
         hashKey: TrackExtended.generateHashKeyIfEnabled(null, trackPath, null),
@@ -955,6 +979,7 @@ class Indexer<T extends Track> {
           discNo: discNoParsed?.$1,
           discTo: discNoParsed?.$2,
           language: tags.language,
+          languagesList: Iso639.splitToLabels(tags.language),
           lyrics: tags.lyrics,
           label: tags.recordLabel,
           releaseType: tags.releaseType,
@@ -971,6 +996,7 @@ class Indexer<T extends Track> {
           ),
           gainData: tags.gainData,
           sortInfo: tags.sortInfo,
+          extraTags: tags.extraTags,
           generatePathHash: TagsExtractor.defaultUniqueArtworkHash,
         );
 
@@ -1046,10 +1072,11 @@ class Indexer<T extends Track> {
     _currentFileNamesMap[trackExt.path.getFilename] = true;
 
     if (!alreadyExists) {
-      tracksInfoList.add(tr);
+      tracksInfoList.value.add(tr);
       if (tr.isNetwork) networkTracksCount.value++;
       SearchSortController.inst.onTrackIndexed(tr);
       allTracksMappedByYTID.addForce(trackExt.youtubeID, tr);
+      _scheduleTracksListsRefresh();
     } else {
       final list = allTracksMappedByYTID[trackExt.youtubeID] ??= [];
       if (!list.contains(tr)) {
@@ -1061,6 +1088,20 @@ class Indexer<T extends Track> {
       artworksInStorage.value++;
       if (artwork.size != null) artworksSizeInStorage.value += artwork.size!;
     }
+  }
+
+  Timer? _tracksListsRefreshTimer;
+
+  // -- each refresh rebuilds every visible tracks list, so rapid adds (indexing) share one
+  void _scheduleTracksListsRefresh() {
+    _tracksListsRefreshTimer ??= Timer(
+      const Duration(milliseconds: 300),
+      () {
+        _tracksListsRefreshTimer = null;
+        tracksInfoList.refresh();
+        SearchSortController.inst.trackSearchList.refresh();
+      },
+    );
   }
 
   /// Removes track entries from related lists, this doesNOT delete tracks from system or remove stats entries
@@ -1418,7 +1459,7 @@ class Indexer<T extends Track> {
         _addTrackToLists(e, null);
       }
     } else {
-      NamidaTaggerController.inst.currentPathsBeingExtracted.clear();
+      // NamidaTaggerController.inst.currentPathsBeingExtracted.clear();
       final audioFilesWithoutDuplicates = <String>[];
       if (prevDuplicated) {
         /// skip duplicated tracks according to filename
@@ -1434,18 +1475,11 @@ class Indexer<T extends Track> {
       final finalAudios = prevDuplicated ? audioFilesWithoutDuplicates : audioFiles.toList();
       final filesToExtractCount = finalAudios.length + modifiedFiles.length;
       _indexingTotalCount.value += filesToExtractCount;
-      int listParts;
-      const int listPartsMultiplier = 30; // more is okay with taglib, most work is io
-      if (Platform.isAndroid || Platform.isIOS) {
-        listParts = (Platform.numberOfProcessors * 0.5 * listPartsMultiplier).round().withMinimum(2);
-      } else {
-        // lil bit more luxurious on desktop
-        listParts = (Platform.numberOfProcessors * 0.8 * listPartsMultiplier).round().withMinimum(2);
-      }
       final keyWrapper = ExtractingPathKey.create();
 
-      Future<void> extractAll(List<String> chunkList, {required bool isModified}) async {
-        if (chunkList.isEmpty) return;
+      // -- the extractor reads on its own pool of native threads
+      Future<void> extractAll(List<String> paths, {required bool isModified}) async {
+        if (paths.isEmpty) return;
 
         final splittersConfigs = _createSplitConfig();
         Future<TrackExtended?> extractFunction(FAudioModel item) => convertTagToTrack(
@@ -1468,7 +1502,7 @@ class Indexer<T extends Track> {
         );
 
         final stream = await NamidaTaggerController.inst.extractMetadataAsStream(
-          paths: chunkList,
+          paths: paths,
           keyWrapper: keyWrapper,
           extractArtwork: null,
           overrideArtwork: isModified,
@@ -1487,20 +1521,11 @@ class Indexer<T extends Track> {
         }
       }
 
-      Future<void> extractAllInParts(List<String> audios, {required bool isModified}) async {
-        final audioFilesParts = audios.split(listParts);
-        final audioFilesCompleters = List.generate(audioFilesParts.length, (_) => Completer<void>());
-        audioFilesParts.loopAdv((part, partIndex) {
-          extractAll(part, isModified: isModified).then((value) => audioFilesCompleters[partIndex].complete());
-        });
-        await Future.wait(audioFilesCompleters.map((e) => e.future));
-      }
-
-      await extractAllInParts(finalAudios, isModified: false);
+      await extractAll(finalAudios, isModified: false);
       if (modifiedFiles.isNotEmpty) {
         Indexer.clearMemoryImageCache();
         final modifiedAudios = modifiedFiles.toList();
-        await extractAllInParts(modifiedAudios, isModified: true);
+        await extractAll(modifiedAudios, isModified: true);
       }
     }
 
@@ -1974,6 +1999,18 @@ class Indexer<T extends Track> {
     final items = <String>{};
     _loopLibraryTags((name, tr) => items.add(name));
     return items;
+  }
+
+  Map<String, int> getLibraryMoodsCounts() {
+    final counts = <String, int>{};
+    _loopLibraryMoods((name, tr) => counts[name] = (counts[name] ?? 0) + 1);
+    return counts;
+  }
+
+  Map<String, int> getLibraryTagsCounts() {
+    final counts = <String, int>{};
+    _loopLibraryTags((name, tr) => counts[name] = (counts[name] ?? 0) + 1);
+    return counts;
   }
 
   List<Track>? getTracksForMood(String? name) {
@@ -2520,6 +2557,7 @@ class Indexer<T extends Track> {
         discNo: disc ?? 0,
         discTo: discTo ?? 0,
         language: '',
+        languagesList: const [],
         lyrics: '',
         label: '',
         releaseType: '',
@@ -2529,6 +2567,7 @@ class Indexer<T extends Track> {
         tagsList: tags,
         gainData: null,
         sortInfo: null,
+        extraTags: null,
         albumsIdentifiersWrappers: AlbumIdentifierWrapper.fromAlbums(
           albums: albums,
           albumArtist: albumArtist ?? '',

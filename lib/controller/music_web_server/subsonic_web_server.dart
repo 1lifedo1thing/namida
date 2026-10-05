@@ -379,6 +379,7 @@ class _SubsonicWebServer extends MusicWebServer {
       discNo: media.discNumber ?? 0,
       discTo: 0,
       language: '',
+      languagesList: const [],
       lyrics: '',
       label: '',
       releaseType: '',
@@ -388,6 +389,7 @@ class _SubsonicWebServer extends MusicWebServer {
       tagsList: [],
       gainData: null,
       sortInfo: null,
+      extraTags: null,
       hashKey: media.id, // TrackExtended.generateHashKeyIfEnabled(null, path, null)
       isVideo: media.isVideo ?? false,
       server: server,

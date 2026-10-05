@@ -13,9 +13,9 @@ import 'package:namida/controller/indexer_controller.dart';
 import 'package:namida/controller/json_to_history_parser.dart';
 import 'package:namida/controller/music_web_server/music_web_server_base.dart';
 import 'package:namida/controller/navigator_controller.dart';
+import 'package:namida/controller/platform/namida_storage/namida_storage.dart';
 import 'package:namida/controller/settings_controller.dart';
 import 'package:namida/controller/settings_search_controller.dart';
-import 'package:namida/controller/tagger_controller.dart';
 import 'package:namida/controller/video_controller.dart';
 import 'package:namida/core/constants.dart';
 import 'package:namida/core/dimensions.dart';
@@ -120,15 +120,44 @@ class IndexerSettings extends SettingSubpageProvider {
   }
 
   void _reAuthDirIndex(DirectoryIndexServer e) {
-    _pickServerFolder(
-      initialType: e.type,
-      initialDir: e,
-      onSuccessChoose: (dirsPath) {
-        settings.directoriesToScan.update((list) => list.remove(e));
-        MusicWebServerAuthDetails.manager.deleteFromDb(e);
-        settings.directoriesToScan.update((list) => list.addAllNoDuplicates(dirsPath));
-      },
+    void onSuccessChoose(List<DirectoryIndex> dirsPath) {
+      settings.directoriesToScan.update((list) => list.remove(e));
+      MusicWebServerAuthDetails.manager.deleteFromDb(e);
+      settings.directoriesToScan.update((list) => list.addAllNoDuplicates(dirsPath));
+    }
+
+    if (e.type == DirectoryIndexType.saf) {
+      _pickSafFolder(onSuccessChoose);
+    } else {
+      _pickServerFolder(
+        initialType: e.type,
+        initialDir: e,
+        onSuccessChoose: onSuccessChoose,
+      );
+    }
+  }
+
+  /// saved with empty credentials so it goes through the same server flow as the others.
+  void _pickSafFolder(void Function(List<DirectoryIndex> dirsPath) onSuccessChoose) async {
+    final treeUri = await NamidaStorage.inst.safPickTree(note: lang.addFolder);
+
+    if (treeUri == null) {
+      snackyy(title: lang.note, message: lang.noFolderChosen);
+      return;
+    }
+
+    final dir = DirectoryIndexServer.saf(treeUri);
+    onSuccessChoose([dir]);
+
+    final authInfo = MusicWebServerAuthDetails.create(
+      dir: dir,
+      password: '',
+      share: null,
+      subdir: null,
+      legacyAuth: true,
     );
+    await authInfo.saveToDb(dir);
+    _maybeShowRefreshPromptDialog(true);
   }
 
   void _pickLocalFolder(void Function(List<DirectoryIndex> dirsPath) onSuccessChoose) async {
@@ -143,16 +172,14 @@ class IndexerSettings extends SettingSubpageProvider {
     _maybeShowRefreshPromptDialog(true);
   }
 
+  /// [types] are offered as a switch inside the dialog, they must share the same tags as [initialType].
   void _pickServerFolder({
     required DirectoryIndexType initialType,
+    List<DirectoryIndexType>? types,
     DirectoryIndex? initialDir,
     required void Function(List<DirectoryIndex> dirsPath) onSuccessChoose,
   }) {
-    // -- uncomment to support in-place selections
-    // final types = List<DirectoryIndexType>.from(DirectoryIndexType.values);
-    // types.remove(DirectoryIndexType.unknown);
-    // types.remove(DirectoryIndexType.local);
-    final types = [initialType];
+    final selectableTypes = types ?? [initialType];
 
     final isURLHost = initialType.check(.isURLHost);
     final initialSource = initialDir?.sourceRaw;
@@ -170,7 +197,8 @@ class IndexerSettings extends SettingSubpageProvider {
     final libraryIdController = initialType.check(.supportsLibraryId) ? TextEditingController(text: null) : null;
     final subdirController = initialType.check(.supportsSubdir) ? TextEditingController(text: null) : null;
     final portController = initialType.check(.supportsPort) ? TextEditingController(text: null) : null;
-    final availableSharesRx = shareNameController == null && libraryIdController == null ? null : <ServerShareWrapper>{}.obs;
+    final shareTargetController = shareNameController ?? libraryIdController; // -- smb shares or jellyfin libraries
+    final availableSharesRx = shareTargetController == null ? null : <ServerShareWrapper>{}.obs;
     final formKey = GlobalKey<FormState>();
 
     if (availableSharesRx != null) {
@@ -188,7 +216,7 @@ class IndexerSettings extends SettingSubpageProvider {
     String? libraryIdHint;
     if (initialSource != null && isURLHost) {
       try {
-        final parsed = SMBServerInfo.fromUrl(initialSource);
+        final parsed = HostServerInfo.fromUrl(initialSource);
         initialDirSourceHint = parsed.host;
         shareHint = parsed.share;
         subdirHint = parsed.subdir;
@@ -392,72 +420,69 @@ class IndexerSettings extends SettingSubpageProvider {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     const SizedBox(height: 8.0),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12.0),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: types
-                            .map(
-                              (e) {
-                                final isSelected = e == selectedType;
-                                final assetImagePath = e.toAssetImage();
-                                Widget? assetWidget = assetImagePath == null
-                                    ? null
-                                    : Image.asset(
-                                        assetImagePath,
-                                        height: 22.0,
-                                      );
-                                assetWidget ??= Icon(
-                                  e.toIcon(),
-                                  size: 22.0,
-                                );
-                                final color = e.toColor(theme);
-                                return Expanded(
-                                  child: NamidaInkWell(
-                                    alignment: Alignment.center,
-                                    animationDurationMS: 200,
-                                    borderRadius: 8.0,
-                                    bgColor: color.withOpacityExt(0.2),
-                                    padding: const EdgeInsets.all(8.0),
-                                    decoration: BoxDecoration(
-                                      border: isSelected
-                                          ? Border.all(
-                                              color: color.withOpacityExt(0.6),
-                                              width: 1.2,
-                                            )
-                                          : null,
-                                      borderRadius: BorderRadius.circular(8.0.multipliedRadius),
-                                    ),
-                                    onTap: () {
-                                      selectedTypeRx.value = e;
-                                    },
-                                    child: Row(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      children: [
-                                        ...[
-                                          assetWidget,
-                                          const SizedBox(width: 12.0),
-                                        ],
-                                        Flexible(
-                                          child: Text(
-                                            e.toText(),
-                                            style: theme.textTheme.displayMedium,
-                                            textAlign: TextAlign.center,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: selectableTypes
+                          .map(
+                            (e) {
+                              final isSelected = e == selectedType;
+                              final assetImagePath = e.toAssetImage();
+                              Widget? assetWidget = assetImagePath == null
+                                  ? null
+                                  : Image.asset(
+                                      assetImagePath,
+                                      height: 22.0,
+                                    );
+                              assetWidget ??= Icon(
+                                e.toIcon(),
+                                size: 22.0,
+                              );
+                              final color = e.toColor(theme);
+                              return Expanded(
+                                child: NamidaInkWell(
+                                  alignment: Alignment.center,
+                                  animationDurationMS: 200,
+                                  borderRadius: 8.0,
+                                  bgColor: color.withOpacityExt(0.2),
+                                  padding: const EdgeInsets.all(8.0),
+                                  decoration: BoxDecoration(
+                                    border: isSelected
+                                        ? Border.all(
+                                            color: color.withOpacityExt(0.6),
+                                            width: 1.2,
+                                          )
+                                        : null,
+                                    borderRadius: BorderRadius.circular(8.0.multipliedRadius),
                                   ),
-                                );
-                              },
-                            )
-                            .addSeparators(
-                              separator: SizedBox(width: 8.0),
-                            )
-                            .toFixedList(),
-                      ),
+                                  onTap: () {
+                                    selectedTypeRx.value = e;
+                                  },
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      ...[
+                                        assetWidget,
+                                        const SizedBox(width: 12.0),
+                                      ],
+                                      Flexible(
+                                        child: Text(
+                                          e.toText(),
+                                          style: theme.textTheme.displayMedium,
+                                          textAlign: TextAlign.center,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          )
+                          .addSeparators(
+                            separator: SizedBox(width: 8.0),
+                          )
+                          .toFixedList(),
                     ),
-                    if (initialType.check(.isFileBased)) ...[
+                    if (initialType.check(.downloadsWholeFiles)) ...[
                       const SizedBox(height: 8.0),
                       NamidaCoolBox(
                         colorScheme: mainColorScheme,
@@ -544,7 +569,7 @@ class IndexerSettings extends SettingSubpageProvider {
                                             margin: const EdgeInsets.symmetric(horizontal: 3.0),
                                             padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 6.0),
                                             onTap: () {
-                                              libraryIdController?.text = e.id;
+                                              shareTargetController?.text = e.id;
                                             },
                                             child: Text(
                                               e.name,
@@ -626,8 +651,15 @@ class IndexerSettings extends SettingSubpageProvider {
   }
 
   void _promptAddFolderType(void Function(List<DirectoryIndex> dirsPath) onSuccessChoose) {
-    final types = List<DirectoryIndexType>.from(DirectoryIndexType.values);
-    types.remove(DirectoryIndexType.unknown);
+    final groups = <List<DirectoryIndexType>>[
+      const [DirectoryIndexType.local],
+      const [DirectoryIndexType.subsonic],
+      const [DirectoryIndexType.jellyfin],
+      const [DirectoryIndexType.webdav],
+      const [DirectoryIndexType.smb],
+      const [DirectoryIndexType.ftp, DirectoryIndexType.sftp],
+      if (NamidaFeaturesVisibility.showSafFolders) const [DirectoryIndexType.saf],
+    ];
     NamidaNavigator.inst.navigateDialog(
       dialogBuilder: (theme) => CustomBlurryDialog(
         theme: theme,
@@ -637,8 +669,9 @@ class IndexerSettings extends SettingSubpageProvider {
           CancelButton(addMargin: false),
         ],
         child: Column(
-          children: types.map(
-            (e) {
+          children: groups.map(
+            (group) {
+              final e = group.first;
               final assetImagePath = e.toAssetImage();
               final assetWidget = assetImagePath == null
                   ? null
@@ -646,19 +679,20 @@ class IndexerSettings extends SettingSubpageProvider {
                       assetImagePath,
                       height: 20.0,
                     );
+              final title = group.map((t) => t.toText()).join(' / ');
               return CustomListTile(
                 icon: assetWidget != null ? null : e.toIcon(),
                 leading: assetWidget,
-                title: e.toText(),
+                title: title,
                 subtitle: e.toSubtitle(),
                 onTap: () async {
                   NamidaNavigator.inst.closeDialog();
-                  switch (e) {
-                    case DirectoryIndexType.local:
-                      _pickLocalFolder(onSuccessChoose);
-                    case DirectoryIndexType.subsonic || DirectoryIndexType.jellyfin || DirectoryIndexType.webdav || DirectoryIndexType.smb:
-                      _pickServerFolder(initialType: e, onSuccessChoose: onSuccessChoose);
-                    case DirectoryIndexType.unknown:
+                  if (e == DirectoryIndexType.local) {
+                    _pickLocalFolder(onSuccessChoose);
+                  } else if (e == DirectoryIndexType.saf) {
+                    _pickSafFolder(onSuccessChoose);
+                  } else {
+                    _pickServerFolder(initialType: e, types: group, onSuccessChoose: onSuccessChoose);
                   }
                 },
               );
@@ -1149,7 +1183,7 @@ class IndexerSettings extends SettingSubpageProvider {
               ),
             ),
           ),
-          const _ExtractingPathsWidget(itemPadding: EdgeInsets.symmetric(horizontal: 18.0, vertical: 4.0)),
+          // const _ExtractingPathsWidget(itemPadding: EdgeInsets.symmetric(horizontal: 18.0, vertical: 4.0)),
           getItemWrapper(
             key: _IndexerSettingsKeys.preventDuplicatedTracks,
             child: Obx(
@@ -2035,63 +2069,63 @@ class RefreshLibraryIconState extends State<RefreshLibraryIcon> with TickerProvi
   }
 }
 
-class _ExtractingPathsWidget extends StatefulWidget {
-  final EdgeInsetsGeometry itemPadding;
-  const _ExtractingPathsWidget({required this.itemPadding});
+// class _ExtractingPathsWidget extends StatefulWidget {
+//   final EdgeInsetsGeometry itemPadding;
+//   const _ExtractingPathsWidget({required this.itemPadding});
 
-  @override
-  State<_ExtractingPathsWidget> createState() => __ExtractingPathsWidgetState();
-}
+//   @override
+//   State<_ExtractingPathsWidget> createState() => __ExtractingPathsWidgetState();
+// }
 
-class __ExtractingPathsWidgetState extends State<_ExtractingPathsWidget> {
-  final _scrollController = ScrollController();
-  bool _isPathsExpanded = false;
+// class __ExtractingPathsWidgetState extends State<_ExtractingPathsWidget> {
+//   final _scrollController = ScrollController();
+//   bool _isPathsExpanded = false;
 
-  @override
-  void dispose() {
-    _scrollController.dispose();
-    super.dispose();
-  }
+//   @override
+//   void dispose() {
+//     _scrollController.dispose();
+//     super.dispose();
+//   }
 
-  @override
-  Widget build(BuildContext context) {
-    final textTheme = context.textTheme;
-    return NamidaInkWell(
-      onTap: () => setState(() => _isPathsExpanded = !_isPathsExpanded),
-      child: ObxO(
-        rx: NamidaTaggerController.inst.currentPathsBeingExtracted,
-        builder: (context, pathsMap) {
-          final paths = pathsMap.values.toFixedList();
-          return paths.isEmpty
-              ? const SizedBox()
-              : SizedBox(
-                  height: 128.0,
-                  child: NamidaScrollbar(
-                    showOnStart: true,
-                    controller: _scrollController,
-                    child: SuperSmoothListView.builder(
-                      controller: _scrollController,
-                      itemCount: paths.length,
-                      itemBuilder: (context, index) {
-                        final e = paths[index];
-                        return Padding(
-                          padding: widget.itemPadding,
-                          child: Text(
-                            e,
-                            maxLines: _isPathsExpanded ? null : 1,
-                            overflow: _isPathsExpanded ? null : TextOverflow.ellipsis,
-                            style: textTheme.displaySmall?.copyWith(fontSize: 11.0),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                );
-        },
-      ),
-    );
-  }
-}
+//   @override
+//   Widget build(BuildContext context) {
+//     final textTheme = context.textTheme;
+//     return NamidaInkWell(
+//       onTap: () => setState(() => _isPathsExpanded = !_isPathsExpanded),
+//       child: ObxO(
+//         rx: NamidaTaggerController.inst.currentPathsBeingExtracted,
+//         builder: (context, pathsMap) {
+//           final paths = pathsMap.values.toFixedList();
+//           return paths.isEmpty
+//               ? const SizedBox()
+//               : SizedBox(
+//                   height: 128.0,
+//                   child: NamidaScrollbar(
+//                     showOnStart: true,
+//                     controller: _scrollController,
+//                     child: SuperSmoothListView.builder(
+//                       controller: _scrollController,
+//                       itemCount: paths.length,
+//                       itemBuilder: (context, index) {
+//                         final e = paths[index];
+//                         return Padding(
+//                           padding: widget.itemPadding,
+//                           child: Text(
+//                             e,
+//                             maxLines: _isPathsExpanded ? null : 1,
+//                             overflow: _isPathsExpanded ? null : TextOverflow.ellipsis,
+//                             style: textTheme.displaySmall?.copyWith(fontSize: 11.0),
+//                           ),
+//                         );
+//                       },
+//                     ),
+//                   ),
+//                 );
+//         },
+//       ),
+//     );
+//   }
+// }
 
 class _LocalFilesSmallChip extends StatelessWidget {
   final IconData icon;
