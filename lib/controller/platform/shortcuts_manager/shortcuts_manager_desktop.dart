@@ -63,6 +63,18 @@ class _ShortcutsManagerDesktop extends ShortcutsManager {
       callback: Player.inst.next,
       title: () => lang.next,
     ),
+    ShortcutKeyActivator(
+      key: LogicalKeyboardKey.arrowLeft,
+      shift: true,
+      callback: () => ChaptersController.inst.seekToAdjacent(forward: false),
+      title: () => lang.previousChapter,
+    ),
+    ShortcutKeyActivator(
+      key: LogicalKeyboardKey.arrowRight,
+      shift: true,
+      callback: () => ChaptersController.inst.seekToAdjacent(forward: true),
+      title: () => lang.nextChapter,
+    ),
 
     // -------------------
     ShortcutKeyActivator(
@@ -113,6 +125,12 @@ class _ShortcutsManagerDesktop extends ShortcutsManager {
         }
       },
       title: () => "${lang.favourites}/${lang.like}: ${lang.add}/${lang.remove}",
+    ),
+    ShortcutKeyActivator(
+      key: LogicalKeyboardKey.keyB,
+      control: true,
+      callback: BookmarksController.inst.addAtCurrentPosition,
+      title: () => lang.addBookmark,
     ),
     ShortcutKeyActivator(
       key: LogicalKeyboardKey.keyF,
@@ -368,11 +386,6 @@ class _ShortcutsManagerDesktop extends ShortcutsManager {
     ),
   );
 
-  static bool _isTextFieldFocused() {
-    final context = FocusManager.instance.primaryFocus?.context;
-    return context != null && context.findAncestorStateOfType<EditableTextState>() != null;
-  }
-
   @override
   void init() {
     _attachment = FocusManager.instance.rootScope.attach(
@@ -387,7 +400,7 @@ class _ShortcutsManagerDesktop extends ShortcutsManager {
         for (int i = 0; i < candidates.length; i++) {
           final activator = candidates[i];
           if (activator.acceptsMatchedTrigger(event, keyboard)) {
-            if (activator.skipInTextFields && _isTextFieldFocused()) return KeyEventResult.ignored;
+            if (activator.skipInTextFields && ShortcutsManager.isTextFieldFocused()) return KeyEventResult.ignored;
             activator.callback();
             return KeyEventResult.handled;
           }

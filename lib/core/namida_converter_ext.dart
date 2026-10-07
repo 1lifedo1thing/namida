@@ -24,6 +24,7 @@ import 'package:namida/class/queue_insertion.dart';
 import 'package:namida/class/route.dart';
 import 'package:namida/class/track.dart';
 import 'package:namida/controller/audio_output_controller.dart';
+import 'package:namida/controller/bookmarks_controller.dart';
 import 'package:namida/controller/current_color.dart';
 import 'package:namida/controller/edit_delete_controller.dart';
 import 'package:namida/controller/ffmpeg_controller.dart';
@@ -67,8 +68,8 @@ import 'package:namida/ui/pages/artists_page.dart';
 import 'package:namida/ui/pages/current_queue_page.dart';
 import 'package:namida/ui/pages/folders_page.dart';
 import 'package:namida/ui/pages/genres_page.dart';
-import 'package:namida/ui/pages/languages_page.dart';
 import 'package:namida/ui/pages/home_page.dart';
+import 'package:namida/ui/pages/languages_page.dart';
 import 'package:namida/ui/pages/main_page.dart';
 import 'package:namida/ui/pages/moods_tags_page.dart';
 import 'package:namida/ui/pages/party_page.dart';
@@ -209,25 +210,26 @@ extension LibraryTabUtils on LibraryTab {
         animateTiles: animateTiles,
         enableHero: enableHero,
       ),
-      LibraryTab.smartPlaylists => const SmartPlaylistsPage(),
+      LibraryTab.smartPlaylists => const SmartPlaylistsPage(isLibraryTab: true),
       LibraryTab.folders => FoldersPage.tracksAndVideos(),
       LibraryTab.foldersMusic => FoldersPage.tracks(),
       LibraryTab.foldersVideos => FoldersPage.videos(),
       LibraryTab.home => const HomePageLocal(),
       LibraryTab.youtube => const YouTubeHomeView(),
       LibraryTab.search => const NamidaDummyPage(),
-      LibraryTab.queues => const QueuesPage(),
+      LibraryTab.queues => const QueuesPage(isLibraryTab: true),
       LibraryTab.currentQueue => const CurrentQueuePage(),
       LibraryTab.favourites => const NormalPlaylistTracksPage(
         playlistName: k_PLAYLIST_NAME_FAV,
         disableAnimation: true,
+        isLibraryTab: true,
       ),
-      LibraryTab.history => const HistoryTracksPage(),
-      LibraryTab.mostPlayed => const MostPlayedTracksPage(),
+      LibraryTab.history => const HistoryTracksPage(isLibraryTab: true),
+      LibraryTab.mostPlayed => const MostPlayedTracksPage(isLibraryTab: true),
       LibraryTab.moods => const MoodsPage(),
       LibraryTab.tags => const TagsPage(),
       LibraryTab.rating => const RatingsPage(),
-      LibraryTab.stats => const StatsPage(isYoutube: false),
+      LibraryTab.stats => const StatsPage(isYoutube: false, isLibraryTab: true),
       LibraryTab.party => const NamidaPartyPage(),
     };
   }
@@ -381,6 +383,7 @@ extension FAudioModelExtensions on FAudioModel {
         recordLabel: original.tags.recordLabel ?? this.tags.recordLabel,
         releaseType: original.tags.releaseType ?? this.tags.releaseType,
         bpm: original.tags.bpm ?? this.tags.bpm,
+        musicalKey: original.tags.musicalKey ?? this.tags.musicalKey,
         mbAlbumId: original.tags.mbAlbumId ?? this.tags.mbAlbumId,
         mbAlbumArtistId: original.tags.mbAlbumArtistId ?? this.tags.mbAlbumArtistId,
         ratingPercentage: original.tags.ratingPercentage ?? this.tags.ratingPercentage,
@@ -442,6 +445,7 @@ extension MediaInfoToFAudioModel on MediaInfo {
         recordLabel: info?.label,
         releaseType: info?.releaseType,
         bpm: info?.bpm,
+        musicalKey: info?.musicalKey,
         mbAlbumId: info?.mbAlbumId,
         mbAlbumArtistId: info?.mbAlbumArtistId,
         gainData: info?.gainData,
@@ -640,10 +644,12 @@ extension DataSaverModeUtils on DataSaverMode {
 extension TrackExecuteActionsUtils on TrackExecuteActions {
   String toText() => switch (this) {
     TrackExecuteActions.none => lang.none,
+    TrackExecuteActions.play => "${lang.play} (${lang.single})",
     TrackExecuteActions.playnext => lang.playNext,
     TrackExecuteActions.playlast => lang.playLast,
     TrackExecuteActions.playafter => lang.playAfter,
     TrackExecuteActions.addtoplaylist => lang.addToPlaylist,
+    TrackExecuteActions.addBookmark => lang.addBookmark,
     TrackExecuteActions.openinfo => lang.info,
     TrackExecuteActions.openArtwork => "${lang.artwork} (${lang.open})",
     TrackExecuteActions.editArtwork => lang.editArtwork,
@@ -668,10 +674,12 @@ extension TrackExecuteActionsUtils on TrackExecuteActions {
   IconData toIcon() {
     return switch (this) {
       TrackExecuteActions.none => Broken.minus_cirlce,
+      TrackExecuteActions.play => Broken.play,
       TrackExecuteActions.playnext => Broken.next,
       TrackExecuteActions.playlast => Broken.play_cricle,
       TrackExecuteActions.playafter => Broken.hierarchy_square,
       TrackExecuteActions.addtoplaylist => Broken.music_library_2,
+      TrackExecuteActions.addBookmark => Broken.book_saved,
       TrackExecuteActions.openinfo => Broken.info_circle,
       TrackExecuteActions.openArtwork => Broken.gallery,
       TrackExecuteActions.editArtwork => Broken.gallery_edit,
@@ -714,6 +722,8 @@ extension TrackExecuteActionsUtils on TrackExecuteActions {
     switch (this) {
       case TrackExecuteActions.none:
         return;
+      case TrackExecuteActions.play:
+        Player.inst.playOrPause(0, [item], info.queueSource);
       case TrackExecuteActions.playnext:
         Player.inst.addToQueue([item], insertNext: true);
       case TrackExecuteActions.playlast:
@@ -729,6 +739,8 @@ extension TrackExecuteActionsUtils on TrackExecuteActions {
             showAddToPlaylistSheet(ids: [finalItem.id], idsNamesLookup: {finalItem.id: info.videoTitle});
           },
         );
+      case TrackExecuteActions.addBookmark:
+        if (Player.inst.isCurrentItem(item)) await BookmarksController.inst.addAtCurrentPosition();
       case TrackExecuteActions.openinfo:
         item.execute(
           selectable: (finalItem) {
@@ -876,10 +888,7 @@ extension TrackExecuteActionsUtils on TrackExecuteActions {
       case TrackExecuteActions.goToArtist:
         item.execute(
           selectable: (finalItem) {
-            final artist = finalItem.track.artistsList.firstOrNull;
-            if (artist != null) {
-              NamidaOnTaps.inst.onArtistTap(artist, MediaType.artist);
-            }
+            NamidaOnTaps.inst.onArtistsTap(finalItem.track.artistsList);
           },
           youtubeID: (finalItem) async {
             final channelId = await YoutubeInfoController.utils.getVideoChannelID(finalItem.id);
@@ -1757,14 +1766,27 @@ extension RouteUtils on NamidaRoute {
 
 extension AlbumsFromMaps on AlbumIdentifierWrapper {
   List<Track> getAlbumTracks() => Indexer.inst.mainMapAlbums.value[this.modifiedOnly()] ?? [];
-  bool isSingle() {
+  bool isSingle() => getAlbumType() == AlbumType.single;
+
+  AlbumType getAlbumType() {
     final tracks = getAlbumTracks();
+    final leadingTrack = tracks.firstOrNull;
+    if (leadingTrack == null) return AlbumType.normal;
+    final releaseType = leadingTrack.releaseType;
+    if (releaseType.isNotEmpty) return _albumTypeOfReleaseType(releaseType);
     if (tracks.length == 1) {
-      final tr = tracks[0];
-      final isAlbum = tr.trackTo > 1 || tr.trackNo > 1;
-      return !isAlbum;
+      final isAlbum = leadingTrack.trackTo > 1 || leadingTrack.trackNo > 1;
+      if (!isAlbum) return AlbumType.single;
     }
-    return false;
+    return AlbumType.normal;
+  }
+
+  /// primary type comes first, ex: `single; live`.
+  static AlbumType _albumTypeOfReleaseType(String releaseType) {
+    final releaseTypeLower = releaseType.toLowerCase();
+    if (releaseTypeLower.startsWith('single')) return AlbumType.single;
+    if (releaseTypeLower.startsWith('ep')) return AlbumType.ep;
+    return AlbumType.normal;
   }
 }
 
@@ -2445,6 +2467,14 @@ extension LyricsSourceL10n on LyricsSource {
   };
 }
 
+extension EmbeddedLyricsPriorityL10n on EmbeddedLyricsPriority {
+  String toText() => switch (this) {
+    EmbeddedLyricsPriority.off => lang.never,
+    EmbeddedLyricsPriority.onlyWhenSynced => lang.synced,
+    EmbeddedLyricsPriority.always => lang.always,
+  };
+}
+
 extension LyricsSaveLocationL10n on LyricsSaveLocation {
   String toText() => switch (this) {
     LyricsSaveLocation.cache => lang.cache,
@@ -2465,6 +2495,20 @@ extension WakelockModeL10n on WakelockMode {
     WakelockMode.none => lang.keepScreenAwakeNone,
     WakelockMode.expanded => lang.keepScreenAwakeMiniplayerExpanded,
     WakelockMode.expandedAndVideo => lang.keepScreenAwakeMiniplayerExpandedAndVideo,
+  };
+}
+
+extension CrossfadeModeL10n on CrossfadeMode {
+  String toText() => switch (this) {
+    CrossfadeMode.standard => lang.defaultLabel,
+    CrossfadeMode.smart => lang.smart,
+    CrossfadeMode.beatMatched => lang.beatMatching,
+  };
+
+  IconData toIcon() => switch (this) {
+    CrossfadeMode.standard => Broken.blend,
+    CrossfadeMode.smart => Broken.magicpen,
+    CrossfadeMode.beatMatched => Broken.buy_crypto,
   };
 }
 
@@ -2568,6 +2612,53 @@ extension NotificationTapActionL10n on NotificationTapAction {
     NotificationTapAction.openMiniplayer => lang.openMiniplayer,
     NotificationTapAction.openQueue => lang.openQueue,
   };
+}
+
+extension NotificationButtonUtils on NotificationButton {
+  String toText() => switch (this) {
+    NotificationButton.previous => lang.previous,
+    NotificationButton.playPause => "${lang.play}/${lang.pause}",
+    NotificationButton.next => lang.next,
+    NotificationButton.favourite => lang.favourite,
+    NotificationButton.stop => lang.stop,
+    NotificationButton.shuffle => lang.shuffle,
+    NotificationButton.repeatMode => lang.repeatMode,
+    NotificationButton.seekBackward => lang.seekBackward,
+    NotificationButton.seekForward => lang.seekForward,
+    NotificationButton.previousChapter => lang.previousChapter,
+    NotificationButton.nextChapter => lang.nextChapter,
+    NotificationButton.sleepTimer => lang.sleepTimer,
+    NotificationButton.addToPlaylist => lang.addToPlaylist,
+    NotificationButton.bookmark => lang.addBookmark,
+  };
+
+  IconData toIcon() => switch (this) {
+    NotificationButton.previous => Broken.previous,
+    NotificationButton.playPause => Broken.play,
+    NotificationButton.next => Broken.next,
+    NotificationButton.favourite => Broken.heart,
+    NotificationButton.stop => Broken.close_circle,
+    NotificationButton.shuffle => Broken.shuffle,
+    NotificationButton.repeatMode => Broken.repeat,
+    NotificationButton.seekBackward => Broken.backward,
+    NotificationButton.seekForward => Broken.forward,
+    NotificationButton.previousChapter => Broken.arrow_square_left,
+    NotificationButton.nextChapter => Broken.arrow_square_right,
+    NotificationButton.sleepTimer => Broken.timer_1,
+    NotificationButton.addToPlaylist => Broken.music_library_2,
+    NotificationButton.bookmark => Broken.book_saved,
+  };
+}
+
+extension NotificationButtonListUtils on List<NotificationButton> {
+  /// play/pause can't be removed, it goes back after previous when missing.
+  List<NotificationButton> ensurePlayPause() {
+    if (contains(NotificationButton.playPause)) return this;
+    final previousIndex = indexOf(NotificationButton.previous);
+    final buttons = [...this];
+    buttons.insert(previousIndex + 1, NotificationButton.playPause);
+    return buttons;
+  }
 }
 
 extension OnYoutubeLinkOpenActionL10n on OnYoutubeLinkOpenAction {
@@ -2830,6 +2921,7 @@ extension AudioOutputForcedOffUtils on AudioOutputForcedOff {
     AudioOutputForcedOff.pitch => lang.pitch,
     AudioOutputForcedOff.skipSilence => lang.skipSilence,
     AudioOutputForcedOff.monoAudio => lang.monoAudio,
+    AudioOutputForcedOff.soundEffects => lang.soundEffects,
     AudioOutputForcedOff.volume => lang.volume,
     AudioOutputForcedOff.fadeOnPlayPause => lang.fadeOnPlayPause,
     AudioOutputForcedOff.crossfade => lang.crossfade,
@@ -2842,8 +2934,35 @@ extension AudioOutputForcedOffUtils on AudioOutputForcedOff {
     AudioOutputForcedOff.equalizer => NamidaFeaturesVisibility.equalizerAvailable,
     AudioOutputForcedOff.loudnessEnhancer => NamidaFeaturesVisibility.loudnessEnhancerAvailable,
     AudioOutputForcedOff.skipSilence => NamidaFeaturesVisibility.skipSilenceAvailable,
+    AudioOutputForcedOff.soundEffects => NamidaFeaturesVisibility.soundEffectsAvailable,
     AudioOutputForcedOff.systemEffects || AudioOutputForcedOff.systemVolume => Platform.isAndroid,
     _ => true,
+  };
+}
+
+extension SoundEffectTypeUtils on SoundEffectType {
+  String toText() => switch (this) {
+    SoundEffectType.crossfeed => lang.crossfeed,
+    SoundEffectType.virtualSurround => lang.virtualSurround,
+    SoundEffectType.echo => lang.echo,
+    SoundEffectType.chorus => lang.chorus,
+    SoundEffectType.autoPan => lang.autoPan,
+    SoundEffectType.compressor => lang.compressor,
+    SoundEffectType.instrumental => lang.instrumental,
+    SoundEffectType.bassEnhancer => lang.bassEnhancer,
+    SoundEffectType.tubeWarmth => lang.tubeWarmth,
+  };
+
+  IconData toIcon() => switch (this) {
+    SoundEffectType.crossfeed => Broken.headphone,
+    SoundEffectType.virtualSurround => Broken.alarm,
+    SoundEffectType.echo => Broken.radar_1,
+    SoundEffectType.chorus => Broken.voice_cricle,
+    SoundEffectType.autoPan => Broken.d_rotate,
+    SoundEffectType.compressor => Broken.pharagraphspacing,
+    SoundEffectType.instrumental => Broken.microphone_slash,
+    SoundEffectType.bassEnhancer => Broken.speaker,
+    SoundEffectType.tubeWarmth => Broken.lamp_on,
   };
 }
 
@@ -3021,5 +3140,21 @@ extension WebhookEventUtils on WebhookEvent {
     WebhookEvent.trackChanged => Broken.music,
     WebhookEvent.play => Broken.play,
     WebhookEvent.pause => Broken.pause,
+  };
+}
+
+extension LyricsIntegrationL10n on LyricsIntegration {
+  String toText() => switch (this) {
+    LyricsIntegration.lyricInfo => 'ColorOS & HyperLyric',
+    LyricsIntegration.superLyric => 'SuperLyric',
+    LyricsIntegration.flymeTicker => 'Flyme & Lyricon',
+  };
+}
+
+extension LyricsIntegrationUtils on LyricsIntegration {
+  IconData toIcon() => switch (this) {
+    LyricsIntegration.lyricInfo => Broken.mobile,
+    LyricsIntegration.superLyric => Broken.status,
+    LyricsIntegration.flymeTicker => Broken.notification_status,
   };
 }

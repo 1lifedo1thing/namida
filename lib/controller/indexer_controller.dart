@@ -842,6 +842,7 @@ class Indexer<T extends Track> {
         trackNo: 0,
         trackTo: 0,
         durationMS: 0,
+        chapters: null,
         year: 0,
         yearText: '',
         size: fileStat?.size ?? 0,
@@ -865,6 +866,7 @@ class Indexer<T extends Track> {
         label: '',
         releaseType: '',
         bpm: 0,
+        musicalKey: '',
         rating: 0.0,
         originalTags: null,
         tagsList: [],
@@ -984,6 +986,7 @@ class Indexer<T extends Track> {
           label: tags.recordLabel,
           releaseType: tags.releaseType,
           bpm: tags.bpm,
+          musicalKey: tags.musicalKey ?? '',
           rating: tags.ratingPercentage,
           originalTags: tags.tags,
           tagsList: tagsEmbedded,
@@ -997,6 +1000,7 @@ class Indexer<T extends Track> {
           gainData: tags.gainData,
           sortInfo: tags.sortInfo,
           extraTags: tags.extraTags,
+          chapters: tags.chapters,
           generatePathHash: TagsExtractor.defaultUniqueArtworkHash,
         );
 
@@ -1322,10 +1326,7 @@ class Indexer<T extends Track> {
         final isDir = await Directory(path).exists().ignoreError() ?? false;
         if (!isDir) return <String>[path];
         final files = await Directory(path).listAllIsolate(recursive: true).ignoreError() ?? [];
-        return <String>[
-          for (final f in files)
-            if (f is File) f.path,
-        ];
+        return files.whereType<File>().map((f) => f.path).where(NamidaFileExtensionsWrapper.audioAndVideo.isPathValid).toFixedList();
       },
       concurrency: 4, // -- each directory listing spawns an isolate
     );
@@ -1859,6 +1860,7 @@ class Indexer<T extends Track> {
     String? tagsString,
     String? moodsString,
     int? lastPositionInMs,
+    List<PlayableBookmark>? bookmarks,
   }) async {
     if (ratingString != null || tagsString != null || moodsString != null) {
       TrackTileManager.rebuildTrackInfo(track);
@@ -1875,6 +1877,7 @@ class Indexer<T extends Track> {
     final tags = tagsString != null ? splitByCommaList(tagsString) : track.effectiveTags;
     final moods = moodsString != null ? splitByCommaList(moodsString) : track.effectiveMoods;
     lastPositionInMs ??= track.lastPlayedPositionInMs ?? 0;
+    bookmarks ??= statsRaw?.bookmarks;
     final newStats = TrackStats(
       track: track,
       rating: rating?.clampInt(0, 100) ?? 0,
@@ -1882,6 +1885,7 @@ class Indexer<T extends Track> {
       moods: moods,
       lastPositionInMs: lastPositionInMs,
       audioTrackId: statsRaw?.audioTrackId,
+      bookmarks: bookmarks,
       modifiedDate: currentTimeMS,
     );
     trackStatsMap[track] = newStats;
@@ -1901,6 +1905,7 @@ class Indexer<T extends Track> {
       moods: stats?.moods,
       lastPositionInMs: stats?.lastPositionInMs ?? 0,
       audioTrackId: audioTrackId,
+      bookmarks: stats?.bookmarks,
       modifiedDate: currentTimeMS,
     );
     trackStatsMap[track] = newStats;
@@ -1920,6 +1925,7 @@ class Indexer<T extends Track> {
               moods: incoming.moods,
               lastPositionInMs: incoming.lastPositionInMs,
               audioTrackId: incoming.audioTrackId,
+              bookmarks: incoming.bookmarks,
               modifiedDate: incoming.modifiedDate,
             );
       final track = effective.track;
@@ -1987,18 +1993,6 @@ class Indexer<T extends Track> {
       await _trackStatsDBManager.put(oldNew.value.path, oldValueDB);
       // await _trackStatsDBManager.delete(oldNew.key.path); // not so important ig, preserve just in case
     }
-  }
-
-  Set<String> getAllLibraryMoods() {
-    final items = <String>{};
-    _loopLibraryMoods((name, tr) => items.add(name));
-    return items;
-  }
-
-  Set<String> getAllLibraryTags() {
-    final items = <String>{};
-    _loopLibraryTags((name, tr) => items.add(name));
-    return items;
   }
 
   Map<String, int> getLibraryMoodsCounts() {
@@ -2539,6 +2533,7 @@ class Indexer<T extends Track> {
         trackNo: e.track ?? 0,
         trackTo: trackTo ?? 0,
         durationMS: e.duration ?? 0, // `e.duration` => milliseconds
+        chapters: null,
         year: TrackExtended.enforceYearFormat(yearString) ?? 0,
         yearText: yearString ?? '',
         size: e.size,
@@ -2562,6 +2557,7 @@ class Indexer<T extends Track> {
         label: '',
         releaseType: '',
         bpm: 0,
+        musicalKey: '',
         rating: 0.0,
         originalTags: tag,
         tagsList: tags,

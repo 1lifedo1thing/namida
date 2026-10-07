@@ -1,5 +1,5 @@
 // signal path ui by claude
-part of 'equalizer_page.dart';
+part of 'sound_control_page.dart';
 
 class _SignalPathSheet extends StatefulWidget {
   final double maxHeight;
@@ -165,6 +165,11 @@ abstract final class _SignalPathSteps {
       final preamp = equalizer.computeEffectivePreamp();
       final preampText = _EqualizerFormat.gain(preamp);
       steps.add(_SignalPathStep(icon: Broken.chart_3, title: lang.equalizer, detail: '${lang.preamp} $preampText', changesAudio: true));
+    }
+    final soundEffects = settings.equalizer.soundEffects.valueR;
+    if (Platform.isAndroid && soundEffects.isNotEmpty) {
+      final effectNames = soundEffects.map((e) => e.toText()).joinText(separator: ', ');
+      steps.add(_SignalPathStep(icon: Broken.magic_star, title: lang.soundEffects, detail: effectNames, changesAudio: true));
     }
     final isLoudnessEnhancerAudible = Platform.isAndroid && !isUsbDirect && config.loudnessEnhancerEnabled && config.loudnessEnhancer != 0.0;
     if (isLoudnessEnhancerAudible) {

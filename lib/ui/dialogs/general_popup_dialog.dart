@@ -24,6 +24,7 @@ import 'package:namida/controller/platform/namida_channel/namida_channel.dart';
 import 'package:namida/controller/platform/namida_storage/namida_storage.dart';
 import 'package:namida/controller/player_controller.dart';
 import 'package:namida/controller/playlist_controller.dart';
+import 'package:namida/controller/selected_tracks_controller.dart';
 import 'package:namida/controller/smart_playlists/smart_playlists_controller.dart';
 import 'package:namida/core/constants.dart';
 import 'package:namida/core/dimensions.dart';
@@ -38,6 +39,8 @@ import 'package:namida/core/utils.dart';
 import 'package:namida/main.dart';
 import 'package:namida/packages/three_arched_circle.dart';
 import 'package:namida/ui/dialogs/add_to_playlist_dialog.dart';
+import 'package:namida/ui/dialogs/bookmarks_sheet.dart';
+import 'package:namida/ui/dialogs/chapters_sheet.dart';
 import 'package:namida/ui/dialogs/common_dialogs.dart';
 import 'package:namida/ui/dialogs/create_smart_playlist_dialog.dart';
 import 'package:namida/ui/dialogs/edit_tags_dialog.dart';
@@ -84,6 +87,7 @@ Future<void> showGeneralPopupDialog(
   Folder? folder,
 }) async {
   final isSingle = tracks.length == 1;
+  final chaptersCount = isSingle ? tracks.first.toTrackExtOrNull()?.chapters?.length ?? 0 : 0;
   forceSingleArtwork ??= isSingle;
 
   final tracksExisting = <Track>[];
@@ -99,6 +103,22 @@ Future<void> showGeneralPopupDialog(
   }
 
   final isSingleAndFromQueue = index != null && isSingle && source == QueueSource.playerQueue;
+  final isSelectionFromQueue = source == QueueSource.selectedTracks && SelectedTracksController.inst.isSelectedFromPlayerQueue;
+  void Function()? moveToNextInQueue;
+  void Function()? moveToLastInQueue;
+  if (isSingleAndFromQueue) {
+    moveToNextInQueue = () => Player.inst.moveToNext(index).closeDialog();
+    moveToLastInQueue = () => Player.inst.moveToLast(index).closeDialog();
+  } else if (isSelectionFromQueue) {
+    moveToNextInQueue = () {
+      final indices = Player.inst.queueIndicesOf(tracks);
+      Player.inst.moveItemsToNext(indices).closeDialog();
+    };
+    moveToLastInQueue = () {
+      final indices = Player.inst.queueIndicesOf(tracks);
+      Player.inst.moveItemsToLast(indices).closeDialog();
+    };
+  }
   final isSingleAndCurrentTrack = isSingle && tracks.first == Player.inst.currentTrack?.track;
   final int? stopAfterItems = isSingleAndFromQueue
       ? Player.inst.sleepAfterItemsForIndex(index)
@@ -966,6 +986,27 @@ Future<void> showGeneralPopupDialog(
                               ),
                             ),
                             const SizedBox(width: 16.0),
+                            if (isSingle)
+                              _BookmarksChip(
+                                track: tracks.first,
+                                color: colorDelightened,
+                                onTap: () {
+                                  cancelSkipTimer();
+                                  NamidaNavigator.inst.closeDialog();
+                                  showBookmarksSheet(tracks.first);
+                                },
+                              ),
+                            if (chaptersCount > 0)
+                              _MenuCountChip(
+                                icon: Broken.weight_1,
+                                count: chaptersCount,
+                                color: colorDelightened,
+                                onTap: () {
+                                  cancelSkipTimer();
+                                  NamidaNavigator.inst.closeDialog();
+                                  showChaptersSheet(tracks.first);
+                                },
+                              ),
                             if (customArtworkManager != null) ...[
                               _ArtworkManager(
                                 customArtworkManager: customArtworkManager,
@@ -1067,7 +1108,7 @@ Future<void> showGeneralPopupDialog(
                                       onTap: () {
                                         cancelSkipTimer();
                                         NamidaNavigator.inst.closeDialog();
-                                        Player.inst.next();
+                                        Player.inst.next(jumpChapters: false);
                                       },
                                     ),
                                   ),
@@ -1327,7 +1368,7 @@ Future<void> showGeneralPopupDialog(
                                         icon: Icon(
                                           Broken.setting_4,
                                           size: 20.0,
-                                          color: context.defaultIconColor(),
+                                          color: iconColor,
                                         ),
                                         iconSize: 20.0,
                                         onPressed: () {
@@ -1354,7 +1395,7 @@ Future<void> showGeneralPopupDialog(
                                     icon: Icon(
                                       Broken.setting_4,
                                       size: 20.0,
-                                      color: context.defaultIconColor(),
+                                      color: iconColor,
                                     ),
                                     iconSize: 20.0,
                                     onPressed: () {
@@ -1601,7 +1642,7 @@ Future<void> showGeneralPopupDialog(
                                         NamidaNavigator.inst.closeDialog();
                                         Player.inst.addToQueue(tracks, insertNext: true, showSnackBar: !isSingle);
                                       },
-                                      onLongPress: isSingleAndFromQueue ? () => Player.inst.moveToNext(index).closeDialog() : null,
+                                      onLongPress: moveToNextInQueue,
                                     ),
                                   ),
                                   Container(
@@ -1619,7 +1660,7 @@ Future<void> showGeneralPopupDialog(
                                         NamidaNavigator.inst.closeDialog();
                                         Player.inst.addToQueue(tracks, showSnackBar: !isSingle);
                                       },
-                                      onLongPress: isSingleAndFromQueue ? () => Player.inst.moveToLast(index).closeDialog() : null,
+                                      onLongPress: moveToLastInQueue,
                                     ),
                                   ),
                                 ],
@@ -1894,5 +1935,80 @@ extension CustomArtworkManagerDialog on CustomArtworkManager {
     } else {
       await onEdit();
     }
+  }
+}
+
+class _BookmarksChip extends StatelessWidget {
+  final Track track;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _BookmarksChip({
+    required this.track,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ObxOSelect(
+      rx: Indexer.inst.trackStatsMap,
+      selector: (statsMap) => statsMap[track]?.bookmarks?.length ?? 0,
+      builder: (context, count) => count == 0
+          ? const SizedBox()
+          : _MenuCountChip(
+              icon: Broken.book_saved,
+              count: count,
+              color: color,
+              onTap: onTap,
+            ),
+    );
+  }
+}
+
+class _MenuCountChip extends StatelessWidget {
+  final IconData icon;
+  final int count;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _MenuCountChip({
+    required this.icon,
+    required this.count,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = context.theme;
+    final contentColor = Color.alphaBlend(color.withAlpha(30), theme.textTheme.displaySmall!.color!);
+    return Padding(
+      padding: const EdgeInsets.only(right: 10.0),
+      child: NamidaInkWell(
+        borderRadius: 8.0,
+        padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 4.0),
+        bgColor: theme.colorScheme.onSurface.withAlpha(12),
+        onTap: onTap,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 16.0,
+              color: contentColor,
+            ),
+            const SizedBox(width: 4.0),
+            Text(
+              '$count',
+              style: theme.textTheme.displaySmall?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: contentColor,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

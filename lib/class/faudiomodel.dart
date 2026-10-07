@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:namida/class/media_chapter.dart';
 import 'package:namida/class/media_info.dart';
 import 'package:namida/class/replay_gain_data.dart';
 import 'package:namida/class/taglib_res.dart';
@@ -95,6 +96,7 @@ class FTags {
   final String? recordLabel;
   final String? releaseType;
   final int? bpm;
+  final String? musicalKey;
   final String? mbAlbumId;
   final String? mbAlbumArtistId;
 
@@ -105,9 +107,13 @@ class FTags {
   /// identifiers worth keeping, keyed by their picard tag name. see [pickExtraTags].
   final Map<String, String>? extraTags;
 
+  /// sorted by start, null when the file has less than 2. writing leaves the file's chapters untouched when null.
+  final List<MediaChapter>? chapters;
+
   const FTags({
     required this.path,
     required this.artwork,
+    this.chapters,
     required this.title,
     required this.album,
     required this.albumArtist,
@@ -137,6 +143,7 @@ class FTags {
     required this.recordLabel,
     required this.releaseType,
     required this.bpm,
+    required this.musicalKey,
     this.mbAlbumId,
     this.mbAlbumArtistId,
     required this.ratingPercentage,
@@ -148,6 +155,7 @@ class FTags {
   const FTags.edit({
     required this.path,
     required this.artwork,
+    this.chapters,
     this.title,
     this.album,
     this.albumArtist,
@@ -177,6 +185,7 @@ class FTags {
     this.recordLabel,
     this.releaseType,
     this.bpm,
+    this.musicalKey,
     this.mbAlbumId,
     this.mbAlbumArtistId,
     this.ratingPercentage,
@@ -286,6 +295,7 @@ class FTags {
       recordLabel: _listToString(map["recordLabel"]) ?? map["RECORDLABEL"] ?? map["label"] ?? map["LABEL"],
       releaseType: _listToString(map["releaseType"]) ?? map["RELEASETYPE"],
       bpm: MediaInfo.extractInt(map["bpm"]),
+      musicalKey: map["musicalKey"],
       mbAlbumId: map["mbAlbumId"] ?? map["MUSICBRAINZ_ALBUMID"] ?? map["MusicBrainz Album Id"],
       mbAlbumArtistId: map["mbAlbumArtistId"] ?? map["MUSICBRAINZ_ALBUMARTISTID"] ?? map["MusicBrainz Album Artist Id"],
       ratingPercentage: ratingToPercentage(ratingString),
@@ -327,6 +337,7 @@ class FTags {
       "recordLabel": recordLabel,
       "releaseType": releaseType,
       "bpm": bpm,
+      "musicalKey": musicalKey,
       "language": language,
       "mbAlbumId": mbAlbumId,
       "mbAlbumArtistId": mbAlbumArtistId,

@@ -6,6 +6,7 @@ import 'package:playlist_manager/playlist_manager.dart';
 
 import 'package:namida/class/faudiomodel.dart';
 import 'package:namida/class/folder.dart';
+import 'package:namida/class/media_chapter.dart';
 import 'package:namida/class/replay_gain_data.dart';
 import 'package:namida/class/split_config.dart';
 import 'package:namida/class/video.dart';
@@ -102,6 +103,7 @@ class TrackStats extends PlayableItemStats {
     required super.moods,
     required super.lastPositionInMs,
     required super.audioTrackId,
+    required super.bookmarks,
     super.modifiedDate,
   });
 
@@ -118,6 +120,7 @@ class TrackStats extends PlayableItemStats {
       moods: stats.moods,
       lastPositionInMs: stats.lastPositionInMs,
       audioTrackId: stats.audioTrackId,
+      bookmarks: stats.bookmarks,
       modifiedDate: stats.modifiedDate,
     );
   }
@@ -130,6 +133,7 @@ class TrackStats extends PlayableItemStats {
       moods: track.effectiveMoods,
       lastPositionInMs: track.lastPlayedPositionInMs ?? 0,
       audioTrackId: track.effectiveAudioTrackId,
+      bookmarks: track.statsRaw?.bookmarks,
     );
   }
 
@@ -160,6 +164,9 @@ class PlayableItemStats {
 
   String? audioTrackId;
 
+  /// sorted by position.
+  List<PlayableBookmark>? bookmarks;
+
   int modifiedDate = 0;
 
   PlayableItemStats({
@@ -168,6 +175,7 @@ class PlayableItemStats {
     required this.moods,
     required this.lastPositionInMs,
     required this.audioTrackId,
+    required this.bookmarks,
     this.modifiedDate = 0,
   });
 
@@ -176,6 +184,11 @@ class PlayableItemStats {
       return listJson.cast<String>();
     }
     return null;
+  }
+
+  static List<PlayableBookmark>? _parseBookmarks(dynamic listJson) {
+    if (listJson is! List || listJson.isEmpty) return null;
+    return listJson.map((e) => PlayableBookmark.fromJson((e as Map).cast<String, dynamic>())).toFixedList();
   }
 
   static List<String>? _cleanList(List<String>? current) {
@@ -190,6 +203,7 @@ class PlayableItemStats {
       moods: _parseList(json['moods']) ?? [],
       lastPositionInMs: json['pms'] ?? json['lastPositionInMs'] ?? 0,
       audioTrackId: json['aid'],
+      bookmarks: _parseBookmarks(json['bm']),
       modifiedDate: json['_mt'] ?? 0,
     );
   }
@@ -197,12 +211,15 @@ class PlayableItemStats {
   Map<String, dynamic>? toJson() {
     final tagsFinal = _cleanList(tags);
     final moodsFinal = _cleanList(moods);
+    final bookmarks = this.bookmarks;
+    final bookmarksFinal = bookmarks == null || bookmarks.isEmpty ? null : bookmarks.map((e) => e.toJson()).toFixedList();
     final map = {
       if (rating > 0) 'rating': rating,
       'tags': ?tagsFinal,
       'moods': ?moodsFinal,
       if (lastPositionInMs > 0) 'pms': lastPositionInMs,
       if (audioTrackId != null) 'aid': audioTrackId,
+      'bm': ?bookmarksFinal,
     };
     if (map.isEmpty) return null;
     if (modifiedDate > 0) map['_mt'] = modifiedDate;
@@ -211,8 +228,30 @@ class PlayableItemStats {
 
   @override
   String toString() {
-    return 'PlayableItemStats(rating: $rating, tags: $tags, moods: $moods, pms: $lastPositionInMs, aid: $audioTrackId)';
+    return 'PlayableItemStats(rating: $rating, tags: $tags, moods: $moods, pms: $lastPositionInMs, aid: $audioTrackId, bm: ${bookmarks?.length})';
   }
+}
+
+class PlayableBookmark {
+  final int positionMS;
+  final String? title;
+
+  const PlayableBookmark({
+    required this.positionMS,
+    required this.title,
+  });
+
+  factory PlayableBookmark.fromJson(Map<String, dynamic> json) {
+    return PlayableBookmark(
+      positionMS: json['p'] ?? 0,
+      title: json['t'],
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'p': positionMS,
+    't': ?title,
+  };
 }
 
 enum PlayableType {
@@ -353,6 +392,7 @@ class TrackExtended {
   final String label;
   final String releaseType;
   final int? bpm;
+  final String musicalKey;
   final double rating;
   final String? originalTags;
   final List<String> tagsList;
@@ -362,6 +402,9 @@ class TrackExtended {
 
   /// identifiers keyed by their picard tag name (`MUSICBRAINZ_TRACKID`, `ISRC`, ...), see [FTags.pickExtraTags].
   final Map<String, String>? extraTags;
+
+  /// sorted by start, null when the file has less than 2.
+  final List<MediaChapter>? chapters;
 
   final List<AlbumIdentifierWrapper> albumsIdentifiersWrappers;
   final bool isVideo;
@@ -416,6 +459,7 @@ class TrackExtended {
     required this.label,
     required this.releaseType,
     required this.bpm,
+    required this.musicalKey,
     required this.rating,
     required this.originalTags,
     required this.tagsList,
@@ -423,6 +467,7 @@ class TrackExtended {
     required this.sortInfo,
     required this.hashKey,
     required this.extraTags,
+    required this.chapters,
     required this.albumsIdentifiersWrappers,
     required this.isVideo,
     required this.server,
@@ -633,6 +678,7 @@ class TrackExtended {
       label: json['label'] ?? '',
       releaseType: json['releaseType'] ?? '',
       bpm: json['bpm'] as int?,
+      musicalKey: json['musicalKey'] ?? '',
       rating: json['rating'] ?? 0.0,
       originalTags: json['originalTags'],
       tagsList: Indexer.splitGeneral(
@@ -643,6 +689,7 @@ class TrackExtended {
       sortInfo: json['sortInfo'] == null ? null : FTagsSortInfo.fromMap(json['sortInfo']),
       hashKey: json['hashKey'],
       extraTags: _extraTagsFromJson(json['extraTags']),
+      chapters: MediaChapter.listFromJson(json['chapters']),
       albumsIdentifiersWrappers: albumsIdentifiersWrappers,
       isVideo: json['v'] ?? false,
       server: json['server'],
@@ -667,6 +714,7 @@ class TrackExtended {
       if (trackNo > 0) 'trackNo': trackNo,
       if (trackTo > 0) 'trackTo': trackTo,
       if (durationMS > 0) 'durationMS': durationMS,
+      'chapters': ?chapters?.map((e) => e.toJson()).toFixedList(),
       if (year > 0) 'year': year,
       if (yearText.isNotEmpty) 'yearText': yearText,
       if (size > 0) 'size': size,
@@ -688,6 +736,7 @@ class TrackExtended {
       if (label.isNotEmpty) 'label': label,
       if (releaseType.isNotEmpty) 'releaseType': releaseType,
       if (bpm != null && bpm! > 0) 'bpm': bpm,
+      if (musicalKey.isNotEmpty) 'musicalKey': musicalKey,
       if (rating > 0) 'rating': rating,
       if (originalTags?.isNotEmpty == true) 'originalTags': originalTags,
       if (gainData != null) 'gainData': ?gainData?.toMap(),
@@ -953,6 +1002,7 @@ extension TrackExtUtils on TrackExtended {
       label: tag.recordLabel ?? label,
       releaseType: tag.releaseType ?? releaseType,
       bpm: tag.bpm ?? bpm,
+      musicalKey: tag.musicalKey ?? musicalKey,
       rating: tag.ratingPercentage ?? rating,
       originalTags: tag.tags ?? originalTags,
       tagsList: finaltagsEmbedded,
@@ -965,6 +1015,7 @@ extension TrackExtUtils on TrackExtended {
       channels: channels,
       dateAdded: dateAdded,
       durationMS: durationMS,
+      chapters: chapters,
       format: format,
       sampleRate: sampleRate,
       bits: bits,
@@ -1004,6 +1055,7 @@ extension TrackExtUtils on TrackExtended {
 
     /// track's duration in milliseconds.
     int? durationMS,
+    List<MediaChapter>? chapters,
     int? year,
     String? yearText,
     int? size,
@@ -1027,6 +1079,7 @@ extension TrackExtUtils on TrackExtended {
     String? label,
     String? releaseType,
     int? bpm,
+    String? musicalKey,
     double? rating,
     String? originalTags,
     List<String>? tagsList,
@@ -1082,6 +1135,7 @@ extension TrackExtUtils on TrackExtended {
       label: label ?? this.label,
       releaseType: releaseType ?? this.releaseType,
       bpm: bpm ?? this.bpm,
+      musicalKey: musicalKey ?? this.musicalKey,
       rating: rating ?? this.rating,
       originalTags: originalTags ?? this.originalTags,
       tagsList: tagsList ?? this.tagsList,
@@ -1089,6 +1143,7 @@ extension TrackExtUtils on TrackExtended {
       sortInfo: sortInfo ?? this.sortInfo,
       hashKey: newHashKey,
       extraTags: extraTags ?? this.extraTags,
+      chapters: chapters ?? this.chapters,
       albumsIdentifiersWrappers: albumsIdentifiersWrappers ?? this.albumsIdentifiersWrappers,
       isVideo: isVideo ?? this.isVideo,
       server: server ?? this.server,
@@ -1152,6 +1207,7 @@ extension TrackUtils on Track {
   String get label => toTrackExt().label;
   String get releaseType => toTrackExt().releaseType;
   int? get bpm => toTrackExt().bpm;
+  String get musicalKey => toTrackExt().musicalKey;
 
   int? get lastPlayedPositionInMs => statsRaw?.lastPositionInMs;
   TrackStats? get statsRaw => Indexer.inst.trackStatsMap.value[this];

@@ -262,8 +262,10 @@ class _SettingsController extends _SettingsKeysWriter {
   late final serversMaxCacheInMB = _key('serversMaxCacheInMB', isDesktop ? 12 * 1024 : (isKuru ? -1 : 4 * 1024), sync: false);
   late final imagesMaxCacheInMB = _key('imagesMaxCacheInMB', isDesktop || isKuru ? 2 * 1024 : 8 * 32, sync: false);
   late final hideStatusBarInExpandedMiniplayer = _key('hideStatusBarInExpandedMiniplayer', false);
-  late final displayFavouriteButtonInNotification = _key('displayFavouriteButtonInNotification', false);
-  late final displayStopButtonInNotification = _key('displayStopButtonInNotification', true);
+  static const _kDefaultNotificationButtons = [NotificationButton.previous, NotificationButton.playPause, NotificationButton.next, NotificationButton.stop];
+  late final notificationButtons = _keyList('notificationButtons', _kDefaultNotificationButtons, item: NotificationButton.values.asCodec(), isUnique: true, isNonEmpty: true);
+  late final notificationButtonsPlaylist = _key<String?>('notificationButtonsPlaylist', null);
+  late final notificationButtonsYTPlaylist = _key<String?>('notificationButtonsYTPlaylist', null);
   late final enableSearchCleanup = _key('enableSearchCleanup', true);
   late final enableBottomNavBar = _key('enableBottomNavBar', true);
   late final displayAudioInfoMiniplayer = _key('displayAudioInfoMiniplayer', false);
@@ -274,7 +276,7 @@ class _SettingsController extends _SettingsKeysWriter {
   late final enableM3USync = _key('enableM3USync', false, sync: false);
   late final enableM3USyncStartup = _key('enableM3USyncStartup', true, sync: false);
   late final importServerPlaylists = _key('importServerPlaylists', true, sync: false);
-  late final prioritizeEmbeddedLyrics = _key('prioritizeEmbeddedLyrics', true);
+  late final embeddedLyricsPriority = _keyEnum('embeddedLyricsPriority', EmbeddedLyricsPriority.onlyWhenSynced, EmbeddedLyricsPriority.values);
   late final romanizeLyrics = _key('romanizeLyrics', false);
   late final romanizeSorting = _key('romanizeSorting', false);
   late final swipeableDrawer = _key('swipeableDrawer', true);
@@ -282,6 +284,7 @@ class _SettingsController extends _SettingsKeysWriter {
   late final enableClipboardMonitoring = _key('enableClipboardMonitoring', false, sync: false);
   late final artworkGestureDoubleTapLRC = _key('artworkGestureDoubleTapLRC', true);
   late final previousButtonReplays = _key('previousButtonReplays', false);
+  late final skipButtonsJumpChapters = _key('skipButtonsJumpChapters', false);
   late final refreshOnStartup = _key('refreshOnStartup', false, sync: false);
   late final alwaysExpandedSearchbar = _key('alwaysExpandedSearchbar', isKuru ? true : false);
   late final mixedQueue = _key('mixedQueue', false);
@@ -302,6 +305,7 @@ class _SettingsController extends _SettingsKeysWriter {
   late final customEQPackage = _key<String?>('customEQPackage', null, sync: false);
   late final stretchLyricsDuration = _key('stretchLyricsDuration', true);
   late final visualDelayMS = _key('visualDelayMS', 0);
+  late final lyricsEditorLatencyMS = _key('lyricsEditorLatencyMS', 0, sync: false);
   late final timeCapsuleYears = _key<int?>('timeCapsuleYears', null);
 
   late final playlistAddTracksAtBeginning = _key('playlistAddTracksAtBeginning', false);
@@ -490,6 +494,7 @@ class _SettingsController extends _SettingsKeysWriter {
   late final scrobblerBroadcast = _key('scrobblerBroadcast', false, sync: false);
   late final webhookUrl = _key('webhookUrl', '', sync: false);
   late final webhookEvents = _keySet<WebhookEvent>('webhookEvents', _kDefaultWebhookEvents, item: WebhookEvent.values.asCodec(), sync: false);
+  late final lyricsIntegrations = _keySet<LyricsIntegration>('lyricsIntegrations', const {}, item: LyricsIntegration.values.asCodec(), sync: false);
 
   static const _kDefaultWebhookEvents = {WebhookEvent.trackChanged, WebhookEvent.play, WebhookEvent.pause};
 
@@ -543,6 +548,19 @@ class _SettingsController extends _SettingsKeysWriter {
       final listName = '${name}s';
       _migrateKey(name, listName, (json) => json is String && _raw[listName] == null ? [json] : null);
     }
+
+    final isFavouriteInNotification = _dropKey('displayFavouriteButtonInNotification') == true;
+    final isStopInNotification = _dropKey('displayStopButtonInNotification') != false;
+    final didCustomizeNotification = isFavouriteInNotification || !isStopInNotification;
+    if (didCustomizeNotification && _raw['notificationButtons'] == null) {
+      _raw['notificationButtons'] = <String>[
+        if (isFavouriteInNotification) NotificationButton.favourite.name,
+        ..._kDefaultNotificationButtons.where((button) => button != NotificationButton.stop || isStopInNotification).map((button) => button.name),
+      ];
+    }
+
+    // -- `true` was the old default, only an explicit `false` is kept
+    _migrateKey('prioritizeEmbeddedLyrics', 'embeddedLyricsPriority', (json) => json == false && _raw['embeddedLyricsPriority'] == null ? EmbeddedLyricsPriority.off.name : null);
   }
 
   void updateMediaItemsTrackSortingAll(MediaType media, List<SortType>? allsorts, bool? isReverse) {

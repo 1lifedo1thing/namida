@@ -410,6 +410,7 @@ class CustomizationSettings extends SettingSubpageProvider {
     bool excludePlayerActions = false,
     bool excludeDelete = true,
     bool excludeFocus = false,
+    bool includePlayingItemActions = false,
     required String title,
     required IconData icon,
     required Rx<TrackExecuteActions> rx,
@@ -417,19 +418,16 @@ class CustomizationSettings extends SettingSubpageProvider {
   }) {
     Iterable<NamidaPopupItem> getChildren() {
       var values = TrackExecuteActions.values;
-      if (excludePlayerActions || excludeDelete || excludeFocus) {
+      if (excludePlayerActions || excludeDelete || excludeFocus || !includePlayingItemActions) {
         final valuesToExclude = <TrackExecuteActions>[
-          if (excludePlayerActions) ...[
-            TrackExecuteActions.playnext,
-            TrackExecuteActions.playlast,
-            TrackExecuteActions.playafter,
-          ],
+          if (excludePlayerActions) ...TrackExecuteActions.playerActions,
           if (excludeDelete) ...[
             TrackExecuteActions.delete,
           ],
           if (excludeFocus) ...[
             TrackExecuteActions.focus,
           ],
+          if (!includePlayingItemActions) ...TrackExecuteActions.playingItemOnlyActions,
         ];
         values = TrackExecuteActions.values.where((element) => !valuesToExclude.remove(element)).toList();
       }
@@ -1199,6 +1197,7 @@ class CustomizationSettings extends SettingSubpageProvider {
                   context: context,
                   key: _CustomizationSettingsKeys.artworkTapAction,
                   excludePlayerActions: true,
+                  includePlayingItemActions: true,
                   title: lang.tapAction,
                   icon: Broken.cd,
                   rx: settings.artworkTapAction,
@@ -1208,6 +1207,7 @@ class CustomizationSettings extends SettingSubpageProvider {
                   context: context,
                   key: _CustomizationSettingsKeys.artworkLongPressAction,
                   excludePlayerActions: true,
+                  includePlayingItemActions: true,
                   title: lang.longPressAction,
                   icon: Broken.story,
                   rx: settings.artworkLongPressAction,

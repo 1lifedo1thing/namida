@@ -25,6 +25,8 @@ import 'package:namida/class/video.dart';
 import 'package:namida/controller/artwork_prefetcher.dart';
 import 'package:namida/controller/audio_cache_controller.dart';
 import 'package:namida/controller/audio_output_controller.dart';
+import 'package:namida/controller/bookmarks_controller.dart';
+import 'package:namida/controller/chapters_controller.dart';
 import 'package:namida/controller/connectivity.dart';
 import 'package:namida/controller/current_color.dart';
 import 'package:namida/controller/history_controller.dart';
@@ -33,6 +35,7 @@ import 'package:namida/controller/indexer_controller.dart';
 import 'package:namida/controller/listen_time_controller.dart';
 import 'package:namida/controller/logs_controller.dart';
 import 'package:namida/controller/lyrics_controller.dart';
+import 'package:namida/controller/lyrics_integrations.dart';
 import 'package:namida/controller/miniplayer_controller.dart';
 import 'package:namida/controller/music_web_server/music_web_server_base.dart';
 import 'package:namida/controller/navigator_controller.dart';
@@ -43,6 +46,7 @@ import 'package:namida/controller/player_controller.dart';
 import 'package:namida/controller/party/party_player_gate.dart';
 import 'package:namida/controller/playlist_controller.dart';
 import 'package:namida/controller/queue_controller.dart';
+import 'package:namida/controller/rhythm_controller.dart';
 import 'package:namida/controller/settings_controller.dart';
 import 'package:namida/controller/smtc_controller.dart';
 import 'package:namida/controller/subtitles_controller.dart';
@@ -70,7 +74,9 @@ import 'package:namida/youtube/controller/youtube_info_controller.dart';
 import 'package:namida/youtube/controller/youtube_playlist_controller.dart';
 import 'package:namida/youtube/widgets/yt_thumbnail.dart';
 
-class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> {
+part 'audio_handler.notification_buttons.dart';
+
+class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> with _NotificationButtonsMixin<Q> {
   @override
   bool getLoudnessEnhancerEnabledTrackValue() => settings.player.replayGainType.value.isLoudnessEnhancerEnabled;
   @override
@@ -88,6 +94,7 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> {
   set partyGate(PartyPlayerGate? gate) {
     _partyGate = gate;
     if (gate == null) forcedRepeatMode.value = null;
+    refreshCrossfadeTransition();
   }
 
   bool get _willPlayWhenReady => playWhenReady.value;
@@ -109,6 +116,7 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> {
 
   NamidaAudioVideoHandler() {
     AudioCacheController.inst.updateAudioCacheMap();
+    _initNotificationButtons();
     playWhenReady.addListener(() {
       final ye = playWhenReady.value;
       CurrentColor.inst.switchColorPalettes(playWhenReady: ye);
@@ -144,6 +152,7 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> {
       final shuffled = isQueueShuffled;
       if (wasShuffled != shuffled) MiniPlayerController.inst.animateQueueToCurrentTrack(jump: false, minZero: true);
       refreshPlaybackStateModes();
+      _refreshNotificationButtonsIfShown(NotificationButton.shuffle);
       SMTCController.instance?.updateShuffle(shuffled);
     }
 
@@ -390,8 +399,9 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> {
     final generation = ++_notificationUpdateGeneration;
     final media = await item.toMediaItem(currentIndex.value, currentQueue.value.length, duration);
     if (generation != _notificationUpdateGeneration) return;
-    mediaItem.add(media);
-    playbackState.add(transformEvent(PlaybackEvent(currentIndex: currentIndex.value), isItemFavourite, itemIndex));
+    final publishedMedia = LyricsIntegrations.prepareMediaItem(media);
+    mediaItem.add(publishedMedia);
+    playbackState.add(_transformEvent(PlaybackEvent(currentIndex: currentIndex.value), item, isItemFavourite, itemIndex));
 
     _refreshPlatformStatusDependers(media, playWhenReady.value, isItemFavourite);
   }
@@ -410,9 +420,16 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> {
     final media = await youtubeIdMediaItem(index, ql);
     if (generation != _notificationUpdateGeneration) return;
     final isItemFavourite = _isYoutubeIDFavouriteOrLiked(item);
-    mediaItem.add(media);
-    playbackState.add(transformEvent(PlaybackEvent(currentIndex: index), isItemFavourite, itemIndex));
+    final publishedMedia = LyricsIntegrations.prepareMediaItem(media);
+    mediaItem.add(publishedMedia);
+    playbackState.add(_transformEvent(PlaybackEvent(currentIndex: index), item, isItemFavourite, itemIndex));
     _refreshPlatformStatusDependers(media, playWhenReady.value, isItemFavourite);
+  }
+
+  /// for extras arriving after [media] was published, ignored once another item took over.
+  void republishMediaItem(MediaItem media) {
+    if (mediaItem.value?.id != media.id) return;
+    mediaItem.add(media);
   }
 
   void _refreshNotificationFavouriteStatus() {
@@ -420,7 +437,7 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> {
     if (item is! YoutubeID) return;
     final isItemFavourite = _isYoutubeIDFavouriteOrLiked(item);
     final index = currentIndex.value;
-    playbackState.add(transformEvent(PlaybackEvent(currentIndex: index), isItemFavourite, index));
+    playbackState.add(_transformEvent(PlaybackEvent(currentIndex: index), item, isItemFavourite, index));
     final media = mediaItem.value;
     if (media != null) _refreshPlatformStatusDependers(media, playWhenReady.value, isItemFavourite);
   }
@@ -881,6 +898,7 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> {
     // -- should be done here so that if info fetching takes time, crossfade out still works.
     // -- otherwise the previous item would keep playing indefinetly.
     beginEarlyCrossFadeOutIfRequired();
+    RhythmController.inst.onItemPlaying();
     if (settings.enablePartyModeColorSwap.value) CurrentColor.inst.switchColorPalettes(item: item);
     return _fnLimiter.executeFuture(
       () async {
@@ -2250,7 +2268,19 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> {
   }
 
   @override
-  void onNotificationFavouriteButtonPressed(Q item) {
+  bool _isItemFavourite(Q item) {
+    final isFavourite = item.execute(selectable: (finalItem) => finalItem.track.isFavourite, youtubeID: _isYoutubeIDFavouriteOrLiked);
+    return isFavourite ?? false;
+  }
+
+  @override
+  void onFavouriteRatingRequested(Q item, bool favourite) {
+    final isFavourite = _isItemFavourite(item);
+    if (isFavourite != favourite) toggleItemFavourite(item);
+  }
+
+  @override
+  void toggleItemFavourite(Q item) {
     item.execute(
       selectable: (finalItem) {
         final newStat = PlaylistController.inst.favouriteButtonOnPressed(finalItem.track, refreshNotification: false);
@@ -2280,6 +2310,7 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> {
   void _onRepeatModeChanged() {
     resetGaplessPlaybackData();
     refreshPlaybackStateModes();
+    _refreshNotificationButtonsIfShown(NotificationButton.repeatMode);
     final repeatMode = displayRepeatMode;
     SMTCController.instance?.updateRepeatMode(repeatMode);
     HomeWidgetController.instance?.updateRepeatMode(repeatMode, numberOfRepeats.value);
@@ -2321,10 +2352,11 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> {
     item?.execute(
       selectable: (finalItem) async {
         final isFav = finalItem.track.isFavourite;
-        playbackState.add(transformEvent(event, isFav, currentIndex.value));
+        playbackState.add(_transformEvent(event, finalItem, isFav, currentIndex.value));
       },
       youtubeID: (finalItem) async {
-        playbackState.add(transformEvent(event, _isYoutubeIDFavouriteOrLiked(finalItem), currentIndex.value));
+        final isFav = _isYoutubeIDFavouriteOrLiked(finalItem);
+        playbackState.add(_transformEvent(event, finalItem, isFav, currentIndex.value));
       },
     );
   }
@@ -2387,14 +2419,30 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> {
   @override
   int get defaultCrossFadeTriggerStartOffsetSeconds => settings.player.crossFadeAutoTriggerSeconds.value;
 
-  @override
-  bool get displayFavouriteButtonInNotification => settings.displayFavouriteButtonInNotification.value;
+  late final _beatMatchedTransition = BeatMatchedCrossfadeTransition<Q>(
+    timingOf: RhythmController.inst.timingOf,
+    gridOf: RhythmController.inst.gridOf,
+  );
+  late final _flowShuffler = RhythmController.inst.createFlowShuffler<Q>();
+  late final _defaultTransition = DefaultCrossfadeTransition<Q>();
+  late final _smartTransition = SmartCrossfadeTransition<Q>(timingOf: RhythmController.inst.timingOf);
 
   @override
+  QueueShuffler<Q> get queueShuffler => RhythmController.inst.isBeatMatching ? _flowShuffler : super.queueShuffler;
+
+  void refreshCrossfadeTransition() {
+    // -- moved starts and changed tempos would never stay in sync with the party
+    final mode = _partyGate == null ? settings.player.crossfadeMode.value : CrossfadeMode.standard;
+    final transition = switch (mode) {
+      CrossfadeMode.standard => _defaultTransition,
+      CrossfadeMode.smart => _smartTransition,
+      CrossfadeMode.beatMatched => _beatMatchedTransition,
+    };
+    setCrossfadeTransition(transition);
+    if (mode != CrossfadeMode.standard) RhythmController.inst.ensureLoaded();
+  }
+
   bool get displayFavouriteButtonAsLikeInNotification => currentItem.value is YoutubeID && YtVideoLikeManager.preferLikeOverFavourite;
-
-  @override
-  bool get displayStopButtonInNotification => settings.displayStopButtonInNotification.value;
 
   @override
   bool get publishQueueToMediaBrowser => settings.mediaBrowserQueue.value;
@@ -2475,6 +2523,17 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> {
     return secondsToReplay > 0 && currentPositionMS.value > secondsToReplay * 1000;
   }
 
+  /// null when the skip should leave the current item.
+  int? _skipChapterTargetMS({required bool forward}) {
+    if (!settings.skipButtonsJumpChapters.value) return null;
+    return ChaptersController.inst.adjacentChapterStartMS(forward: forward);
+  }
+
+  bool skipWillStayInItem({required bool forward, required bool jumpChapters}) {
+    if (jumpChapters && _skipChapterTargetMS(forward: forward) != null) return true;
+    return !forward && previousButtonWillReplay;
+  }
+
   // ------------------------------------------------------------
 
   Future<void> togglePlayPause() {
@@ -2493,9 +2552,9 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> {
     return play();
   }
 
-  Future<void> userPause() {
+  Future<void> userPause({int? pauseFadeMillis}) {
     if (partyGate?.interceptPause(isUserInitiated: true) == true) return Future.value();
-    return pause();
+    return pause(pauseFadeMillis: pauseFadeMillis);
   }
 
   Future<void> userTogglePlayPause() => playWhenReady.value ? userPause() : userPlay();
@@ -2505,14 +2564,14 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> {
     return seek(position);
   }
 
-  Future<void> userSkipToNext() {
+  Future<void> userSkipToNext({bool jumpChapters = true}) {
     if (partyGate?.interceptSkip(offset: 1) == true) return Future.value();
-    return skipToNext();
+    return skipToNext(jumpChapters: jumpChapters);
   }
 
-  Future<void> userSkipToPrevious() {
+  Future<void> userSkipToPrevious({bool jumpChapters = true}) {
     if (partyGate?.interceptSkip(offset: -1) == true) return Future.value();
-    return skipToPrevious();
+    return skipToPrevious(jumpChapters: jumpChapters);
   }
 
   Future<void> userSkipToQueueItem(int index) {
@@ -2529,6 +2588,7 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> {
   }
 
   /// returns the requested mode.
+  @override
   PlayerRepeatMode userCycleRepeatMode() {
     final repeatMode = displayRepeatMode.nextElement(PlayerRepeatMode.values);
     userSetRepeatMode(repeatMode);
@@ -2619,7 +2679,24 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> {
   }
 
   @override
-  Future<void> skipToPrevious({bool isManualSkip = true}) async {
+  Future<void> skipToNext({bool? andPlay, bool isManualSkip = true, bool jumpChapters = true}) async {
+    final chapterTargetMS = isManualSkip && jumpChapters ? _skipChapterTargetMS(forward: true) : null;
+    if (chapterTargetMS != null) {
+      await seek(Duration(milliseconds: chapterTargetMS));
+      return;
+    }
+
+    await super.skipToNext(andPlay: andPlay, isManualSkip: isManualSkip);
+  }
+
+  @override
+  Future<void> skipToPrevious({bool isManualSkip = true, bool jumpChapters = true}) async {
+    final chapterTargetMS = isManualSkip && jumpChapters ? _skipChapterTargetMS(forward: false) : null;
+    if (chapterTargetMS != null) {
+      await seek(Duration(milliseconds: chapterTargetMS));
+      return;
+    }
+
     if (previousButtonWillReplay) {
       await seek(Duration.zero);
       return;
@@ -2679,10 +2756,10 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> {
   }
 
   @override
-  Future<void> fastForward() async => await onFastForward();
+  Future<void> fastForward() => Player.inst.seekSecondsForward();
 
   @override
-  Future<void> rewind() async => await onRewind();
+  Future<void> rewind() => Player.inst.seekSecondsBackward();
 
   @override
   Future<dynamic> customAction(String name, [Map<String, dynamic>? extras]) async {
@@ -2693,7 +2770,8 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> {
       case HomeWidgetController.actionCycleRepeat:
         userCycleRepeatMode();
       default:
-        return super.customAction(name, extras);
+        final isNotificationButton = await _onNotificationButtonPressed(name);
+        if (!isNotificationButton) return super.customAction(name, extras);
     }
   }
 
@@ -2804,12 +2882,6 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> {
       } catch (_) {}
     }
   }
-
-  @override
-  MediaControlsProvider get mediaControls => _mediaControls;
-  static final _mediaControls = Platform.isAndroid && NamidaFeaturesAvailablity.android13and_plus.resolve()
-      ? MediaControlsProvider.android13plus() // can crash on android below 13
-      : MediaControlsProvider.main();
 
   // -- builders
 

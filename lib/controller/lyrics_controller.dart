@@ -17,11 +17,13 @@ import 'package:namida/class/fuzzy_matcher.dart';
 import 'package:namida/class/http_response_wrapper.dart';
 import 'package:namida/class/lyrics.dart';
 import 'package:namida/class/track.dart';
+import 'package:namida/controller/lyrics_integrations.dart';
 import 'package:namida/controller/lyrics_search_utils/lrc_search_details.dart';
 import 'package:namida/controller/lyrics_search_utils/lrc_search_utils_base.dart';
 import 'package:namida/controller/navigator_controller.dart';
 import 'package:namida/controller/player_controller.dart';
 import 'package:namida/controller/settings_controller.dart';
+import 'package:namida/controller/tagger_controller.dart';
 import 'package:namida/controller/wakelock_controller.dart';
 import 'package:namida/core/constants.dart';
 import 'package:namida/core/enums.dart';
@@ -53,8 +55,9 @@ class Lyrics {
   final currentLyricsLRC = Rxn<Lrc>();
   final lyricsCanBeAvailable = true.obs;
 
-  bool get _lyricsEnabled => settings.enableLyrics.value || settings.enableSimpleLyricsLine.value;
-  bool get _lyricsPrioritizeEmbedded => settings.prioritizeEmbeddedLyrics.value;
+  bool get _lyricsViewsEnabled => settings.enableLyrics.value || settings.enableSimpleLyricsLine.value;
+  bool get _lyricsEnabled => _lyricsViewsEnabled || LyricsIntegrations.isActive;
+  EmbeddedLyricsPriority get _embeddedLyricsPriority => settings.embeddedLyricsPriority.value;
   LyricsSource get _lyricsSource => settings.lyricsSource.value;
 
   final _lrcSearchManager = _LRCSearchManager();
@@ -83,6 +86,13 @@ class Lyrics {
     }
   }
 
+  /// shows [lrc] in the lyrics views until the next [updateLyrics].
+  void previewLyrics(Lrc lrc) {
+    currentLyricsText.value = LrcText.empty;
+    currentLyricsLRC.value = lrc;
+    _updateWidgets(lrc, null);
+  }
+
   void resetLyrics({bool hide = true}) {
     currentLyricsText.value = LrcText.empty;
     currentLyricsLRC.value = null;
@@ -95,15 +105,27 @@ class Lyrics {
   static final _lengthSplitRegex = RegExp(r'[:.]');
 
   /// timestamps multiplier for spedup/slowed/nightcore versions, 0 means no stretching.
-  double getStretchMultiplier(Lrc lrc) {
-    if (!settings.stretchLyricsDuration.value) return 0.0;
+  double getStretchMultiplier(Lrc lrc) => getStretchMultiplierFor(lrc, _getCurrentItemDurationMS());
+
+  static double getStretchMultiplierFor(Lrc lrc, int itemDurationMS) {
     final lengthText = lrc.length;
     if (lengthText == null || lengthText.isEmpty) return 0.0;
+    if (!settings.stretchLyricsDuration.value) return 0.0;
     final lyricsDurationMicro = _parseLengthMicro(lengthText);
     if (lyricsDurationMicro == null || lyricsDurationMicro <= 0) return 0.0;
-    final itemDurationMS = _getCurrentItemDurationMS();
     return itemDurationMS * 1000 / lyricsDurationMicro;
   }
+
+  /// value of the `[length:]` tag, [getStretchMultiplier] compares it to the item duration.
+  static String formatLengthTag(int milliseconds) {
+    final duration = Duration(milliseconds: milliseconds);
+    final min = duration.inMinutes;
+    final sec = duration.inSeconds.remainder(60);
+    final ms = milliseconds.remainder(1000);
+    return '${_pad2(min)}:${_pad2(sec)}.${ms.toString().padLeft(3, '0')}';
+  }
+
+  static String _pad2(int n) => n.toString().padLeft(2, '0');
 
   static int? _parseLengthMicro(String lengthText) {
     final parts = lengthText.split(_lengthSplitRegex);
@@ -131,7 +153,7 @@ class Lyrics {
 
   Future<void> updateLyrics(Playable item) async {
     await _updateLyrics(item);
-    if (!settings.tutorial.lyricsFullscreenTipSeen.value) {
+    if (_lyricsViewsEnabled && !settings.tutorial.lyricsFullscreenTipSeen.value) {
       if (currentLyricsLRC.value != null || currentLyricsText.value.text.isNotEmpty) {
         snackyy(
           message: lang.longPressTheLyricsToEnterFullscreen,
@@ -194,6 +216,8 @@ class Lyrics {
     if (LrcSearchUtils.isIgnoreMarker(embedded)) return _noLyrics;
 
     final local = await pickLocalLyrics(lrcUtils, embedded);
+    final embeddedLrc = local.embeddedLrc;
+    if (embeddedLrc != null) return (lrc: embeddedLrc, txt: null, canBeAvailable: true);
     final localLyrics = local.isEmbedded ? embedded : await local.file?.readLrcString();
     if (localLyrics != null) {
       if (LrcSearchUtils.isIgnoreMarker(localLyrics)) return _unavailableLyrics;
@@ -232,26 +256,37 @@ class Lyrics {
     return _unavailableLyrics;
   }
 
-  static const LocalLyricsPick _noLocalLyrics = (file: null, isEmbedded: false);
-  static const LocalLyricsPick _embeddedLocalLyrics = (file: null, isEmbedded: true);
+  static const LocalLyricsPick _noLocalLyrics = (file: null, isEmbedded: false, isEmbeddedPrioritized: false, embeddedLrc: null);
+  static const LocalLyricsPick _embeddedLocalLyrics = (file: null, isEmbedded: true, isEmbeddedPrioritized: false, embeddedLrc: null);
+  static const LocalLyricsPick _prioritizedEmbeddedLocalLyrics = (file: null, isEmbedded: true, isEmbeddedPrioritized: true, embeddedLrc: null);
 
   /// the local lyrics [updateLyrics] shows before searching online, [embedded] can be newer than the ones in [lrcUtils].
   ///
-  /// 1. track embedded, when prioritized
+  /// 1. track embedded, when prioritized (only synced ones with [EmbeddedLyricsPriority.onlyWhenSynced], already parsed into `embeddedLrc`)
   /// 2. cached/device lrc, the location lyrics are saved in goes first
   /// 3. track embedded
   /// 4. cached/device txt
   Future<LocalLyricsPick> pickLocalLyrics(LrcSearchUtils lrcUtils, String embedded) async {
     if (LrcSearchUtils.isIgnoreMarker(embedded)) return _noLocalLyrics;
     final hasEmbedded = embedded != '';
-    if (hasEmbedded && _lyricsPrioritizeEmbedded) return _embeddedLocalLyrics;
+    if (hasEmbedded) {
+      switch (_embeddedLyricsPriority) {
+        case EmbeddedLyricsPriority.off:
+          break;
+        case EmbeddedLyricsPriority.onlyWhenSynced:
+          final embeddedLrc = embedded.parseLRC();
+          if (embeddedLrc != null) return (file: null, isEmbedded: true, isEmbeddedPrioritized: true, embeddedLrc: embeddedLrc);
+        case EmbeddedLyricsPriority.always:
+          return _prioritizedEmbeddedLocalLyrics;
+      }
+    }
     if (_lyricsSource == LyricsSource.internet) return _noLocalLyrics;
 
     final files = await lrcUtils.firstLyricsFiles(includeTxt: !hasEmbedded);
     final lrc = files.lrc;
-    if (lrc != null) return (file: lrc, isEmbedded: false);
+    if (lrc != null) return (file: lrc, isEmbedded: false, isEmbeddedPrioritized: false, embeddedLrc: null);
     if (hasEmbedded) return _embeddedLocalLyrics;
-    return (file: files.txt, isEmbedded: false);
+    return (file: files.txt, isEmbedded: false, isEmbeddedPrioritized: false, embeddedLrc: null);
   }
 
   _LyricsResolveResult _parseLocalLyrics(String lyrics) {
@@ -322,6 +357,25 @@ class Lyrics {
     }
     if (deviceFile != null) return deviceFile;
     return lrcUtils.saveLyricsToCache(lyrics, isSynced);
+  }
+
+  Future<bool> embedLyricsByUser(Track track, String lyrics) async {
+    final hasPermission = await requestManageStoragePermission(directoryToCreate: AppDirs.INTERNAL_STORAGE);
+    if (!hasPermission) return false;
+    bool didEmbed = false;
+    await NamidaTaggerController.inst
+        .updateTracksMetadata(
+          tracks: [track],
+          editedTags: {TagField.lyrics: lyrics},
+          onEdit: (didUpdate, error, _) {
+            didEmbed = didUpdate;
+            if (didUpdate) return;
+            final message = error ?? 'Unknown Error';
+            snackyy(title: lang.metadataEditFailed, message: message, isError: true);
+          },
+        )
+        .ignoreError();
+    return didEmbed;
   }
 
   /// with [LyricsSource.internet] nothing local was looked up, a lyrics file that is already there must not get replaced.
@@ -666,16 +720,6 @@ class _LRCProvidersSearcher {
     return maxIndex <= 0 ? artist : artist.substring(0, maxIndex);
   }
 
-  static String _pad2(int n) => n.toString().padLeft(2, '0');
-
-  static String _formatLength(int milliseconds) {
-    final duration = Duration(milliseconds: milliseconds);
-    final min = duration.inMinutes;
-    final sec = duration.inSeconds.remainder(60);
-    final ms = milliseconds.remainder(1000);
-    return '${_pad2(min)}:${_pad2(sec)}.${ms.toString().padLeft(3, '0')}';
-  }
-
   static int _targetDurationMS(LRCSearchDetails? details) {
     if (details == null || details.isDurationModified) return 0;
     return details.durationMS;
@@ -716,7 +760,7 @@ class _LRCProvidersSearcher {
     if (artist != '') lrcBuffer.writeln('[ar:$artist]');
     if (album != '') lrcBuffer.writeln('[al:$album]');
     if (title != '') lrcBuffer.writeln('[ti:$title]');
-    if (durationMS > 0) lrcBuffer.writeln('[length:${_formatLength(durationMS)}]');
+    if (durationMS > 0) lrcBuffer.writeln('[length:${Lyrics.formatLengthTag(durationMS)}]');
     lrcBuffer.write(lyrics);
     return lrcBuffer.toString();
   }
@@ -840,7 +884,7 @@ class _LRCProvidersSearcher {
         final lrc = utf8.decode(base64Decode(content)).trim();
         if (lrc == '') continue;
         final durMS = c['duration'] is num ? (c['duration'] as num).round() : targetMS;
-        final lyrics = lrc.contains('[length:') || durMS <= 0 ? lrc : '[length:${_formatLength(durMS)}]\n$lrc';
+        final lyrics = lrc.contains('[length:') || durMS <= 0 ? lrc : '[length:${Lyrics.formatLengthTag(durMS)}]\n$lrc';
         fetched.add(_model(lyrics, true, LyricsProvider.kugou));
       } catch (_) {
         session.markFailure();
@@ -992,7 +1036,7 @@ class LrcText {
   }
 }
 
-typedef LocalLyricsPick = ({File? file, bool isEmbedded});
+typedef LocalLyricsPick = ({File? file, bool isEmbedded, bool isEmbeddedPrioritized, Lrc? embeddedLrc});
 
 typedef _LyricsResolveResult = ({Lrc? lrc, LrcText? txt, bool canBeAvailable});
 typedef _LRCFetchResult = ({Lrc? lrc, String? txt, bool didSearchFail});

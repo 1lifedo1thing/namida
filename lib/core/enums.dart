@@ -727,6 +727,12 @@ enum WakelockMode {
   expandedAndVideo,
 }
 
+enum CrossfadeMode {
+  standard,
+  smart,
+  beatMatched,
+}
+
 enum RouteType {
   // ----- Pages -----
   PAGE_Home,
@@ -745,7 +751,7 @@ enum RouteType {
   PAGE_widePlayer,
   PAGE_smartPlaylists,
   PAGE_discover,
-  PAGE_artistsMap,
+  PAGE_artistsMap(isDrawerEdgeSwipeOnly: true),
   PAGE_moods,
   PAGE_tags,
   PAGE_languages,
@@ -808,6 +814,10 @@ enum RouteType {
 
   /// others
   UNKNOWN,
+  ;
+
+  final bool isDrawerEdgeSwipeOnly;
+  const RouteType({this.isDrawerEdgeSwipeOnly = false});
 }
 
 /// Used for search and sort.
@@ -841,6 +851,12 @@ enum LyricsSource {
   auto,
   local,
   internet,
+}
+
+enum EmbeddedLyricsPriority {
+  off,
+  onlyWhenSynced,
+  always,
 }
 
 enum LyricsSaveLocation {
@@ -918,6 +934,29 @@ enum NotificationTapAction {
   openApp,
   openMiniplayer,
   openQueue,
+}
+
+enum NotificationButton {
+  previous(isTransport: true),
+  playPause(isTransport: true),
+  next(isTransport: true),
+  favourite,
+  stop,
+  shuffle,
+  repeatMode,
+  seekBackward,
+  seekForward,
+  previousChapter,
+  nextChapter,
+  sleepTimer,
+  addToPlaylist,
+  bookmark,
+  ;
+
+  final bool isTransport;
+  const NotificationButton({this.isTransport = false});
+
+  static final transportButtons = values.where((button) => button.isTransport).toFixedList();
 }
 
 enum SearchType {
@@ -1063,10 +1102,12 @@ enum YTVisibleMixesPlaces {
 
 enum TrackExecuteActions {
   none,
-  playnext,
-  playlast,
-  playafter,
+  play(isPlayerAction: true),
+  playnext(isPlayerAction: true),
+  playlast(isPlayerAction: true),
+  playafter(isPlayerAction: true),
   addtoplaylist,
+  addBookmark(isPlayingItemOnly: true),
   openinfo,
 
   openArtwork,
@@ -1087,6 +1128,14 @@ enum TrackExecuteActions {
   copyYTLink,
   searchYTSimilar,
   delete,
+  ;
+
+  final bool isPlayerAction;
+  final bool isPlayingItemOnly;
+  const TrackExecuteActions({this.isPlayerAction = false, this.isPlayingItemOnly = false});
+
+  static final playerActions = values.where((action) => action.isPlayerAction).toFixedList();
+  static final playingItemOnlyActions = values.where((action) => action.isPlayingItemOnly).toFixedList();
 }
 
 enum CacheVideoPriority {
@@ -1263,6 +1312,7 @@ enum LibraryImageSource {
 
 enum AlbumType {
   single,
+  ep,
   normal,
 }
 
@@ -1312,4 +1362,30 @@ enum WebhookEvent {
   trackChanged,
   play,
   pause,
+}
+
+enum LyricsIntegration {
+  lyricInfo,
+  superLyric(sendsPerLine: true),
+  flymeTicker(sendsPerLine: true),
+  ;
+
+  final bool sendsPerLine;
+  const LyricsIntegration({this.sendsPerLine = false});
+}
+
+enum SoundEffectType {
+  crossfeed,
+  virtualSurround,
+  echo,
+  chorus,
+  autoPan,
+  compressor,
+  instrumental(defaultIntensity: 0.8),
+  bassEnhancer,
+  tubeWarmth,
+  ;
+
+  final double defaultIntensity;
+  const SoundEffectType({this.defaultIntensity = 0.5});
 }

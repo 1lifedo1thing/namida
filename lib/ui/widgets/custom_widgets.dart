@@ -6,11 +6,11 @@ import 'dart:ui';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart' hide ReorderableListView, ReorderCallback, SliverReorderableList, ReorderableDragStartListener, ReorderableDelayedDragStartListener, Tooltip;
+import 'package:flutter/physics.dart';
 import 'package:flutter/rendering.dart' as fr;
 import 'package:flutter/services.dart';
 
 import 'package:basic_audio_handler/basic_audio_handler.dart';
-import 'package:checkmark/checkmark.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_scrollbar_modified/flutter_scrollbar_modified.dart';
 import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
@@ -79,6 +79,7 @@ import 'custom_reorderable_list.dart';
 
 export 'popup_wrapper.dart';
 
+part 'check_marks.dart';
 part 'smooth_scroll.dart';
 
 class NamidaReordererableListener extends StatelessWidget {
@@ -1351,7 +1352,6 @@ class SmallListTile extends StatelessWidget {
   final IconData? icon;
   final IconData? trailingIcon;
   final bool active;
-  final bool displayAnimatedCheck;
   final bool compact;
   final Color? color;
   final double? iconSize;
@@ -1372,7 +1372,6 @@ class SmallListTile extends StatelessWidget {
     this.active = false,
     this.icon,
     this.trailingIcon,
-    this.displayAnimatedCheck = false,
     this.compact = true,
     this.subtitle,
     this.color,
@@ -1453,14 +1452,7 @@ class SmallListTile extends StatelessWidget {
               ),
             )
           : null,
-      trailing: displayAnimatedCheck
-          ? NamidaCheckMark(
-              size: 18.0,
-              activeColor: color,
-              inactiveColor: color,
-              active: settings.artistSortReversed.value,
-            )
-          : trailingIcon != null
+      trailing: trailingIcon != null
           ? Icon(
               trailingIcon,
               color: color,
@@ -1469,148 +1461,6 @@ class SmallListTile extends StatelessWidget {
           : trailing,
       onTap: onTap,
       onLongPress: onLongPress,
-    );
-  }
-}
-
-class ListTileWithCheckMark extends StatelessWidget {
-  final bool active;
-  final RxBase<bool>? activeRx;
-  final bool halfActive;
-  final void Function()? onTap;
-  final String? title;
-  final String subtitle;
-  final IconData? icon;
-  final Color? tileColor;
-  final Widget? titleWidget;
-  final Widget? leading;
-  final double? iconSize;
-  final bool dense;
-  final bool expanded;
-  final double borderRadius;
-
-  const ListTileWithCheckMark({
-    super.key,
-    this.active = false,
-    this.activeRx,
-    this.halfActive = false,
-    this.onTap,
-    this.title,
-    this.subtitle = '',
-    this.icon = Broken.arrange_circle,
-    this.tileColor,
-    this.titleWidget,
-    this.leading,
-    this.iconSize,
-    this.dense = false,
-    this.expanded = true,
-    this.borderRadius = 14.0,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
-    final tileAlpha = context.isDarkMode ? 5 : 20;
-    final br = BorderRadius.circular(borderRadius.multipliedRadius);
-    final titleWidgetFinal = Padding(
-      padding: EdgeInsets.symmetric(horizontal: dense ? 10.0 : 14.0),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          titleWidget ??
-              Text(
-                title ?? lang.reverseOrder,
-                style: textTheme.displayMedium,
-              ),
-          if (subtitle != '')
-            Text(
-              subtitle,
-              style: textTheme.displaySmall,
-            ),
-        ],
-      ),
-    );
-    return Material(
-      borderRadius: br,
-      color: tileColor ?? Color.alphaBlend(theme.colorScheme.onSurface.withAlpha(tileAlpha), theme.cardTheme.color!),
-      child: InkWell(
-        borderRadius: br,
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
-          child: Row(
-            mainAxisSize: expanded ? MainAxisSize.max : MainAxisSize.min,
-            children: [
-              if (leading != null)
-                leading!
-              else if (icon != null)
-                Icon(
-                  icon,
-                  size: iconSize,
-                ),
-              expanded
-                  ? Expanded(
-                      child: titleWidgetFinal,
-                    )
-                  : Flexible(
-                      child: titleWidgetFinal,
-                    ),
-              halfActive
-                  ? Icon(
-                      Broken.minus,
-                      size: 18.0,
-                      color: theme.colorScheme.secondary,
-                    )
-                  : activeRx != null
-                  ? ObxO(
-                      rx: activeRx!,
-                      builder: (context, active) => NamidaCheckMark(
-                        size: 18.0,
-                        active: active,
-                      ),
-                    )
-                  : NamidaCheckMark(
-                      size: 18.0,
-                      active: active,
-                    ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class NamidaCheckMark extends StatelessWidget {
-  final double size;
-  final bool active;
-  final Color? activeColor;
-  final Color? inactiveColor;
-
-  const NamidaCheckMark({
-    super.key,
-    required this.size,
-    required this.active,
-    this.activeColor,
-    this.inactiveColor,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = context.theme;
-    return SizedBox(
-      width: size,
-      height: size,
-      child: CheckMark(
-        duration: const Duration(milliseconds: 800),
-        curve: Curves.fastLinearToSlowEaseIn,
-        strokeWidth: 2,
-        activeColor: activeColor ?? theme.colorScheme.secondary,
-        inactiveColor: inactiveColor ?? theme.colorScheme.secondary,
-        active: active,
-      ),
     );
   }
 }
@@ -2415,23 +2265,20 @@ class NamidaLoadingController {
 class NamidaLoadingSwitcher extends StatefulWidget {
   final NamidaLoadingController? controller;
   final Widget Function(NamidaLoadingController loadingController) builder;
-  final double? size;
-  final bool showLoading;
 
   const NamidaLoadingSwitcher({
     super.key,
     this.controller,
     required this.builder,
-    this.size,
-    this.showLoading = true,
   });
 
   @override
   State<NamidaLoadingSwitcher> createState() => _NamidaLoadingSwitcherState();
 }
 
-class _NamidaLoadingSwitcherState extends State<NamidaLoadingSwitcher> {
+class _NamidaLoadingSwitcherState extends State<NamidaLoadingSwitcher> with TickerProviderStateMixin {
   late final NamidaLoadingController loadingController;
+  _LoadingDimPulse? _dimPulse;
 
   @override
   void initState() {
@@ -2443,46 +2290,69 @@ class _NamidaLoadingSwitcherState extends State<NamidaLoadingSwitcher> {
   }
 
   void _startLoading() {
-    if (mounted) setState(() => loadingController._isLoading = true);
+    if (!mounted) return;
+    final dimPulse = _dimPulse ??= _LoadingDimPulse(this);
+    dimPulse.start();
+    setState(() => loadingController._isLoading = true);
   }
 
   void _stopLoading() {
-    if (mounted) setState(() => loadingController._isLoading = false);
+    if (!mounted) return;
+    _dimPulse?.stop();
+    setState(() => loadingController._isLoading = false);
   }
 
   @override
   void dispose() {
     if (widget.controller == null) loadingController.dispose();
+    _dimPulse?.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final child = widget.builder(loadingController);
-    final isLoading = loadingController.isLoading;
-    return Stack(
-      fit: StackFit.loose,
-      alignment: Alignment.center,
-      children: [
-        AnimatedOpacity(
-          opacity: isLoading ? 0.5 : 1.0,
-          duration: const Duration(milliseconds: 200),
-          child: child,
-        ),
-        if (isLoading && widget.showLoading)
-          IgnorePointer(
-            child: AnimatedOpacity(
-              opacity: isLoading ? 0.8 : 0.0,
-              duration: const Duration(milliseconds: 200),
-              child: SizedBox(
-                width: widget.size,
-                height: widget.size,
-                child: widget.size == null ? const CircularProgressIndicator(strokeWidth: 4.0) : const CircularProgressIndicator(strokeWidth: 2.0),
-              ),
-            ),
-          ),
-      ],
+    return FadeTransition(
+      opacity: _dimPulse?.opacity ?? kAlwaysCompleteAnimation,
+      child: widget.builder(loadingController),
     );
+  }
+}
+
+class _LoadingDimPulse {
+  final AnimationController fade;
+  final AnimationController pulse;
+  late final opacity = _DimPulseOpacity(fade: fade, pulse: pulse);
+
+  _LoadingDimPulse(TickerProvider vsync)
+    : fade = AnimationController(vsync: vsync, duration: _kLoadingFadeDuration),
+      pulse = AnimationController(vsync: vsync, duration: _kLoadingCycle ~/ 2) {
+    fade.addStatusListener(_onFadeStatus);
+  }
+
+  void _onFadeStatus(AnimationStatus status) {
+    if (status == AnimationStatus.dismissed) pulse.stop();
+  }
+
+  void start() {
+    if (!pulse.isAnimating) pulse.repeat(reverse: true);
+    fade.forward();
+  }
+
+  void stop() => fade.reverse();
+
+  void dispose() {
+    fade.dispose();
+    pulse.dispose();
+  }
+}
+
+class _DimPulseOpacity extends CompoundAnimation<double> {
+  _DimPulseOpacity({required Animation<double> fade, required Animation<double> pulse}) : super(first: fade, next: pulse);
+
+  @override
+  double get value {
+    final pulseDepth = Curves.easeInOut.transform(next.value);
+    return 1.0 - first.value * (0.3 + 0.3 * pulseDepth);
   }
 }
 
@@ -2971,7 +2841,7 @@ class SubpageInfoContainer extends StatelessWidget {
                 infoMaxWidth = maxWidth - 24.0;
               } else if (isBanner) {
                 bannerHeight = (maxWidth * 0.34).clampDouble(96.0, maxHeight * 0.25);
-                final besideThumbnailSize = (maxWidth * _kBannerThumbnailPercentage).clampDouble(88.0, 176.0);
+                final besideThumbnailSize = (maxWidth * _kBannerThumbnailPercentage).clampDouble(96.0, 200.0);
                 final besideInfoWidth = maxWidth - besideThumbnailSize - _kBannerThumbnailInsets;
                 isBannerTextBelow = showSubpageInfoAtSide || besideInfoWidth < _kBannerMinBesideTextWidth;
                 thumbnailSize = isBannerTextBelow ? (maxWidth * _kBannerStackedThumbnailPercentage).clampDouble(88.0, 240.0) : besideThumbnailSize;
@@ -2984,7 +2854,8 @@ class SubpageInfoContainer extends StatelessWidget {
                 imageMaxWidth = maxWidth.withMaximum(maxHeight * 0.55);
                 infoMaxWidth = maxWidth;
               } else {
-                imageMaxWidth = (maxWidth * _kThumbnailWidthPercentage).withMaximum(maxHeight * _kThumbnailHeightPercentage);
+                final thumbnailScale = subpageInfoType == MediaType.artist ? _kArtistThumbnailScale : 1.0;
+                imageMaxWidth = (maxWidth * _kThumbnailWidthPercentage).withMaximum(maxHeight * _kThumbnailHeightPercentage) * thumbnailScale;
                 infoMaxWidth = maxWidth - imageMaxWidth;
               }
 
@@ -3437,7 +3308,7 @@ class SubpageInfoContainer extends StatelessWidget {
   static const _kBannerThumbnailInsets = 24.0 + 24.0 + 14.0;
   static const _kBannerThumbnailOverlap = 0.45;
   static const _kBannerFeatherPercentage = 0.8;
-  static const _kBannerThumbnailPercentage = 0.3;
+  static const _kBannerThumbnailPercentage = 0.34;
   static const _kBannerStackedThumbnailPercentage = 0.7;
   static const _kBannerStackedFontScale = 1.2;
   static const _kBannerMinBesideTextWidth = 140.0;
@@ -3448,6 +3319,7 @@ class SubpageInfoContainer extends StatelessWidget {
   static const _kExtraButtonsMinWidth = 310.0;
   static const _kThumbnailWidthPercentage = 0.5;
   static const _kThumbnailHeightPercentage = 0.35;
+  static const _kArtistThumbnailScale = 0.85;
 
   /// a frameless fan in a thumbnail spills a little into the surrounding padding instead of leaving it empty.
   static const _kThumbnailFanScale = 1.12;
@@ -6297,11 +6169,14 @@ class NamidaScrollbar extends StatelessWidget {
 }
 
 class NamidaScrollbarWithController extends StatefulWidget {
+  /// used as is and never disposed, a new one is created otherwise.
+  final ScrollController? controller;
   final bool showOnStart;
   final double scrollStep;
   final Widget Function(ScrollController sc) child;
   const NamidaScrollbarWithController({
     super.key,
+    this.controller,
     this.showOnStart = false,
     this.scrollStep = 0.0,
     required this.child,
@@ -6313,15 +6188,19 @@ class NamidaScrollbarWithController extends StatefulWidget {
 
 class _NamidaScrollbarWithControllerState extends State<NamidaScrollbarWithController> {
   late final ScrollController _sc;
+  late final bool _ownsController;
+
   @override
   void initState() {
-    _sc = NamidaScrollController.create();
+    final controller = widget.controller;
+    _ownsController = controller == null;
+    _sc = controller ?? NamidaScrollController.create();
     super.initState();
   }
 
   @override
   void dispose() {
-    _sc.dispose();
+    if (_ownsController) _sc.dispose();
     super.dispose();
   }
 
@@ -8695,6 +8574,7 @@ class NamidaArtworkFullscreen extends StatefulWidget {
   final VoidCallback? _releaseInitialImage;
   final Object? heroTag;
   final Color? Function()? themeColor;
+  final Future<String?> Function(BuildContext context)? onSaveCollage;
 
   const NamidaArtworkFullscreen._({
     required this.images,
@@ -8703,6 +8583,7 @@ class NamidaArtworkFullscreen extends StatefulWidget {
     required this._releaseInitialImage,
     required this.heroTag,
     required this.themeColor,
+    required this.onSaveCollage,
   });
 
   static Future<void> open({
@@ -8710,6 +8591,7 @@ class NamidaArtworkFullscreen extends StatefulWidget {
     required int initialIndex,
     required Object? heroTag,
     required Color? Function()? themeColor,
+    Future<String?> Function(BuildContext context)? onSaveCollage,
   }) async {
     final initialImage = await images[initialIndex]._resolve();
     if (initialImage == null) return;
@@ -8727,6 +8609,7 @@ class NamidaArtworkFullscreen extends StatefulWidget {
         releaseInitialImage: releaseInitialImage,
         heroTag: shownHeroTag,
         themeColor: themeColor,
+        onSaveCollage: onSaveCollage,
       ),
     );
   }
@@ -8776,6 +8659,11 @@ class _NamidaArtworkFullscreenState extends State<NamidaArtworkFullscreen> {
     NamidaOnTaps.inst.showSavedImageInSnack(savePath, widget.themeColor?.call());
   }
 
+  void _saveCollage(Future<String?> Function(BuildContext context) onSaveCollage) async {
+    final savePath = await onSaveCollage(context);
+    NamidaOnTaps.inst.showSavedImageInSnack(savePath, widget.themeColor?.call());
+  }
+
   void _onPageChanged(int index) {
     _currentIndex.value = index;
   }
@@ -8816,6 +8704,7 @@ class _NamidaArtworkFullscreenState extends State<NamidaArtworkFullscreen> {
 
     final images = widget.images;
     final count = images.length;
+    final onSaveCollage = widget.onSaveCollage;
     final pageController = _pageController;
     final pagingAxis = pageController == null ? null : Axis.horizontal;
     final heroTag = widget.heroTag;
@@ -8894,6 +8783,15 @@ class _NamidaArtworkFullscreenState extends State<NamidaArtworkFullscreen> {
                         Expanded(
                           child: pageIndicatorWidget ?? const SizedBox(),
                         ),
+                        if (onSaveCollage != null)
+                          ObxO(
+                            rx: settings.artworkCollageStyle,
+                            builder: (context, collageStyle) => NamidaIconButton(
+                              tooltip: () => '${lang.save} (${collageStyle.toText()})',
+                              icon: collageStyle.toIcon(),
+                              onPressed: () => _saveCollage(onSaveCollage),
+                            ),
+                          ),
                         Align(
                           alignment: Alignment.centerRight,
                           child: NamidaIconButton(

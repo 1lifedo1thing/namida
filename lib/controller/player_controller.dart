@@ -135,6 +135,10 @@ class Player {
   RxBaseCore<int> get currentIndex => _audioHandler.currentIndex;
   RxBaseCore<int> get nowPlayingPosition => _audioHandler.currentPositionMS;
   int get nowPlayingPositionR => _audioHandler.currentPositionMS.valueR;
+
+  /// [nowPlayingPosition] is updated every ~200ms, this one is exact.
+  int getExactPositionMS() => _audioHandler.currentPlayer.position.inMilliseconds;
+
   int get seekCount => _audioHandler.seekCount;
   int get lastSeekPositionMS => _audioHandler.lastSeekPositionMS;
   RxBaseCore<double> get currentSpeed => _audioHandler.currentSpeed;
@@ -211,6 +215,9 @@ class Player {
 
   void refreshPlatformIcons() => _audioHandler.refreshPlatformIcons();
 
+  MediaItem? get currentMediaItem => _audioHandler.mediaItem.value;
+  void republishMediaItem(MediaItem media) => _audioHandler.republishMediaItem(media);
+
   // -- error playing track
   void cancelPlayErrorSkipTimer() => _audioHandler.cancelPlayErrorSkipTimer();
   RxBaseCore<int> get playErrorRemainingSecondsToSkip => _audioHandler.playErrorRemainingSecondsToSkip;
@@ -238,6 +245,7 @@ class Player {
     } else {
       _audioHandler = NamidaAudioVideoHandler();
     }
+    _audioHandler.refreshCrossfadeTransition();
 
     void videoInfoListener() {
       final info = _audioHandler.videoPlayerInfo.value;
@@ -329,7 +337,7 @@ class Player {
 
   void toggleFavouriteForCurrentItem() {
     final current = currentItem.value;
-    if (current != null) _audioHandler.onNotificationFavouriteButtonPressed(current);
+    if (current != null) _audioHandler.toggleItemFavourite(current);
   }
 
   bool get displayFavouriteButtonAsLike => _audioHandler.displayFavouriteButtonAsLikeInNotification;
@@ -341,6 +349,8 @@ class Player {
       // -- late init
     }
   }
+
+  void refreshChapterNotificationButtons() => _audioHandler.refreshChapterNotificationButtons();
 
   Future<void> setAudioOnlyPlayback(bool audioOnly) async {
     await _audioHandler.setAudioOnlyPlayback(audioOnly);
@@ -412,10 +422,15 @@ class Player {
   void endSpeedUp([_]) {
     final speed = _defaultSpeedUpValue;
     if (speed <= 0) return;
+    restoreUserSpeed();
+    _isSpeedModifierActive.value = null;
+  }
+
+  /// the item's own speed, or the global one.
+  Future<void> restoreUserSpeed() {
     final currentConfig = Player.audioConfigs.map.value[Player.inst.currentItem.value?.key ?? ''];
     final originalSpeed = currentConfig?.speed ?? settings.player.speed.value;
-    Player.inst.setSpeed(originalSpeed);
-    _isSpeedModifierActive.value = null;
+    return Player.inst.setSpeed(originalSpeed);
   }
 
   void startFastForward([_]) {
@@ -630,6 +645,30 @@ class Player {
     return done;
   }
 
+  Future<bool> moveItemsToNext(List<int> indices, {bool vibrate = true}) async {
+    final done = await _audioHandler.moveItemsToNext(indices);
+    if (done && vibrate) VibratorController.light();
+    return done;
+  }
+
+  Future<bool> moveItemsToLast(List<int> indices, {bool vibrate = true}) async {
+    final done = await _audioHandler.moveItemsToLast(indices);
+    if (done && vibrate) VibratorController.light();
+    return done;
+  }
+
+  /// every queue index holding one of [tracks], duplicates included.
+  List<int> queueIndicesOf(Iterable<Selectable> tracks) {
+    final tracksSet = tracks.map((e) => e.track).toSet();
+    final queue = currentQueue.value;
+    final indices = <int>[];
+    for (int i = 0; i < queue.length; i++) {
+      final item = queue[i];
+      if (item is Selectable && tracksSet.contains(item.track)) indices.add(i);
+    }
+    return indices;
+  }
+
   SnackbarController? _latestSnacky;
   Future<void> removeFromQueueWithUndo(int index) async {
     _latestSnacky?.close();
@@ -765,8 +804,9 @@ class Player {
     await _audioHandler.onPlayRaw();
   }
 
-  Future<void> pause() async {
-    await _audioHandler.userPause();
+  /// [fadeMillis] 0 pauses right away, null uses the fade setting.
+  Future<void> pause({int? fadeMillis}) async {
+    await _audioHandler.userPause(pauseFadeMillis: fadeMillis);
   }
 
   /// Pauses without the party gate, closing the app shouldn't pause the party for everyone.
@@ -792,6 +832,8 @@ class Player {
     await _audioHandler.resetGaplessPlaybackData();
   }
 
+  void refreshCrossfadeTransition() => _audioHandler.refreshCrossfadeTransition();
+
   Future<void> pauseRaw() async {
     await _audioHandler.onPauseRaw();
   }
@@ -800,15 +842,17 @@ class Player {
     await _audioHandler.userTogglePlayPause();
   }
 
-  Future<void> next() async {
-    await _audioHandler.userSkipToNext();
+  /// [jumpChapters] false always leaves the item, ex: swipes.
+  Future<void> next({bool jumpChapters = true}) async {
+    await _audioHandler.userSkipToNext(jumpChapters: jumpChapters);
   }
 
-  Future<void> previous() async {
-    await _audioHandler.userSkipToPrevious();
+  Future<void> previous({bool jumpChapters = true}) async {
+    await _audioHandler.userSkipToPrevious(jumpChapters: jumpChapters);
   }
 
-  bool get previousWillReplay => _audioHandler.previousButtonWillReplay;
+  /// previous replaying the item or skips jumping between chapters, the ui shouldn't animate towards another item.
+  bool skipWillStayInItem({required bool forward, required bool jumpChapters}) => _audioHandler.skipWillStayInItem(forward: forward, jumpChapters: jumpChapters);
 
   Future<void> skipToQueueItem(int index) async {
     if (_audioHandler.partyGate == null) _audioHandler.setPlayWhenReady(true);
@@ -817,6 +861,30 @@ class Player {
 
   Future<void> seek(Duration position) async {
     await _audioHandler.userSeek(position);
+  }
+
+  bool isCurrentItem(Playable item) {
+    final current = _audioHandler.currentItem.value;
+    if (current == null) return false;
+    final isSame = item.execute(
+      selectable: (finalItem) => current is Selectable && current.track == finalItem.track,
+      youtubeID: (finalItem) => current is YoutubeID && current.id == finalItem.id,
+    );
+    return isSame == true;
+  }
+
+  /// seeks when [item] is already playing, otherwise plays it next from [position].
+  void seekOrPlayAt(Playable item, Duration position) {
+    if (isCurrentItem(item)) {
+      seek(position);
+      return;
+    }
+    final source = item.execute<QueueSourceBase>(
+      selectable: (_) => QueueSource.others(null),
+      youtubeID: (_) => QueueSourceYoutubeID.ytPlayerQueue,
+    );
+    if (source == null) return;
+    playOrPause(0, [item], source, gentlePlay: true, startPosition: position);
   }
 
   /// Default value is set to user preference [seekDurationInSeconds]

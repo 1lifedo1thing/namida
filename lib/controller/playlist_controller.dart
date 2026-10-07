@@ -109,7 +109,11 @@ class PlaylistController extends PlaylistManager<TrackWithDate, Track, SortType>
       button: didAddTracks
           ? SnackbarButton(
               text: lang.undo,
-              function: () async => await updatePropertyInPlaylist(playlist.name, tracks: oldTracksList, modifiedDate: originalModifyDate),
+              function: () async {
+                await updatePropertyInPlaylist(playlist.name, tracks: oldTracksList, modifiedDate: originalModifyDate);
+                final restoredPlaylist = getPlaylist(playlist.name);
+                if (restoredPlaylist != null) await onPlaylistTracksChanged(restoredPlaylist); // -- rewrites the m3u, its pending write still holds the added tracks
+              },
             )
           : null,
       merge: didAddTracks
@@ -175,6 +179,16 @@ class PlaylistController extends PlaylistManager<TrackWithDate, Track, SortType>
       }
     }
     return tracks;
+  }
+
+  /// adds [track] without prompting, or removes it when already inside [playlist].
+  Future<void> toggleTrackInPlaylist(LocalPlaylist playlist, Track track) async {
+    final index = playlist.tracks.indexWhere((e) => e.track == track);
+    if (index >= 0) {
+      await removeTracksFromPlaylist(playlist, [index]);
+    } else {
+      await addTracksToPlaylistRaw(playlist, [track], null, (e, dateAdded) => TrackWithDate(dateAdded: dateAdded, track: e));
+    }
   }
 
   bool favouriteButtonOnPressed(Track track, {bool refreshNotification = true, bool deferListsSorting = false}) {
@@ -697,7 +711,7 @@ class PlaylistController extends PlaylistManager<TrackWithDate, Track, SortType>
         remoteSource: PlaylistRemoteSource(sourceKey: serverKey, remoteId: spl.id),
       );
 
-      newPl = ensureNewSourceItemsSorted(newPl);
+      newPl = await ensureNewSourceItemsSorted(newPl);
       await importPlaylistForce(newPl, sortPlaylists: false);
 
       anyChanged = true;
@@ -1038,6 +1052,7 @@ class PlaylistController extends PlaylistManager<TrackWithDate, Track, SortType>
               activeRx: didRead,
               icon: Broken.info_circle,
               title: lang.iReadAndAgree,
+              burst: true,
               onTap: didRead.toggle,
             ),
           ],

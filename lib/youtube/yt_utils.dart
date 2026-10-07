@@ -24,6 +24,7 @@ import 'package:namida/class/file_parts.dart';
 import 'package:namida/class/route.dart';
 import 'package:namida/class/video.dart';
 import 'package:namida/controller/audio_cache_controller.dart';
+import 'package:namida/controller/bookmarks_controller.dart';
 import 'package:namida/controller/current_color.dart';
 import 'package:namida/controller/edit_delete_controller.dart';
 import 'package:namida/controller/ffmpeg_controller.dart';
@@ -43,8 +44,10 @@ import 'package:namida/core/icon_fonts/broken_icons.dart';
 import 'package:namida/core/translations/language.dart';
 import 'package:namida/core/utils.dart';
 import 'package:namida/main.dart';
+import 'package:namida/ui/dialogs/bookmarks_sheet.dart';
 import 'package:namida/ui/dialogs/track_stats_dialog.dart';
 import 'package:namida/ui/widgets/custom_widgets.dart';
+import 'package:namida/ui/widgets/history_listens_navigation.dart';
 import 'package:namida/youtube/class/download_task_base.dart';
 import 'package:namida/youtube/class/youtube_id.dart';
 import 'package:namida/youtube/controller/youtube_account_controller.dart';
@@ -72,6 +75,8 @@ class YTUtils {
   const YTUtils();
 
   static const comments = _YTUtilsCommentActions();
+
+  static final historyListensNavigation = Rxn<HistoryListensNavigation>();
 
   static void expandMiniplayer() {
     final st = MiniPlayerController.inst.ytMiniplayerKey.currentState;
@@ -362,6 +367,7 @@ class YTUtils {
   }) async {
     final currentItem = Player.inst.currentItem.value;
     NamidaPopupItem? repeatForWidget;
+    NamidaPopupItem? bookmarksItem;
     final defaultItems = await YTUtils.getVideoCardMenuItems(
       queueSource: queueSource,
       downloadIndex: null,
@@ -397,6 +403,14 @@ class YTUtils {
           horizontalPadding: 4.0,
         ),
       );
+      final bookmarksCount = BookmarksController.inst.currentBookmarks.value.length;
+      if (bookmarksCount > 0) {
+        bookmarksItem = NamidaPopupItem(
+          icon: Broken.book_saved,
+          title: '${lang.bookmarks}: $bookmarksCount',
+          onTap: () => showBookmarksSheet(currentItem),
+        );
+      }
     }
     final clearItem = NamidaPopupItem(
       icon: Broken.broom,
@@ -416,6 +430,7 @@ class YTUtils {
     final items = <NamidaPopupItem>[];
     items.addAll(defaultItems);
     if (repeatForWidget != null) items.add(repeatForWidget);
+    if (bookmarksItem != null) items.add(bookmarksItem);
     items.add(clearItem);
     return items;
   }
@@ -847,7 +862,8 @@ class YTUtils {
     return infoMap;
   }
 
-  static Future<void> onYoutubeHistoryPlaylistTap({int? initialListen}) async {
+  static Future<void> onYoutubeHistoryPlaylistTap({int? initialListen, List<int>? listensToNavigate}) async {
+    historyListensNavigation.value = HistoryListensNavigation.of(listensToNavigate, initialListen);
     bool shouldNavigate = true;
     if (initialListen != null) {
       shouldNavigate = NamidaOnTaps.jumpToListen(
@@ -1034,14 +1050,9 @@ class YTUtils {
         title: lang.clear,
         trailingWidgets: [
           Obx(
-            (context) => Checkbox.adaptive(
-              splashRadius: 28.0,
-              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(4.0.multipliedRadius),
-              ),
-              value: allSelected.valueR,
-              onChanged: (_) {
+            (context) => NamidaIconButton(
+              icon: null,
+              onPressed: () {
                 final newVal = allSelected.toggle();
                 if (newVal == true) {
                   for (var e in audiosCached) {
@@ -1067,6 +1078,10 @@ class YTUtils {
                 }
                 reEvaluateTotalSize();
               },
+              child: NamidaCheckMark(
+                size: 18.0,
+                active: allSelected.valueR,
+              ),
             ),
           ),
         ],

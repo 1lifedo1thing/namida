@@ -674,6 +674,7 @@ class AppPaths {
   static final SETTINGS_SHORTCUTS = _join(_USER_DATA, 'namida_settings_shortcuts.json');
   static final TRACKS_DB_INFO = DbWrapperFileInfo(directory: _USER_DATA, dbName: 'tracks');
   static final TRACKS_STATS_DB_INFO = DbWrapperFileInfo(directory: _USER_DATA, dbName: 'tracks_stats');
+  static final TRACKS_RHYTHM_DB_INFO = DbWrapperFileInfo(directory: _USER_DATA, dbName: 'tracks_rhythm');
   static final LATEST_PLAYED_FOR_SOURCE = DbWrapperFileInfo(directory: _USER_DATA, dbName: 'latest_played');
   static final AUDIO_CONFIGS = DbWrapperFileInfo(directory: _USER_DATA, dbName: 'audio_configs');
   static final SMART_PLAYLISTS = DbWrapperFileInfo(directory: _USER_DATA, dbName: 'smart_playlists');
@@ -955,6 +956,7 @@ class AppDirs {
   static final VIDEOS_CACHE_TEMP = _join(USER_DATA, 'Videos', 'Temp');
   static final THUMBNAILS = _join(USER_DATA, 'Thumbnails'); // extracted video thumbnails
   static final LYRICS = _join(USER_DATA, 'Lyrics');
+  static final LYRICS_DRAFTS = _join(USER_DATA, 'Lyrics Drafts');
   static final SUBTITLES = _join(USER_DATA, 'Subtitles');
   static final M3UBackup = _join(USER_DATA, 'M3U Backup'); // backups m3u on first found
   static final RECENTLY_DELETED = _join(USER_DATA, 'Recently Deleted'); // stores files that was deleted recently
@@ -1256,6 +1258,7 @@ final kDummyExtendedTrack = TrackExtended(
   label: "",
   releaseType: "",
   bpm: 0,
+  musicalKey: '',
   rating: 0.0,
   originalTags: null,
   tagsList: [],
@@ -1263,6 +1266,7 @@ final kDummyExtendedTrack = TrackExtended(
   gainData: null,
   sortInfo: null,
   extraTags: null,
+  chapters: null,
   albumsIdentifiersWrappers: [],
   isVideo: false,
   server: null,
@@ -1351,9 +1355,7 @@ class NamidaFeaturesVisibility {
 
   static final wallpaperColors = NamidaFeaturesAvailablity.android12and_plus.resolve();
   static final displayArtworkOnLockscreen = NamidaFeaturesAvailablity.android12and_below.resolve();
-  static final displayFavButtonInNotif = _isAndroid;
-  static final displayFavButtonInNotifMightCauseIssue = displayFavButtonInNotif && NamidaFeaturesAvailablity.android11and_below.resolve();
-  static final displayStopButtonInNotif = _isAndroid;
+  static final notificationButtonsMightDisplaceArtwork = NamidaFeaturesAvailablity.android11and_below.resolve();
   static final displayAppIcons = _isAndroid;
   static final showEqualizerBands = _isAndroid;
   static final showSafFolders = _isAndroid;
@@ -1378,6 +1380,7 @@ class NamidaFeaturesVisibility {
   static final skipSilenceAvailable = PlayerConfig.isSkipSilenceSupported;
   static final equalizerAvailable = PlayerConfig.isEqualizerSupported;
   static final loudnessEnhancerAvailable = PlayerConfig.isLoudnessEnhancerSupported;
+  static final soundEffectsAvailable = _isAndroid;
 
   static final showDownloadNotifications = _isWindows || _isLinux;
   static final showVideoControlsOnHover = _isWindows || _isLinux;

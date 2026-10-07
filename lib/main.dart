@@ -26,6 +26,7 @@ import 'package:namida/class/route.dart';
 import 'package:namida/class/shortcut_data.dart';
 import 'package:namida/controller/backup_controller.dart';
 import 'package:namida/controller/connectivity.dart';
+import 'package:namida/controller/chapters_controller.dart';
 import 'package:namida/controller/current_color.dart';
 import 'package:namida/controller/directory_index.dart';
 import 'package:namida/controller/eggs_controller.dart';
@@ -34,6 +35,7 @@ import 'package:namida/controller/history_controller.dart';
 import 'package:namida/controller/home_widget_controller.dart';
 import 'package:namida/controller/indexer_controller.dart';
 import 'package:namida/controller/logs_controller.dart';
+import 'package:namida/controller/lyrics_integrations.dart';
 import 'package:namida/controller/music_web_server/music_web_server_base.dart';
 import 'package:namida/controller/navigator_controller.dart';
 import 'package:namida/controller/notification_controller.dart';
@@ -286,6 +288,8 @@ Future<bool> _mainAppInitialization() async {
       ytInfoInitSyncItemsCompleter.future,
     ].executeAllAndSilentReportErrors();
 
+    LyricsIntegrations.init();
+
     // -- best to initialize last, so that tracks are prepared (for info/colors) and rhttp is initialized (for network), etc.
     try {
       await Player.inst.initializePlayer().whenComplete(prepareLatestQueue);
@@ -300,6 +304,7 @@ Future<bool> _mainAppInitialization() async {
     NamidaNavigator.setDefaultSystemUIOverlayStyle.ignoreError();
     ScrollSearchController.inst.initialize();
     Subtitles.inst.initialize();
+    ChaptersController.inst.initialize();
   } catch (e, st) {
     logger.error('_mainAppInitialization 2', e: e, st: st);
   }
@@ -518,13 +523,13 @@ class Namida extends StatefulWidget {
         Namida._disposeAllResources().ignoreError(),
       ],
     );
-    if (Platform.isWindows) _terminateProcessWindows();
+    if (Platform.isWindows) terminateProcessWindows();
     await windowManager.destroy().ignoreError();
     return exit(0); // -- destroy alone can take seconds to actually close the process
   }
 
   /// `exit` (ExitProcess) runs dll detach routines while the engine & gpu threads are still alive, some gpu drivers hang or crash there.
-  static void _terminateProcessWindows() {
+  static void terminateProcessWindows() {
     final kernel32 = ffi.DynamicLibrary.open('kernel32.dll');
     final getCurrentProcess = kernel32.lookupFunction<ffi.IntPtr Function(), int Function()>('GetCurrentProcess');
     final terminateProcess = kernel32.lookupFunction<ffi.Int32 Function(ffi.IntPtr process, ffi.Uint32 exitCode), int Function(int process, int exitCode)>('TerminateProcess');
