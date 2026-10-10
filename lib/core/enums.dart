@@ -87,11 +87,9 @@ enum SortType {
     SortType.shuffleDaily,
   ];
 
-  static List<SortType>? sortListFromJsonList(dynamic value) {
-    try {
-      return (value as List).map((e) => SortType.values.getEnum(e)!).toList();
-    } catch (_) {}
-    return null;
+  static List<SortType> sortListFromJsonList(dynamic value) {
+    if (value is! List) return const [];
+    return value.whereType<String>().map(SortType.values.getEnum).nonNulls.toFixedList();
   }
 
   static dynamic sortsToJson(List<SortType> items) => items.map((e) => e.name).toFixedList();
@@ -949,6 +947,7 @@ enum NotificationButton {
   previousChapter,
   nextChapter,
   sleepTimer,
+  stopAfterCurrent,
   addToPlaylist,
   bookmark,
   ;
@@ -1108,6 +1107,7 @@ enum TrackExecuteActions {
   playafter(isPlayerAction: true),
   addtoplaylist,
   addBookmark(isPlayingItemOnly: true),
+  stopAfterCurrent(isPlayingItemOnly: true),
   openinfo,
 
   openArtwork,
@@ -1158,11 +1158,9 @@ enum YTSortType {
   firstListen,
   ;
 
-  static List<YTSortType>? sortListFromJsonList(dynamic value) {
-    try {
-      return (value as List).map((e) => YTSortType.values.getEnum(e)!).toList();
-    } catch (_) {}
-    return null;
+  static List<YTSortType> sortListFromJsonList(dynamic value) {
+    if (value is! List) return const [];
+    return value.whereType<String>().map(YTSortType.values.getEnum).nonNulls.toFixedList();
   }
 
   static dynamic sortsToJson(List<YTSortType> items) => items.map((e) => e.name).toFixedList();

@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:history_manager/history_manager.dart';
 
+import 'package:namida/class/video.dart';
 import 'package:namida/controller/settings_controller.dart';
 import 'package:namida/core/constants.dart';
 import 'package:namida/core/dimensions.dart';
@@ -63,14 +64,30 @@ class YoutubeHistoryController with HistoryManager<YoutubeID, String> {
         try {
           final response = f.readAsJsonSync(ensureExists: false) as List?;
           final dayOfVideo = int.parse(f.path.getFilenameWOExt);
+          final canRepairDates = dayOfVideo > 0;
 
           final listVideos = <YoutubeID>[];
+          bool didRepairDates = false;
+          YoutubeID? previous;
+          bool isNewestFirst = true;
           if (response != null) {
             for (final item in response) {
               var vid = YoutubeID.fromJson(item);
+              if (canRepairDates && vid.dateAddedMS < _kUnknownDateMaxMS) {
+                vid = _withDayDate(vid, dayOfVideo);
+                didRepairDates = true;
+              }
+              final dateMS = vid.dateAddedMS;
+              if (previous != null && dateMS > previous.dateAddedMS) isNewestFirst = false;
+              previous = vid;
               listVideos.add(vid);
-              tempMapTopItems.addForce(vid.id, vid.dateAddedMS);
+              tempMapTopItems.addForce(vid.id, dateMS);
             }
+          }
+          if (!isNewestFirst) listVideos.sortByReverse((e) => e.dateAddedMS);
+          if (didRepairDates) {
+            final listVideosJson = listVideos.map((e) => e.toJson()).toFixedList();
+            f.writeAsJsonSync(listVideosJson);
           }
 
           map[dayOfVideo] = listVideos;
@@ -81,12 +98,25 @@ class YoutubeHistoryController with HistoryManager<YoutubeID, String> {
 
     final topItems = ListensSortedMap<String>();
     topItems.assignAll(tempMapTopItems);
-    topItems.sortAllInternalLists();
 
     return HistoryPrepareInfo(
       historyMap: map,
       topItems: topItems,
       totalItemsCount: totalCount,
+    );
+  }
+
+  /// watches saved without a date load as 0 or local 1970.
+  static const _kUnknownDateMaxMS = Duration.millisecondsPerDay;
+
+  static YoutubeID _withDayDate(YoutubeID vid, int day) {
+    final dayStartMS = HistoryManager.daysSince1970ToMilliseconds(day);
+    return YoutubeID(
+      id: vid.id,
+      source: vid.sourceNull,
+      watchNull: YTWatch(dateMSNull: dayStartMS, isYTMusic: vid.watch.isYTMusic),
+      queueSource: vid.queueSource,
+      playlistID: vid.playlistID,
     );
   }
 

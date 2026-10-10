@@ -115,7 +115,9 @@ class TagLibRes {
       final newVal = _getProperty(newPropertiesMap, defaultKey); // -- `FTags.toTagLibMap` writes the default key only
       if (newVal != null) {
         final validKeyInOldMap = _firstValidKey(allProperties, fallbackKeys);
-        allProperties[validKeyInOldMap ?? defaultKey] = newVal;
+        final key = validKeyInOldMap ?? defaultKey;
+        final oldVal = allProperties[key];
+        allProperties[key] = _keepMultiValued(key, oldVal, newVal);
         newPropertiesMap.remove(defaultKey);
       }
     }
@@ -129,13 +131,55 @@ class TagLibRes {
     redirectField(TagLibField.label, _TagLibFieldsFallback.label);
     redirectField(TagLibField.releaseType, _TagLibFieldsFallback.releaseType);
 
-    allProperties.addAll(newPropertiesMap);
+    for (final e in newPropertiesMap.entries) {
+      final key = e.key;
+      final oldVal = allProperties[key];
+      allProperties[key] = _keepMultiValued(key, oldVal, e.value);
+    }
     return allProperties;
+  }
+
+  static const _kMultiValuedFields = {
+    TagLibField.artist, TagLibField.artists, TagLibField.album, TagLibField.albumArtist, TagLibField.composer, //
+    TagLibField.genre, TagLibField.style, TagLibField.mood, TagLibField.tags, //
+  };
+
+  static List<String> _keepMultiValued(String key, List<String>? oldValues, List<String> newValues) {
+    if (oldValues == null || oldValues.length < 2 || newValues.length != 1) return newValues;
+    if (!_kMultiValuedFields.contains(key)) return newValues;
+    return FTagsMultiValues.splitJoined(newValues[0]) ?? newValues;
+  }
+
+  /// writes [newPropertiesMap] only when [trackPath] holds none of its fields yet.
+  static WriteIfMissingResult writeIfMissingSync(String trackPath, {required Map<String, List<String>> newPropertiesMap}) {
+    TagLibFile? tagFile;
+    try {
+      tagFile = TagLibFile.open(trackPath);
+      if (tagFile == null) return (didWrite: false, error: 'Unsupported file');
+
+      final allProperties = tagFile.properties;
+      final hasAnyField = newPropertiesMap.keys.any((field) => _getProperty(allProperties, field) != null);
+      if (hasAnyField) return (didWrite: false, error: null);
+
+      allProperties.addAll(newPropertiesMap);
+      tagFile.setProperties(allProperties);
+      final didSave = tagFile.save();
+      if (!didSave) {
+        final error = TagLibFile.lastError ?? 'Failed to save';
+        return (didWrite: false, error: error);
+      }
+      return (didWrite: true, error: null);
+    } catch (e) {
+      return (didWrite: false, error: e.toString());
+    } finally {
+      tagFile?.close();
+    }
   }
 
   FAudioModel toFAudioModel({required FArtwork? artwork}) {
     final info = this.properties;
-    int? parsy(String? v) => v == null ? null : int.tryParse(v);
+    final bpmText = info.bpm?.trim();
+    final bpm = bpmText == null ? null : num.tryParse(bpmText)?.round();
     final audioInfo = info.audioInfo;
     final channels = audioInfo.channels;
     return FAudioModel(
@@ -168,12 +212,13 @@ class TagLibRes {
         country: info.country,
         recordLabel: info.recordLabel,
         releaseType: info.releaseType,
-        bpm: parsy(info.bpm),
+        bpm: bpm,
         musicalKey: info.musicalKey,
         mbAlbumId: info.MUSICBRAINZ_ALBUMID,
         mbAlbumArtistId: info.MUSICBRAINZ_ALBUMARTISTID,
         gainData: ReplayGainData.fromTagLibMap(properties),
         sortInfo: FTagsSortInfo.fromTagLibMap(properties),
+        multiValues: properties._buildMultiValues(),
         extraTags: FTags.pickExtraTags(properties.propertiesMap),
         ratingPercentage: FTags.ratingToPercentage(info.rating),
         tempo: info.tempo,
@@ -213,7 +258,34 @@ class TagLibPropertiesWrapper {
     final val = propertiesMap[field];
     if (val == null || val.isEmpty) return null;
     if (val.length == 1) return val[0];
-    return val.join('; ');
+    return val.join(FTagsMultiValues.kJoiner);
+  }
+
+  List<String>? _getMultiValues(String field) {
+    final val = propertiesMap[field];
+    if (val == null) return null;
+    return FTagsMultiValues.valuesOrNull(val);
+  }
+
+  List<String>? _getMultiValuesFallbacks(List<_TagProperty> keys) {
+    for (final k in keys) {
+      final key = k.resolveKeyIn(propertiesMap);
+      if (key != null) return _getMultiValues(key);
+    }
+    return null;
+  }
+
+  FTagsMultiValues? _buildMultiValues() {
+    return FTagsMultiValues.orNull(
+      artists: _getMultiValuesFallbacks(_TagLibFieldsFallback.artist),
+      albums: _getMultiValues(TagLibField.album),
+      albumArtists: _getMultiValues(TagLibField.albumArtist),
+      composers: _getMultiValues(TagLibField.composer),
+      genres: _getMultiValues(TagLibField.genre),
+      styles: _getMultiValues(TagLibField.style),
+      moods: _getMultiValues(TagLibField.mood),
+      tags: _getMultiValues(TagLibField.tags),
+    );
   }
 
   String? _getPropertyFirst(String field) {
@@ -507,3 +579,5 @@ class TagLibField {
   static const ACOUSTID_FINGERPRINT = 'ACOUSTID_FINGERPRINT';
   static const MUSICIP_PUID = 'MUSICIP_PUID';
 }
+
+typedef WriteIfMissingResult = ({bool didWrite, String? error});

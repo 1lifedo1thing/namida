@@ -63,6 +63,7 @@ import 'package:namida/ui/dialogs/queue_insertion_dialogs.dart';
 import 'package:namida/ui/pages/about_page.dart';
 import 'package:namida/ui/pages/settings_page.dart';
 import 'package:namida/ui/widgets/animated_widgets.dart';
+import 'package:namida/ui/widgets/baked_blur.dart';
 import 'package:namida/ui/widgets/custom_tooltip.dart';
 import 'package:namida/ui/widgets/effects/effects.dart';
 import 'package:namida/ui/widgets/library/multi_artwork_container.dart';
@@ -500,6 +501,14 @@ class NamidaBgBlur extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (!enabled || (disableIfBlur0 && blur == 0)) return child;
+    final artworkBlurSources = ArtworkBlurScope.maybeOf(context);
+    if (artworkBlurSources != null) {
+      return ArtworkBackdropBlur(
+        sources: artworkBlurSources,
+        blur: blur,
+        child: child,
+      );
+    }
     Widget blurredWidget = BackdropFilter(
       backdropGroupKey: _groupKey,
       filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur, tileMode: NamidaBlur.kDefaultTileMode),
@@ -1640,7 +1649,7 @@ class CreatePlaylistButton extends StatelessWidget {
                   final m3uPath = exportAsM3uRx.value ? PlaylistController.getUnusedM3uFilePathInStorage(name) : null;
 
                   final pl = await PlaylistController.inst.addNewPlaylist(name, m3uPath: m3uPath);
-                  if (m3uPath != null) {
+                  if (pl != null && m3uPath != null) {
                     await PlaylistController.inst.exportPlaylistToM3UFile(pl, m3uPath);
                     snackyy(
                       message: "${lang.savedIn}: $m3uPath",
@@ -9291,7 +9300,7 @@ class _PlayableTitleSubtitleWidgetState extends State<PlayableTitleSubtitleWidge
   void _onLocalChange(Selectable item) async {
     final track = item.track;
     _videoName = track.title;
-    _channelName = track.originalArtist;
+    _channelName = track.displayArtist();
 
     refreshState();
   }

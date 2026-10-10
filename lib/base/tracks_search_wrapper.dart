@@ -7,6 +7,7 @@ import 'package:history_manager/history_manager.dart';
 import 'package:lrc/lrc.dart';
 import 'package:nampack/extensions/extensions.dart';
 
+import 'package:namida/class/faudiomodel.dart';
 import 'package:namida/class/fuzzy_matcher.dart';
 import 'package:namida/class/split_config.dart';
 import 'package:namida/class/track.dart';
@@ -42,6 +43,7 @@ class TracksSearchWrapper {
     final addMoods = filters.contains(TrackSearchFilter.moods);
     final addTags = filters.contains(TrackSearchFilter.tags);
     final addLanguages = filters.contains(TrackSearchFilter.language);
+    final addFolder = filters.contains(TrackSearchFilter.folder);
     final maxListensCount = topTracksMapListens.values.firstOrNull?.length;
     final lyricsLocations = addLyrics ? LyricsLocations.fromSettings() : null;
     return (
@@ -55,6 +57,7 @@ class TracksSearchWrapper {
               genre: e.originalGenre,
               style: e.originalStyle,
               composer: e.composer,
+              multiValues: e.multiValues,
               year: e.year,
               comment: e.comment,
               description: addDescription ? e.description : null,
@@ -62,6 +65,7 @@ class TracksSearchWrapper {
               moods: addMoods ? e.effectiveMoods : null,
               tags: addTags ? e.effectiveTags : null,
               languages: addLanguages ? e.languagesList : null,
+              networkFolderName: addFolder && e.isNetwork ? e.folderName : null,
               path: e.path,
               isVideo: e.isVideo,
               listensCount: topTracksMapListens[e.asTrack()]?.length,
@@ -132,6 +136,7 @@ class TracksSearchWrapper {
       final isVideo = trMap.isVideo;
       final year = trMap.year;
       final track = Track.decide(path, isVideo);
+      final folderName = sfolder ? trMap.networkFolderName ?? track.folderName : null;
 
       final listensCount = trMap.listensCount;
       final listensMultiplier = _listensMultiplierOf(listensCount, maxListensLog);
@@ -142,11 +147,12 @@ class TracksSearchWrapper {
           track: track,
           splitTitle: splitThis(removeFeatArtistsFromTitle ? Indexer.removeFeatArtistsFromTitle(title) : title, stitle, tryCutBeforeBrackets: true),
           splitFilename: splitThis(path.getFilename, sfilename),
-          splitFolder: splitThis(Track.explicit(path).folderName, sfolder),
+          splitFolder: splitThis(folderName, sfolder),
           splitAlbum: salbum
               ? _mapListCleanedAndCleanedMinor(
                   Indexer.splitAlbum(
                     trMap.album,
+                    tagged: trMap.multiValues?.albums,
                     config: splitConfig.albumConfig,
                   ),
                   textCleanedForSearch,
@@ -159,6 +165,7 @@ class TracksSearchWrapper {
                   Indexer.splitArtist(
                     title: title,
                     originalArtist: trMap.artist,
+                    tagged: trMap.multiValues?.artists,
                     config: splitConfig.artistsConfig,
                   ),
                   textCleanedForSearch,
@@ -169,6 +176,7 @@ class TracksSearchWrapper {
               ? _mapListCleanedAndCleanedMinor(
                   Indexer.splitGenre(
                     trMap.genre,
+                    tagged: trMap.multiValues?.genres,
                     config: splitConfig.genresConfig,
                   ),
                   textCleanedForSearch,
@@ -179,6 +187,7 @@ class TracksSearchWrapper {
               ? _mapListCleanedAndCleanedMinor(
                   Indexer.splitStyle(
                     trMap.style,
+                    tagged: trMap.multiValues?.styles,
                     config: splitConfig.genresConfig,
                   ),
                   textCleanedForSearch,
@@ -189,6 +198,7 @@ class TracksSearchWrapper {
               ? _mapListCleanedAndCleanedMinor(
                   Indexer.splitComposer(
                     trMap.composer,
+                    tagged: trMap.multiValues?.composers,
                     config: splitConfig.artistsConfig,
                   ),
                   textCleanedForSearch,
@@ -876,6 +886,7 @@ typedef TracksSearchTrackParams = ({
   String genre,
   String style,
   String composer,
+  FTagsMultiValues? multiValues,
   int? year,
   String? comment,
   String? description,
@@ -883,6 +894,7 @@ typedef TracksSearchTrackParams = ({
   List<String>? moods,
   List<String>? tags,
   List<String>? languages,
+  String? networkFolderName,
   String path,
   bool isVideo,
   int? listensCount,

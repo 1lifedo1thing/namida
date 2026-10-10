@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:history_manager/history_manager.dart';
 import 'package:nampack/nampack.dart';
 
 import 'package:namida/base/settings_file_writer.dart';
@@ -361,6 +362,24 @@ void main() {
     expect(settings.buildJson().containsKey('notificationButtons'), false);
   });
 
+  test('old custom most played ranges cover their first and last days whole, once', () async {
+    final picked = DateRange(oldest: DateTime(2024, 1, 10), newest: DateTime(2024, 1, 14));
+    final singleDay = DateRange(oldest: DateTime(2024, 1, 20), newest: DateTime(2024, 1, 20));
+    await loadFile(settings, {'_v': 2, 'mostPlayedCustomDateRange': picked.toJson(), 'ytMostPlayedCustomDateRange': singleDay.toJson()});
+    expect(settings.mostPlayedCustomDateRange.value, DateRange(oldest: DateTime(2024, 1, 10), newest: DateTime(2024, 1, 14, 23, 59, 59, 999)));
+    expect(settings.ytMostPlayedCustomDateRange.value, DateRange(oldest: DateTime(2024, 1, 20), newest: DateTime(2024, 1, 20, 23, 59, 59, 999)));
+    expect(settings.buildJson().containsKey('mostPlayedCustomDateRange'), false);
+    expect(settings.buildJson().containsKey('ytMostPlayedCustomDateRange'), false);
+
+    final exact = DateRange(oldest: DateTime(2024, 1, 10, 12), newest: DateTime(2024, 1, 12, 12));
+    settings.mostPlayedCustomDateRange.save(exact);
+    await loadFile(settings, settings.buildJson());
+    expect(settings.mostPlayedCustomDateRange.value, exact);
+
+    await loadFile(settings, {'_v': 2, 'ytMostPlayedCustomDateRange': DateRange.dummy().toJson()});
+    expect(settings.ytMostPlayedCustomDateRange.userValue, null);
+  });
+
   group('keys', () {
     test('direct writes throw, the value stays', () async {
       await loadSync(null);
@@ -618,7 +637,7 @@ void main() {
 
       settings.updateMediaItemsTrackSortingAll(MediaType.album, [SortType.title], true);
       expect(settings.mediaItemsTrackSorting.value[MediaType.album], [SortType.title]);
-      expect(settings.mediaItemsTrackSorting.value[MediaType.artist], settings.mediaItemsTrackSorting.fallback[MediaType.artist]);
+      expect(settings.mediaItemsTrackSorting.value[MediaType.artist], settings.mediaItemsTrackSortingDefault.fallback[MediaType.artist]);
       expect(settings.buildJson()['mediaItemsTrackSorting'], {
         'album': ['title'],
       });
@@ -626,6 +645,58 @@ void main() {
 
       settings.updateMediaItemsTrackSortingAll(MediaType.album, albumSorts, null);
       expect(settings.buildJson().containsKey('mediaItemsTrackSorting'), false);
+    });
+
+    test('track sort presets: the active one is sorted by and edited, the default chain stays', () async {
+      await loadFile(settings, {'_v': 2});
+      final albumSorts = settings.mediaItemsTrackSorting.value[MediaType.album]!.toList();
+      settings.addTrackSortPreset(MediaType.album, 'a');
+      expect(settings.mediaItemsTrackSortingPresets.value[MediaType.album]?.activeIndex, 0);
+      expect(settings.mediaItemsTrackSorting.value[MediaType.album], albumSorts);
+
+      int sortsNotified = 0;
+      bool? reverseSeenBySorts;
+      void onSorts() {
+        sortsNotified++;
+        reverseSeenBySorts = settings.mediaItemsTrackSortingReverse.value[MediaType.album];
+      }
+
+      settings.mediaItemsTrackSorting.addListener(onSorts);
+      addTearDown(() => settings.mediaItemsTrackSorting.removeListener(onSorts));
+
+      settings.updateMediaItemsTrackSortingAll(MediaType.album, [SortType.duration], true);
+      expect(settings.mediaItemsTrackSorting.value[MediaType.album], [SortType.duration]);
+      expect(settings.mediaItemsTrackSortingReverse.value[MediaType.album], true);
+      expect(sortsNotified, 1);
+      expect(reverseSeenBySorts, true);
+      expect(settings.buildJson().containsKey('mediaItemsTrackSorting'), false);
+
+      settings.renameTrackSortPreset(MediaType.album, 0, 'b');
+      expect(sortsNotified, 1);
+
+      settings.selectTrackSortPreset(MediaType.album, null);
+      expect(settings.mediaItemsTrackSorting.value[MediaType.album], albumSorts);
+      expect(settings.mediaItemsTrackSortingReverse.value[MediaType.album], false);
+      expect(reverseSeenBySorts, false);
+
+      settings.selectTrackSortPreset(MediaType.album, 0);
+      settings.updateMediaItemsTrackSortingAll(MediaType.album, [SortType.title], null, toDefault: true);
+      expect(settings.mediaItemsTrackSortingPresets.value[MediaType.album]?.activeIndex, null);
+      expect(settings.mediaItemsTrackSorting.value[MediaType.album], [SortType.title]);
+      expect(settings.mediaItemsTrackSortingPresets.value[MediaType.album]?.presets.first.sorts, [SortType.duration]);
+
+      await loadFile(settings, settings.buildJson());
+      expect(settings.mediaItemsTrackSortingPresets.value[MediaType.album]?.presets.first.name, 'b');
+      settings.selectTrackSortPreset(MediaType.album, 0);
+      expect(settings.mediaItemsTrackSorting.value[MediaType.album], [SortType.duration]);
+
+      settings.addTrackSortPreset(MediaType.album, 'c');
+      settings.selectTrackSortPreset(MediaType.album, 0);
+      settings.removeTrackSortPreset(MediaType.album, 0);
+      expect(settings.mediaItemsTrackSortingPresets.value[MediaType.album]?.activeIndex, null);
+      expect(settings.mediaItemsTrackSorting.value[MediaType.album], [SortType.title]);
+      settings.removeTrackSortPreset(MediaType.album, 0);
+      expect(settings.buildJson().containsKey('mediaItemsTrackSortingPresets'), false);
     });
 
     test('grid counts fall back to auto', () async {

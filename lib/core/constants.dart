@@ -313,11 +313,70 @@ class NamidaLinkUtils {
 
     try {
       final possibleId = NamidaLinkRegex.youtubeIdRegex.firstMatch(link)?.group(1);
-      if (possibleId == null || possibleId.length != 11) return '';
+      if (possibleId == null || possibleId.length != 11) return null;
       return possibleId;
     } catch (_) {}
 
     return null;
+  }
+
+  /// the 11th char of a youtube id holds only 4 bits.
+  static final _youtubeIdInBracketsRegex = RegExp(r'\[([\w-]{10}[AEIMQUYcgkosw048])\]');
+  static const _kYoutubeIdInBracketsLength = 13;
+
+  /// `Title [id].ext`, the yt-dlp default.
+  static String? extractYoutubeIdInTrailingBrackets(String filename) {
+    final extensionIndex = filename.lastIndexOf('.');
+    final nameEnd = extensionIndex > 0 ? extensionIndex : filename.length;
+    final bracketsStart = nameEnd - _kYoutubeIdInBracketsLength;
+    if (bracketsStart < 0) return null;
+    final hasBrackets = filename.codeUnitAt(bracketsStart) == 0x5B && filename.codeUnitAt(nameEnd - 1) == 0x5D;
+    if (!hasBrackets) return null;
+    final candidate = _youtubeIdInBracketsRegex.matchAsPrefix(filename, bracketsStart)?.group(1);
+    if (candidate == null || _isWordsOrCounter(candidate)) return null;
+    return candidate;
+  }
+
+  /// words (`Bonus_Track`) or counters (`Track_01_04`, `VID20240104`) that fit the id pattern by chance.
+  static bool _isWordsOrCounter(String candidate) {
+    const dash = 0x2D;
+    const underscore = 0x5F;
+    const zero = 0x30;
+    const nine = 0x39;
+    const upperZ = 0x5A;
+    bool hasLetters = false;
+    bool isInTrailingCounter = false;
+    bool isWordAllCaps = false;
+    bool hasUpperAfterWordStart = false;
+    bool isPreviousSeparator = true;
+    bool isPreviousDigit = false;
+    for (int i = 0; i < candidate.length; i++) {
+      final c = candidate.codeUnitAt(i);
+      final isDigit = c >= zero && c <= nine;
+      final isSeparator = c == dash || c == underscore;
+      if (isDigit) {
+        if (hasLetters) isInTrailingCounter = true;
+      } else if (isSeparator) {
+        if (isPreviousSeparator) return false;
+      } else {
+        if (isInTrailingCounter || isPreviousDigit) return false;
+        final isUpper = c <= upperZ;
+        if (isPreviousSeparator) {
+          isWordAllCaps = isUpper;
+          hasUpperAfterWordStart = false;
+        } else if (isUpper) {
+          if (!isWordAllCaps) return false;
+          hasUpperAfterWordStart = true;
+        } else {
+          if (hasUpperAfterWordStart) return false;
+          isWordAllCaps = false;
+        }
+        hasLetters = true;
+      }
+      isPreviousSeparator = isSeparator;
+      isPreviousDigit = isDigit;
+    }
+    return !isPreviousSeparator;
   }
 
   static String? extractPlaylistId(String playlistUrl) {
@@ -675,6 +734,7 @@ class AppPaths {
   static final TRACKS_DB_INFO = DbWrapperFileInfo(directory: _USER_DATA, dbName: 'tracks');
   static final TRACKS_STATS_DB_INFO = DbWrapperFileInfo(directory: _USER_DATA, dbName: 'tracks_stats');
   static final TRACKS_RHYTHM_DB_INFO = DbWrapperFileInfo(directory: _USER_DATA, dbName: 'tracks_rhythm');
+  static final TRACKS_EXTERNAL_DB_INFO = DbWrapperFileInfo(directory: _USER_DATA, dbName: 'tracks_external');
   static final LATEST_PLAYED_FOR_SOURCE = DbWrapperFileInfo(directory: _USER_DATA, dbName: 'latest_played');
   static final AUDIO_CONFIGS = DbWrapperFileInfo(directory: _USER_DATA, dbName: 'audio_configs');
   static final SMART_PLAYLISTS = DbWrapperFileInfo(directory: _USER_DATA, dbName: 'smart_playlists');
@@ -1265,11 +1325,13 @@ final kDummyExtendedTrack = TrackExtended(
   hashKey: null,
   gainData: null,
   sortInfo: null,
+  multiValues: null,
   extraTags: null,
   chapters: null,
   albumsIdentifiersWrappers: [],
   isVideo: false,
   server: null,
+  serverFolder: null,
 );
 
 /// Unknown Tag Fields
