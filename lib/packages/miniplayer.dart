@@ -264,13 +264,7 @@ class NamidaMiniPlayerTrack extends StatelessWidget {
             final trExt = (currentItem as Selectable).track.toTrackExt();
             var text = " • ${trExt.audioInfoFormattedCompact}";
             final bits = trExt.bits;
-            final isLossless = trExt.isLossless;
-
-            final bitsTextParts = [
-              if (bits >= 24) 'Hi-Res',
-              if (isLossless == true) 'Lossless',
-            ];
-            final bitsText = bitsTextParts.join(' ');
+            final bitsText = trExt.audioQualityText();
             final isBitPerfect = AudioOutputController.inst.isBitPerfectActiveR();
             final badgeIcon = isBitPerfect ? Broken.flash : Broken.wind_2;
 
@@ -375,10 +369,7 @@ class NamidaMiniPlayerTrack extends StatelessWidget {
                                         ),
                                         const SizedBox(width: 2.0),
                                         Text(
-                                          [
-                                            '$bits-bit',
-                                            ...bitsTextParts,
-                                          ].join(' '),
+                                          bitsText.isEmpty ? '$bits-bit' : '$bits-bit $bitsText',
                                           style: TextStyle(
                                             color: theme.colorScheme.primary,
                                             fontSize: 11.0,
@@ -1304,27 +1295,30 @@ class _TrackImage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutWidthProvider(
-      builder: (context, maxWidth) => ArtworkWidget(
-        key: Key(track.pathToImage),
-        track: track,
-        path: track.pathToImage,
-        thumbnailSize: maxWidth,
-        compressed: MiniPlayerController.inst.shouldCompressArtwork,
-        borderRadius: 6.0 + 8.0.multipliedRadius * (maxWidth * 0.004),
-        fadeMilliSeconds: 0,
-        forceSquared: settings.forceSquaredTrackThumbnail.value,
-        boxShadow: const [
-          BoxShadow(
-            color: Color.fromARGB(40, 12, 12, 12),
-            blurRadius: 18.0,
-            offset: Offset(0.0, 6.0),
-          ),
-        ],
-        iconSize: maxWidth * 0.5,
-        blur: 32.0 * MiniPlayerController.inst.animation.value,
-        disableBlurBgSizeShrink: true,
-        allowFloating: true,
+    return _PlaybackGlowOpacity(
+      builder: (glowOpacity) => LayoutWidthProvider(
+        builder: (context, maxWidth) => ArtworkWidget(
+          key: Key(track.pathToImage),
+          track: track,
+          path: track.pathToImage,
+          thumbnailSize: maxWidth,
+          compressed: MiniPlayerController.inst.shouldCompressArtwork,
+          borderRadius: 6.0 + 8.0.multipliedRadius * (maxWidth * 0.004),
+          fadeMilliSeconds: 0,
+          forceSquared: settings.forceSquaredTrackThumbnail.value,
+          boxShadow: const [
+            BoxShadow(
+              color: Color.fromARGB(40, 12, 12, 12),
+              blurRadius: 18.0,
+              offset: Offset(0.0, 6.0),
+            ),
+          ],
+          iconSize: maxWidth * 0.5,
+          blur: 32.0 * MiniPlayerController.inst.animation.value,
+          glowOpacity: glowOpacity,
+          disableBlurBgSizeShrink: true,
+          allowFloating: true,
+        ),
       ),
     );
   }
@@ -1339,31 +1333,93 @@ class _YoutubeIDImage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutWidthProvider(
-      builder: (context, maxWidth) => YoutubeThumbnail(
-        type: ThumbnailType.video,
-        key: Key(video.id),
-        videoId: video.id,
-        width: maxWidth,
-        forceSquared: settings.forceSquaredTrackThumbnail.value,
-        isImportantInCache: true,
-        compressed: MiniPlayerController.inst.shouldCompressArtwork,
-        preferLowerRes: false,
-        fadeMilliSeconds: 0,
-        borderRadius: 6.0 + 8.0.multipliedRadius * (maxWidth * 0.004),
-        boxShadow: const [
-          BoxShadow(
-            color: Color.fromARGB(40, 12, 12, 12),
-            blurRadius: 18.0,
-            offset: Offset(0.0, 6.0),
-          ),
-        ],
-        iconSize: maxWidth * 0.5,
-        blur: 32.0 * MiniPlayerController.inst.animation.value,
-        disableBlurBgSizeShrink: true,
-        allowFloating: true,
+    return _PlaybackGlowOpacity(
+      builder: (glowOpacity) => LayoutWidthProvider(
+        builder: (context, maxWidth) => YoutubeThumbnail(
+          type: ThumbnailType.video,
+          key: Key(video.id),
+          videoId: video.id,
+          width: maxWidth,
+          forceSquared: settings.forceSquaredTrackThumbnail.value,
+          isImportantInCache: true,
+          compressed: MiniPlayerController.inst.shouldCompressArtwork,
+          preferLowerRes: false,
+          fadeMilliSeconds: 0,
+          borderRadius: 6.0 + 8.0.multipliedRadius * (maxWidth * 0.004),
+          boxShadow: const [
+            BoxShadow(
+              color: Color.fromARGB(40, 12, 12, 12),
+              blurRadius: 18.0,
+              offset: Offset(0.0, 6.0),
+            ),
+          ],
+          iconSize: maxWidth * 0.5,
+          blur: 32.0 * MiniPlayerController.inst.animation.value,
+          glowOpacity: glowOpacity,
+          disableBlurBgSizeShrink: true,
+          allowFloating: true,
+        ),
       ),
     );
+  }
+}
+
+// by claude
+/// dims the artwork glow while paused.
+class _PlaybackGlowOpacity extends StatefulWidget {
+  final Widget Function(ValueListenable<double> glowOpacity) builder;
+
+  const _PlaybackGlowOpacity({
+    required this.builder,
+  });
+
+  @override
+  State<_PlaybackGlowOpacity> createState() => _PlaybackGlowOpacityState();
+}
+
+class _PlaybackGlowOpacityState extends State<_PlaybackGlowOpacity> with SingleTickerProviderStateMixin {
+  static const _kPausedOpacity = 0.35;
+  static const _kCurve = Curves.easeOutCubic;
+
+  late final _opacity = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 500),
+    reverseDuration: const Duration(milliseconds: 800),
+    lowerBound: _kPausedOpacity,
+    upperBound: 1.0,
+    value: Player.inst.isPlaying.value ? 1.0 : _kPausedOpacity,
+  );
+
+  void _onPlayingChanged() {
+    final isPlaying = Player.inst.isPlaying.value;
+    final isGlowVisible = settings.enableGlowEffect.value && !MiniPlayerController.inst.isMinimized;
+    if (!isGlowVisible) {
+      _opacity.value = isPlaying ? 1.0 : _kPausedOpacity;
+      return;
+    }
+    if (isPlaying) {
+      _opacity.animateTo(1.0, curve: _kCurve);
+    } else {
+      _opacity.animateBack(_kPausedOpacity, curve: _kCurve);
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    Player.inst.isPlaying.addListener(_onPlayingChanged);
+  }
+
+  @override
+  void dispose() {
+    Player.inst.isPlaying.removeListener(_onPlayingChanged);
+    _opacity.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return widget.builder(_opacity);
   }
 }
 

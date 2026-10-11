@@ -645,6 +645,7 @@ extension TrackExecuteActionsUtils on TrackExecuteActions {
   String toText() => switch (this) {
     TrackExecuteActions.none => lang.none,
     TrackExecuteActions.play => "${lang.play} (${lang.single})",
+    TrackExecuteActions.playOptions => "${lang.play} (${lang.choose})",
     TrackExecuteActions.playnext => lang.playNext,
     TrackExecuteActions.playlast => lang.playLast,
     TrackExecuteActions.playafter => lang.playAfter,
@@ -676,6 +677,7 @@ extension TrackExecuteActionsUtils on TrackExecuteActions {
     return switch (this) {
       TrackExecuteActions.none => Broken.minus_cirlce,
       TrackExecuteActions.play => Broken.play,
+      TrackExecuteActions.playOptions => Broken.play_add,
       TrackExecuteActions.playnext => Broken.next,
       TrackExecuteActions.playlast => Broken.play_cricle,
       TrackExecuteActions.playafter => Broken.hierarchy_square,
@@ -726,6 +728,9 @@ extension TrackExecuteActionsUtils on TrackExecuteActions {
         return;
       case TrackExecuteActions.play:
         Player.inst.playOrPause(0, [item], info.queueSource);
+      case TrackExecuteActions.playOptions:
+        final queue = info.queue ?? [item];
+        Player.inst.playWithOptions(info.index, queue, info.queueSource);
       case TrackExecuteActions.playnext:
         Player.inst.addToQueue([item], insertNext: true);
       case TrackExecuteActions.playlast:
@@ -1522,14 +1527,12 @@ extension RouteUtils on NamidaRoute {
         route == RouteType.SUBPAGE_historyTracks ||
         route == RouteType.SUBPAGE_mostPlayedTracks;
 
-    final shouldShowInitialActions =
+    final shouldShowSettingsIcon =
+        !showMainMenu && //
+        !showPlaylistMenu &&
+        !route.isOpenableFromSettings &&
         route != RouteType.PAGE_stats &&
-        route != RouteType.PAGE_yourYear &&
-        route != RouteType.SETTINGS_page &&
-        route != RouteType.SETTINGS_subpage &&
-        route != RouteType.YOUTUBE_USER_MANAGE_ACCOUNT_SUBPAGE &&
-        route != RouteType.YOUTUBE_USER_MANAGE_SUBSCRIPTION_SUBPAGE;
-    final shouldShowSettingsIcon = !showMainMenu && !showPlaylistMenu && shouldShowInitialActions;
+        route != RouteType.PAGE_yourYear;
 
     final docsLink = this.getDocsLink();
 
@@ -2278,6 +2281,7 @@ extension TrackTileItemL10n on TrackTileItem {
     TrackTileItem.path => lang.path,
     TrackTileItem.sampleRate => lang.sampleRate,
     TrackTileItem.bitDepth => lang.bitDepth,
+    TrackTileItem.lossless => lang.lossless,
     TrackTileItem.bpm => 'BPM',
     TrackTileItem.size => lang.size,
     TrackTileItem.rating => lang.rating,
@@ -2317,6 +2321,7 @@ extension TrackTileItemL10n on TrackTileItem {
     TrackTileItem.path => Broken.location,
     TrackTileItem.sampleRate => Broken.voice_cricle,
     TrackTileItem.bitDepth => Broken.voice_cricle,
+    TrackTileItem.lossless => Broken.voice_cricle,
     TrackTileItem.bpm => Broken.alarm,
     TrackTileItem.size => Broken.size,
     TrackTileItem.rating => Broken.grammerly,

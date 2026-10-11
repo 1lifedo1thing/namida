@@ -1329,17 +1329,17 @@ class _NamidaMiniPlayerBaseState<E, S> extends State<NamidaMiniPlayerBase<E, S>>
                                   rx: settings.artworkGestureDoubleTapLRC,
                                   builder: (context, artworkGestureDoubleTapLRC) {
                                     if (artworkGestureDoubleTapLRC) {
-                                      return ObxO(
-                                        rx: Lyrics.inst.currentLyricsLRC,
-                                        builder: (context, currentLyricsLRC) {
+                                      return Obx(
+                                        (context) {
                                           // -- only when lrc view is not visible, to prevent other gestures delaying.
+                                          final isLRCViewVisible = settings.enableLyrics.valueR && Lyrics.inst.currentLyricsLRC.valueR != null;
                                           return DoubleTapDetector(
-                                            onDoubleTap: currentLyricsLRC == null
-                                                ? () {
+                                            onDoubleTap: isLRCViewVisible
+                                                ? null
+                                                : () {
                                                     settings.enableLyrics.save(!settings.enableLyrics.value);
                                                     Lyrics.inst.updateLyrics(currentItem);
-                                                  }
-                                                : null,
+                                                  },
                                             child: currentImage,
                                           );
                                         },
@@ -2222,6 +2222,7 @@ class WaveformMiniplayer extends StatelessWidget {
       if (ms != null) {
         final finalMS = allowMagnet ? SeekMagnet.snapMilliseconds(ms, _currentDurationInMS, _magnetThreshold) : ms;
         Player.inst.seek(Duration(milliseconds: finalMS));
+        WaveformComponent.pokeAt(finalMS);
       }
     }
 
@@ -2509,11 +2510,18 @@ class SeekBackwardsDetectorWidget extends StatelessWidget {
   final Widget child;
   const SeekBackwardsDetectorWidget({super.key, required this.child});
 
+  static void _onSecondsReady(int seconds) {
+    final targetMS = Player.inst.nowPlayingPosition.value - seconds * 1000;
+    WaveformComponent.pokeAt(targetMS, strength: 0.75);
+  }
+
+  static void _onTap() => Player.inst.seekSecondsBackward(onSecondsReady: _onSecondsReady);
+
   @override
   Widget build(BuildContext context) {
     return TapDetector(
       behavior: HitTestBehavior.translucent,
-      onTap: Player.inst.seekSecondsBackward,
+      onTap: _onTap,
       child: LongPressDetector(
         behavior: HitTestBehavior.translucent,
         onLongPress: null,
@@ -2535,11 +2543,18 @@ class SeekForwardDetectorWidget extends StatelessWidget {
   final Widget child;
   const SeekForwardDetectorWidget({super.key, required this.child});
 
+  static void _onSecondsReady(int seconds) {
+    final targetMS = Player.inst.nowPlayingPosition.value + seconds * 1000;
+    WaveformComponent.pokeAt(targetMS, strength: 0.75);
+  }
+
+  static void _onTap() => Player.inst.seekSecondsForward(onSecondsReady: _onSecondsReady);
+
   @override
   Widget build(BuildContext context) {
     return TapDetector(
       behavior: HitTestBehavior.translucent,
-      onTap: Player.inst.seekSecondsForward,
+      onTap: _onTap,
       child: LongPressDetector(
         onLongPress: null,
         initializer: (instance) {

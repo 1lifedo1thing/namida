@@ -21,6 +21,7 @@ import 'package:webdav_client/webdav_client.dart' as webdav;
 
 import 'package:namida/class/faudiomodel.dart';
 import 'package:namida/class/file_parts.dart';
+import 'package:namida/class/replay_gain_data.dart';
 import 'package:namida/class/split_config.dart';
 import 'package:namida/class/track.dart';
 import 'package:namida/class/version_wrapper.dart';
@@ -28,6 +29,7 @@ import 'package:namida/controller/connectivity.dart';
 import 'package:namida/controller/directory_index.dart';
 import 'package:namida/controller/ffmpeg_controller.dart';
 import 'package:namida/controller/files_download_manager.dart';
+import 'package:namida/controller/history_controller.dart';
 import 'package:namida/controller/indexer_controller.dart';
 import 'package:namida/controller/logs_controller.dart';
 import 'package:namida/controller/lyrics_search_utils/lrc_search_utils_selectable.dart';
@@ -56,6 +58,7 @@ part 'jellyfin_server.dart';
 part 'local_range_proxy.dart';
 part 'saf_server.dart';
 part 'server_cache_controller.dart';
+part 'server_playback_reporter.dart';
 part 'sftp_server.dart';
 part 'smb_server.dart';
 part 'subsonic_web_server.dart';
@@ -80,6 +83,10 @@ abstract class MusicWebServer {
   Future<List<WebServerPlaylist>?> fetchPlaylists({required int? Function(String remoteId) knownChangedMS}) async => null;
   FutureOr<WebStreamUriDetails?> getStreamUrl(String id, {void Function(File cachedFile)? onFetchedIfLocal});
   Future<Uint8List?> getImage(String id);
+
+  Future<void> _reportPlayback(String id, _PlaybackReport report, int positionMS) async {}
+  Duration? get _playbackProgressInterval => null;
+  Future<_ListensReportResult> _reportListens(List<_ServerListen> listens) async => _ListensReportResult.rejected;
 
   /// the original file, never transcoded.
   Future<_ServerFileSource?> _getOriginalFileSource(String id) async {
@@ -160,6 +167,15 @@ String? _serverFolderOf(String remoteFilePath, {List<String> baseSegments = cons
   if (dirStart >= dirEnd) return null;
   return segments.getRange(dirStart, dirEnd).join('/');
 }
+
+String _channelsText(int? channels) => switch (channels) {
+  null || 0 => '',
+  1 => 'mono',
+  2 => 'stereo',
+  _ => channels.toString(),
+};
+
+List<String>? _namesOrNull(Iterable<String> names) => names.isEmpty ? null : names.toFixedList();
 
 bool _startsWithSegments(List<String> segments, List<String> prefix) {
   if (prefix.length > segments.length) return false;

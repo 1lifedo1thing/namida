@@ -352,6 +352,8 @@ class TrackTile extends StatelessWidget {
     info: SwipeQueueAddTileInfo(
       queueSource: properties.configs.queueSource,
       heroTag: _heroTag,
+      queue: tracks,
+      index: index,
     ),
   );
 
@@ -799,6 +801,8 @@ class TrackTile extends StatelessWidget {
         infoCallback: () => SwipeQueueAddTileInfo(
           queueSource: queueSource,
           heroTag: heroTag,
+          queue: tracks,
+          index: index,
         ),
         dismissibleKey: heroTag,
         allowSwipeLeft: properties.allowSwipeLeft,
@@ -928,6 +932,7 @@ class TrackTileManager {
     TrackTileItem.format: (track, _) => track.format.toUpperCase(),
     TrackTileItem.sampleRate: (track, _) => '${track.sampleRate}Hz',
     TrackTileItem.bitDepth: (track, _) => '${track.bits} bit',
+    TrackTileItem.lossless: (track, _) => track.audioQualityText(),
     TrackTileItem.bpm: (track, _) => '${track.bpm ?? 0} BPM',
     TrackTileItem.size: (track, _) => track.size.fileSizeFormatted,
     TrackTileItem.bitrate: (track, _) => "${(track.bitrate)} kb/s",
