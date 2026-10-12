@@ -3,11 +3,13 @@ import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:basic_audio_handler/basic_audio_handler.dart';
 import 'package:history_manager/history_manager.dart';
 import 'package:nampack/nampack.dart';
 
 import 'package:namida/base/settings_file_writer.dart';
 import 'package:namida/class/count_per_row.dart';
+import 'package:namida/class/player_config_preset.dart';
 import 'package:namida/controller/settings_controller.dart';
 import 'package:namida/controller/sync_manager/sync_manager.dart';
 import 'package:namida/core/constants.dart';
@@ -281,7 +283,12 @@ void main() {
     settings.player.onInterrupted.update((actions) => actions[InterruptionType.shouldDuck] = InterruptionAction.duckAudio);
     expect(settings.player.buildJson().containsKey('onInterrupted'), false);
 
-    File(AppPaths.SETTINGS_PLAYER).writeAsStringSync(jsonEncode({'_v': 2, 'onInterrupted': {'shouldPause': 'pause', 'unknown': 'doNothing'}}));
+    File(AppPaths.SETTINGS_PLAYER).writeAsStringSync(
+      jsonEncode({
+        '_v': 2,
+        'onInterrupted': {'shouldPause': 'pause', 'unknown': 'doNothing'},
+      }),
+    );
     await settings.player.prepareSettingsFile();
     expect(settings.player.buildJson()['onInterrupted'], {'unknown': 'doNothing'});
     expect(settings.player.onInterrupted.value.length, 3);
@@ -915,6 +922,46 @@ void main() {
       expect(settings.extra.getPreferredTabIndexIfLoggedInYT(), 0);
     });
 
+    test('extra: yt home section sources', () async {
+      await loadFile(settings.extra, {'_v': 2});
+      expect(settings.extra.getYTHomeSectionSource(YTHomePages.home), YTHomeSource.local);
+      expect(settings.extra.getYTHomeSectionSource(YTHomePages.notifications), YTHomeSource.youtube);
+      expect(settings.extra.getYTHomeSectionSource(YTHomePages.downloads), YTHomeSource.local);
+
+      settings.extra.setYTHomeSectionSource(YTHomePages.playlists, YTHomeSource.youtube);
+      expect(settings.extra.getYTHomeSectionSource(YTHomePages.playlists), YTHomeSource.youtube);
+      expect(settings.extra.getYTHomeSectionSource(YTHomePages.channels), YTHomeSource.local);
+      settings.extra.setYTHomeSectionSource(YTHomePages.playlists, YTHomeSource.local);
+      expect(settings.extra.getYTHomeSectionSource(YTHomePages.playlists), YTHomeSource.local);
+
+      settings.extra.setYTHomeSectionSource(YTHomePages.channels, YTHomeSource.youtube);
+      expect(settings.extra.buildJson(), {
+        '_v': 2,
+        'ytHomeSectionSources': {'playlists': 'local', 'channels': 'youtube'},
+      });
+
+      for (final section in YTHomePages.values) {
+        expect(section.sources, isNotEmpty);
+        expect(section.hasSourceChoice, section.sources.length > 1);
+      }
+    });
+
+    test('extra: old yt split page indexes migrate to section sources', () async {
+      await loadFile(settings.extra, {'_v': 2, 'ytInitialHomePage': 'channels', 'ytHomePageIndex': 1, 'ytChannelsPageIndex': 0, 'ytPlaylistsPageIndex': 'x'});
+      expect(settings.extra.ytInitialHomePage.value, YTHomePages.channels);
+      expect(settings.extra.ytHomeSectionSources.value, {YTHomePages.home: YTHomeSource.youtube, YTHomePages.channels: YTHomeSource.local});
+      final migrated = settings.extra.buildJson();
+      for (final oldName in ['ytHomePageIndex', 'ytChannelsPageIndex', 'ytPlaylistsPageIndex']) {
+        expect(migrated.containsKey(oldName), false, reason: oldName);
+      }
+
+      await loadFile(settings.extra, migrated);
+      expect(settings.extra.buildJson(), migrated);
+
+      await loadFile(settings.extra, {'_v': 2, 'ytPlaylistsPageIndex': null});
+      expect(settings.extra.buildJson(), {'_v': 2});
+    });
+
     test('extra: recent searches', () async {
       await loadFile(settings.extra, {'_v': 2});
       settings.extra.addRecentSearch('a');
@@ -952,6 +999,77 @@ void main() {
         'windowBounds': {'l': 1, 't': 'x', 'r': 3, 'b': 4},
       });
       expect(settings.extra.windowBounds.value, null);
+    });
+
+    test('equalizer: config presets put in place, rename, remove and reload equal', () async {
+      await loadFile(settings.equalizer, {'_v': 2});
+      final defaults = PlayerConfig(
+        skipSilence: false,
+        loudnessEnhancerEnabled: false,
+        loudnessEnhancer: 0.0,
+        equalizerEnabled: false,
+        equalizer: ParametricEqualizer.flat,
+        preset: null,
+        speed: 1.0,
+        volume: 1.0,
+        pitch: 1.0,
+      );
+      final bassPreset = EqualizerPreset.allDefaults[1];
+      final night = PlayerConfigPreset(
+        name: 'Night',
+        config: defaults.copyWith(equalizerEnabled: true, equalizer: bassPreset.equalizer, preset: bassPreset, volume: 0.5, loudnessEnhancer: 2.5),
+      );
+      final slowed = PlayerConfigPreset(name: 'Slowed', config: defaults.copyWith(speed: 0.85, pitch: 0.85));
+      settings.equalizer.putConfigPreset(slowed);
+      settings.equalizer.putConfigPreset(night);
+      settings.equalizer.putConfigPreset(slowed.copyWith(config: defaults.copyWith(speed: 0.8, pitch: 0.8)));
+      settings.equalizer.putConfigPreset(night.copyWith(name: 'Late'), replacing: 'Night');
+      expect(settings.equalizer.configPresets.value.map((e) => e.name), ['Slowed', 'Late']);
+      expect(settings.equalizer.configPresets.value.first.config.speed, 0.8);
+
+      final json = settings.equalizer.buildJson();
+      await loadFile(settings.equalizer, json);
+      final reloaded = settings.equalizer.configPresets.value;
+      expect(reloaded[0].config, slowed.config.copyWith(speed: 0.8, pitch: 0.8));
+      expect(reloaded[1].config, night.config);
+
+      expect(settings.equalizer.findConfigPresetDuplicate(night.config, exceptName: 'Other')?.name, 'Late');
+      expect(settings.equalizer.findConfigPresetDuplicate(night.config, exceptName: 'Late'), null);
+      expect(settings.equalizer.findConfigPresetDuplicate(defaults, exceptName: 'Other'), null);
+
+      settings.equalizer.removeConfigPreset('Slowed');
+      settings.equalizer.removeConfigPreset('Late');
+      expect(settings.equalizer.configPresets.userValue, null);
+    });
+
+    test('equalizer: a config preset stops matching once any value changes', () {
+      final config = PlayerConfig(
+        skipSilence: false,
+        loudnessEnhancerEnabled: true,
+        loudnessEnhancer: 2.5,
+        equalizerEnabled: true,
+        equalizer: EqualizerPreset.allDefaults[1].equalizer,
+        preset: EqualizerPreset.allDefaults[1],
+        speed: 1.25,
+        volume: 0.5,
+        pitch: 1.1,
+      );
+      final reloaded = PlayerConfig.fromMap(jsonDecode(jsonEncode(config.toMap())));
+      expect(reloaded, config);
+      final changed = [
+        config.copyWith(skipSilence: true),
+        config.copyWith(loudnessEnhancerEnabled: false),
+        config.copyWith(loudnessEnhancer: 2.6),
+        config.copyWith(equalizerEnabled: false),
+        config.copyWith(equalizer: ParametricEqualizer.flat),
+        config.copyWith(preset: EqualizerPreset.allDefaults[2]),
+        config.copyWith(speed: 1.0),
+        config.copyWith(volume: 0.6),
+        config.copyWith(pitch: 1.25),
+      ];
+      for (final c in changed) {
+        expect(c == config, false);
+      }
     });
 
     test('party: reactions and hidden owners', () async {

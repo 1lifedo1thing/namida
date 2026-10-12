@@ -40,6 +40,7 @@ import 'package:namida/core/enums.dart';
 import 'package:namida/core/extensions.dart';
 import 'package:namida/core/namida_converter_ext.dart';
 import 'package:namida/core/translations/language.dart';
+import 'package:namida/ui/pages/offline_docs_page.dart';
 import 'package:namida/youtube/controller/youtube_account_controller.dart';
 import 'package:namida/youtube/controller/youtube_info_controller.dart';
 import 'package:namida/youtube/pages/yt_playlist_subpage.dart';
@@ -476,6 +477,9 @@ enum AppPathsBackupEnum {
   bool? supportsSync() {
     return switch (this) {
       // -- supported
+      AppPathsBackupEnum.SETTINGS ||
+      AppPathsBackupEnum.SETTINGS_PLAYER ||
+      AppPathsBackupEnum.SETTINGS_YOUTUBE ||
       AppPathsBackupEnum.TRACKS_DB_INFO ||
       AppPathsBackupEnum.TRACKS_STATS_DB_INFO ||
       AppPathsBackupEnum.LATEST_PLAYED_FOR_SOURCE ||
@@ -507,10 +511,7 @@ enum AppPathsBackupEnum {
       AppPathsBackupEnum.VIDEOS_CACHE_DB_INFO => true,
 
       // -- coming soon
-      AppPathsBackupEnum.SETTINGS ||
       AppPathsBackupEnum.SETTINGS_EQUALIZER ||
-      AppPathsBackupEnum.SETTINGS_PLAYER ||
-      AppPathsBackupEnum.SETTINGS_YOUTUBE ||
       AppPathsBackupEnum.SETTINGS_EXTRA ||
       AppPathsBackupEnum.SETTINGS_TUTORIAL ||
       AppPathsBackupEnum.SETTINGS_SHORTCUTS ||
@@ -956,6 +957,8 @@ class AppPaths {
     final accounts = YoutiPie.signedInAccounts.value;
     final activeAccount = YoutiPie.activeAccountDetails.value;
     final expiredAccountsCount = accounts.where(cookies.isSessionExpired).length;
+    final sessionFailureReport = YoutiPie.lastSessionFailureReport;
+    final sessionFailureDetails = sessionFailureReport?.toText().split('\n');
 
     Map<String, dynamic> accountInfo(UserChannelInfo account) {
       final identity = account.identity;
@@ -972,6 +975,12 @@ class AppPaths {
       'has_connection': ConnectivityController.inst.hasConnection,
       'language': YoutiPie.languageCode,
       'country': YoutiPie.countryCode,
+      'last_session_reset': _formatLogsDate(YoutiPie.lastSessionReset),
+      if (sessionFailureReport != null)
+        'last_session_failure': {
+          'date': _formatLogsDate(sessionFailureReport.date),
+          'details': sessionFailureDetails,
+        },
       'js_player': {
         'version': cipher.jsPlayerVersion,
         'signature_timestamp': cipher.signatureTimestamp,
@@ -1228,7 +1237,12 @@ class AppDocsLinks {
   final String link;
   const AppDocsLinks._(this.link);
 
-  Future<bool> launch() => NamidaLinkUtils.openLink(this.link);
+  Future<bool> launch() {
+    if (ConnectivityController.inst.hasConnection) {
+      return NamidaLinkUtils.openLink(this.link);
+    }
+    return OfflineDocs.open(this.link);
+  }
 
   static const _BASE_RAW = 'https://docs.namida.app';
   static const _SETTINGS_RAW = '$_BASE_RAW/settings/';
@@ -1441,6 +1455,7 @@ final kDummyExtendedTrack = TrackExtended(
   isVideo: false,
   server: null,
   serverFolder: null,
+  hasNoEmbeddedArtwork: false,
 );
 
 /// Unknown Tag Fields

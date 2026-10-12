@@ -366,7 +366,12 @@ enum LibraryTab {
   foldersMusic,
   foldersVideos,
   search,
-  youtube,
+  youtube(hasSectionsMenu: true),
+  ytHome(isInDrawerOnlyWhenActive: true),
+  ytNotifications(isInDrawerOnlyWhenActive: true),
+  ytChannels(isInDrawerOnlyWhenActive: true),
+  ytPlaylists(isInDrawerOnlyWhenActive: true),
+  ytDownloads(isInDrawerOnlyWhenActive: true),
   queues,
   currentQueue,
   favourites,
@@ -378,6 +383,11 @@ enum LibraryTab {
   languages,
   stats,
   party;
+
+  final bool isInDrawerOnlyWhenActive;
+  final bool hasSectionsMenu;
+
+  const LibraryTab({this.isInDrawerOnlyWhenActive = false, this.hasSectionsMenu = false});
 
   LibraryTab get group => switch (this) {
     LibraryTab.tracksMusic || LibraryTab.tracksVideos => LibraryTab.tracks,
@@ -793,6 +803,7 @@ enum RouteType {
   // ----- Youtube -----
   YOUTUBE_HOME_LOCAL,
   YOUTUBE_HOME,
+  YOUTUBE_HOME_SECTION,
   YOUTUBE_PLAYLISTS,
   YOUTUBE_PLAYLIST_SUBPAGE,
   YOUTUBE_PLAYLIST_DOWNLOAD_SUBPAGE,
@@ -870,6 +881,50 @@ enum LyricsProvider {
   kugou,
 }
 
+enum LyricsEffect {
+  /// lines scale down continuously the further they are from the current line, following the scroll.
+  focalScale(isListOnly: true),
+
+  /// far lines get blurred like a depth of field. costs a gpu blur per far line, first to disable on jank.
+  depthBlur(isListOnly: true),
+
+  /// the line that just became current pops in with a small overshoot.
+  springPop(isListOnly: true),
+
+  /// instrumental gaps show three dots filling up until the next line, instead of an empty pill.
+  interludeDots(isListOnly: true),
+
+  /// far jumps (seeks) scroll slower with an emphasized curve, adjacent lines keep the quick glide.
+  seekGlide(isListOnly: true),
+
+  /// lines without word timing are revealed by a short sweep instead of showing at once.
+  lineReveal,
+
+  /// sung words are tinted towards the artwork color. free.
+  accentTint,
+
+  /// soft artwork colored halo behind sung words. a glyph blur rasterized once per line, drawn every frame.
+  glow,
+
+  /// the word being sung grows slightly as the sweep crosses it. paints the line twice per frame. word-synced only.
+  wordBump,
+
+  /// highlight band travelling over long held words (>=1s), or a line held after its last word. an extra layer per frame while it runs. word-synced only.
+  shimmer,
+
+  /// a soft sweep edge instead of a hard one. an offscreen layer every frame of the sweep.
+  feather,
+
+  /// lines without word timing sweep over most of their duration instead of a short reveal. repaints every frame like word-synced lines.
+  untimedLineSweep,
+  ;
+
+  final bool isListOnly;
+  const LyricsEffect({this.isListOnly = false});
+
+  static final karaokeEffects = values.where((effect) => !effect.isListOnly).toFixedList();
+}
+
 enum QueueInsertionType {
   moreAlbum,
   moreArtist,
@@ -882,6 +937,7 @@ enum QueueInsertionType {
   algorithm,
   algorithmDiscoverDate,
   algorithmTimeRange,
+  similar,
   mix,
   advancedPlay,
   advancedShuffle,
@@ -900,6 +956,27 @@ enum QueueInsertionType {
     QueueInsertionType.algorithmTimeRange => 7,
     _ => null,
   };
+}
+
+/// [weight] per shared value, scaled by closeness for [year], [bpm], [key] and [history].
+enum SimilarTracksSource {
+  genre(weight: 3.0),
+  style(weight: 3.0),
+  mood(weight: 2.0),
+  tag(weight: 2.0),
+  artist(weight: 2.0),
+  albumArtist(weight: 1.0),
+  composer(weight: 1.5),
+  year(weight: 1.5),
+  language(weight: 1.0),
+  bpm(weight: 1.5, isRhythm: true),
+  key(weight: 1.0, isRhythm: true),
+  history(weight: 3.0),
+  ;
+
+  final double weight;
+  final bool isRhythm;
+  const SimilarTracksSource({required this.weight, this.isRhythm = false});
 }
 
 enum LocalVideoMatchingType {
@@ -1052,12 +1129,30 @@ enum FABType {
   search,
 }
 
+enum YTHomeSource {
+  local,
+  youtube(requiresAccount: true),
+  ;
+
+  final bool requiresAccount;
+
+  const YTHomeSource({this.requiresAccount = false});
+}
+
 enum YTHomePages {
-  home,
-  notifications,
-  channels,
-  playlists,
-  downloads,
+  home([YTHomeSource.local, YTHomeSource.youtube]),
+  notifications([YTHomeSource.youtube]),
+  channels([YTHomeSource.local, YTHomeSource.youtube]),
+  playlists([YTHomeSource.local, YTHomeSource.youtube]),
+  downloads([YTHomeSource.local], showsSource: false),
+  ;
+
+  final List<YTHomeSource> sources;
+  final bool showsSource;
+
+  const YTHomePages(this.sources, {this.showsSource = true});
+
+  bool get hasSourceChoice => sources.length > 1;
 }
 
 enum SetMusicAsAction {
@@ -1116,6 +1211,7 @@ enum TrackExecuteActions {
   openArtwork,
   editArtwork,
   saveArtwork,
+  flipArtwork(isPlayingItemOnly: true),
   editTags,
   setRating,
   setRatingAdv,

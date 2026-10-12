@@ -12,7 +12,7 @@ sealed class _SettingsKeysWriter with SettingsFileWriter {
 
   Map<String, dynamic> _raw = {'_v': _kVersion};
   List? _legacy;
-  final _keys = <String, _SettingsKey>{};
+  final _keys = <String, SettingsKey>{};
   bool _didCreateAllKeys = false;
 
   bool get syncable => false;
@@ -38,17 +38,17 @@ sealed class _SettingsKeysWriter with SettingsFileWriter {
     return {for (final key in _keys.values) key.name: key._encode(key.value)};
   }
 
-  _SettingsKey<T> _key<T>(String name, T fallback, {_SettingsCodec<T>? codec, bool sync = true}) {
-    final key = _SettingsKey<T>._(this, name, fallback, codec, sync);
+  SettingsKey<T> _key<T>(String name, T fallback, {_SettingsCodec<T>? codec, bool sync = true}) {
+    final key = SettingsKey<T>._(this, name, fallback, codec, sync);
     key._load(_raw[name]);
     return _keys[name] = key;
   }
 
-  _SettingsKey<E> _keyEnum<E extends Enum>(String name, E fallback, List<E> values, {bool sync = true}) {
+  SettingsKey<E> _keyEnum<E extends Enum>(String name, E fallback, List<E> values, {bool sync = true}) {
     return _key(name, fallback, codec: _EnumCodec(values), sync: sync);
   }
 
-  _SettingsKey<T> _keyObject<T>(String name, T fallback, T? Function(Map<String, dynamic> json) fromJson, Object? Function(T value) toJson, {bool sync = true}) {
+  SettingsKey<T> _keyObject<T>(String name, T fallback, T? Function(Map<String, dynamic> json) fromJson, Object? Function(T value) toJson, {bool sync = true}) {
     return _key(name, fallback, codec: _ObjectCodec(fromJson, toJson), sync: sync);
   }
 
@@ -225,6 +225,70 @@ sealed class _SettingsKeysWriter with SettingsFileWriter {
     if (didChange) writeToStorage();
   }
 
+  /// [json] is this file from a backup, a key it sets or reset wins. a key the backup never touched keeps ours.
+  void applyBackupJson(Map<String, dynamic> json) {
+    final (incoming, dumpedNames) = _migrateDetached(json);
+    _createAllKeys();
+    final Map? incomingModified = incoming['_m'];
+    final nowMS = DateTime.now().millisecondsSinceEpoch;
+    bool didChange = false;
+    for (final key in _keys.values) {
+      final name = key.name;
+      final wasModifiedInBackup = incomingModified != null && incomingModified.containsKey(name);
+      final hasValue = incoming.containsKey(name);
+      if (!hasValue && !wasModifiedInBackup) continue;
+      final dumpedJson = incoming[name];
+      final isDumpedDefault = dumpedNames != null && dumpedNames.contains(name) && _jsonEquals(dumpedJson, key._encodedFallback);
+      if (isDumpedDefault) continue;
+      final backupJson = _backupJsonFor(name, dumpedJson);
+      if (_jsonEquals(backupJson, _raw[name])) continue;
+      if (backupJson == null) {
+        _raw.remove(name);
+      } else {
+        _raw[name] = backupJson;
+      }
+      if (syncable && key.sync) {
+        final Map modified = _raw['_m'] ??= <String, dynamic>{};
+        modified[name] = nowMS;
+      }
+      key._loadFromPeer(backupJson);
+      didChange = true;
+    }
+    if (didChange) writeToStorage();
+  }
+
+  /// what the key named [name] gets when a backup sets [backupJson].
+  Object? _backupJsonFor(String name, Object? backupJson) => backupJson;
+
+  bool _isMigratingDetached = false;
+
+  /// runs the format migrations over [json], this file from elsewhere, leaving this writer's own state as it was.
+  /// also returns the names still holding values of the old full-dump format, defaults included.
+  (Map<String, dynamic>, Set<String>?) _migrateDetached(Map<String, dynamic> json) {
+    final ownRaw = _raw;
+    final ownLegacy = _legacy;
+    final isLegacyFormat = json['_v'] == null;
+    _raw = json;
+    _legacy = isLegacyFormat ? json.keys.toList() : json['_legacy'] as List?;
+    _isMigratingDetached = true;
+    try {
+      if (isLegacyFormat) _migrateLegacy();
+      _migrateKeys();
+      final dumpedNames = _legacy?.cast<String>().toSet();
+      return (_raw, dumpedNames);
+    } finally {
+      _raw = ownRaw;
+      _legacy = ownLegacy;
+      _isMigratingDetached = false;
+    }
+  }
+
+  @override
+  Future<void> writeToStorage() async {
+    if (_isMigratingDetached) return;
+    return super.writeToStorage();
+  }
+
   bool _takeLegacy(String name) {
     final legacy = _legacy;
     if (legacy == null) return false;
@@ -256,7 +320,7 @@ sealed class _SettingsKeysWriter with SettingsFileWriter {
 }
 
 /// [value] is [userValue] or, when none is set, [fallback].
-class _SettingsKey<T> extends Rx<T> {
+class SettingsKey<T> extends Rx<T> {
   final String name;
   final bool sync;
   final T fallback;
@@ -264,7 +328,7 @@ class _SettingsKey<T> extends Rx<T> {
   final _SettingsCodec<T>? _codec;
   T? _override;
 
-  _SettingsKey._(this._owner, this.name, this.fallback, this._codec, this.sync) : super(fallback);
+  SettingsKey._(this._owner, this.name, this.fallback, this._codec, this.sync) : super(fallback);
 
   T? get userValue => _override;
 
@@ -379,7 +443,7 @@ class _SettingsKey<T> extends Rx<T> {
   }
 }
 
-class _SettingsListKey<T> extends _SettingsKey<_ProtectedList<T>> {
+class _SettingsListKey<T> extends SettingsKey<_ProtectedList<T>> {
   _SettingsListKey._(super.owner, super.name, super.fallback, super.codec, super.sync) : super._();
 
   void update(void Function(List<T> value) fn) {
@@ -456,7 +520,7 @@ class _SettingsEnumListKey<E extends Enum> extends _SettingsListKey<E> {
   }
 }
 
-class _SettingsSetKey<T> extends _SettingsKey<_ProtectedSet<T>> {
+class _SettingsSetKey<T> extends SettingsKey<_ProtectedSet<T>> {
   _SettingsSetKey._(super.owner, super.name, super.fallback, super.codec, super.sync) : super._();
 
   @override
@@ -476,7 +540,7 @@ class _SettingsSetKey<T> extends _SettingsKey<_ProtectedSet<T>> {
 
 /// only entries that differ from a non-empty default are stored, the rest is merged back in on load,
 /// so entries added to or changed in the default later still apply.
-class _SettingsMapKey<K, V> extends _SettingsKey<_ProtectedMap<K, V>> {
+class _SettingsMapKey<K, V> extends SettingsKey<_ProtectedMap<K, V>> {
   _SettingsMapKey._(super.owner, super.name, super.fallback, super.codec, super.sync) : super._();
 
   @override

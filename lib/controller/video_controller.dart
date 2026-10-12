@@ -185,6 +185,15 @@ class VideoController {
 
   int get localVideosTotalCount => _allVideoPaths.length;
 
+  /// `current/total` while extracting, `?` while listing paths, otherwise how many were found.
+  String getLocalVideosCountTextR() {
+    final current = localVideoExtractCurrent.valueR;
+    final total = localVideoExtractTotal.valueR;
+    if (total != 0) return '${current ?? total}/$total';
+    if (current != null) return '?';
+    return localVideosTotalCount.formatDecimal();
+  }
+
   final localVideoExtractCurrent = Rxn<int>();
   final localVideoExtractTotal = 0.obs;
 
@@ -613,14 +622,17 @@ class VideoController {
   }
 
   Future<void> toggleVideoPlayback() async {
-    final currentValue = settings.enableVideoPlayback.value;
-    settings.enableVideoPlayback.save(!currentValue);
+    final isEnabled = !settings.enableVideoPlayback.value;
+    settings.enableVideoPlayback.save(isEnabled);
+    await onVideoPlaybackToggled(isEnabled);
+  }
 
+  Future<void> onVideoPlaybackToggled(bool isEnabled) async {
     // only modify if not playing yt/local video, since [enableVideoPlayback] is
     // limited to local music.
     if (Player.inst.currentItem.value is! Selectable) return;
 
-    if (currentValue) {
+    if (!isEnabled) {
       // should close/hide
       currentVideo.value = null;
       YoutubeController.inst.dispose();
@@ -868,6 +880,16 @@ class VideoController {
     printy('videos local: ${localVideos.length}');
   }
 
+  /// merges the cache videos db of an extracted backup, its videos files are expected in [AppDirs.VIDEOS_CACHE] already.
+  /// both video dbs are reloaded after.
+  Future<void> importBackupCacheDb(File? cacheVideosDb) async {
+    if (cacheVideosDb != null) {
+      final params = (incoming: cacheVideosDb, dbInfo: _videoCacheIDMapDB.fileInfo, cacheDirPath: AppDirs.VIDEOS_CACHE);
+      await _VideoControllerIsolateFunctions._mergeBackupCacheDb.thready(params);
+    }
+    await initialize();
+  }
+
   Future<void> _saveCachedVideos(String id) {
     final videos = _videoCacheIDMap[id];
     if (videos == null || videos.isEmpty) {
@@ -1027,6 +1049,43 @@ extension _GlobalPaintBounds on BuildContext {
 
 class _VideoControllerIsolateFunctions {
   const _VideoControllerIsolateFunctions();
+
+  /// the backup's video info wins for the same file, paths are moved onto [cacheDirPath] of this device.
+  static void _mergeBackupCacheDb(({File incoming, DbWrapperFileInfo dbInfo, String cacheDirPath}) params) {
+    const dbConfig = DBConfig(createIfNotExist: true, autoDisposeTimerDuration: null);
+    final cacheDirPath = params.cacheDirPath;
+    final incomingDb = DBWrapper.openFromFileSync(params.incoming, config: dbConfig);
+    final localDb = DBWrapper.openFromInfoSync(fileInfo: params.dbInfo, config: dbConfig);
+    final toWrite = <MapEntry<String, Map<String, dynamic>?>>[];
+    incomingDb.loadEverythingKeyed(
+      (id, value) {
+        final localVideos = localDb.get(id);
+        final merged = <String, dynamic>{...?localVideos};
+        final indexKeyByPath = <String, String>{};
+        for (final e in merged.entries) {
+          final localJson = e.value;
+          final localPath = localJson is Map ? localJson['path'] : null;
+          if (localPath is String) indexKeyByPath[localPath] = e.key;
+        }
+        bool didChange = false;
+        for (final videoJson in value.values) {
+          if (videoJson is! Map<String, dynamic>) continue;
+          final path = videoJson['path'];
+          if (path is! String) continue;
+          final pathInCache = FileParts.joinPath(cacheDirPath, path.getFilename);
+          if (!File(pathInCache).existsSync()) continue;
+          videoJson['path'] = pathInCache;
+          final indexKey = indexKeyByPath[pathInCache] ??= '${merged.length}';
+          merged[indexKey] = videoJson;
+          didChange = true;
+        }
+        if (didChange) toWrite.add(MapEntry(id, merged));
+      },
+    );
+    localDb.putAll(DBWriteList(toWrite));
+    incomingDb.close();
+    localDb.close();
+  }
 
   static Future<Map<String, NamidaVideo>> _readLocalVideosDb(({String oldJsonFilePath, DbWrapperFileInfo dbFileInfo}) params) async {
     final oldJsonFilePath = params.oldJsonFilePath;

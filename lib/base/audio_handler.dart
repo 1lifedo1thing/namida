@@ -986,6 +986,42 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> w
     playErrorRemainingSecondsToSkip.value = 0;
   }
 
+  void _onTrackPlayError(Track tr, Object e, StackTrace st, Function skipItem) {
+    onPauseRaw();
+    cancelPlayErrorSkipTimer();
+    playErrorRemainingSecondsToSkip.value = 7;
+
+    _playErrorSkipTimer = Timer.periodic(
+      const Duration(seconds: 1),
+      (timer) {
+        playErrorRemainingSecondsToSkip.value--;
+        if (playErrorRemainingSecondsToSkip.value <= 0) {
+          NamidaNavigator.inst.closeDialog();
+          if (currentQueue.value.length > 1) skipItem();
+          timer.cancel();
+        }
+      },
+    );
+    NamidaDialogs.inst.showTrackDialog(
+      tr,
+      errorPlayingTrack: e,
+      source: QueueSource.playerQueue,
+    );
+    logger.error('Error playing file', e: e, st: st);
+  }
+
+  @override
+  void onPlaybackError(Object e, StackTrace st) {
+    final item = currentItem.value;
+    item?.execute(
+      selectable: (finalItem) => _onTrackPlayError(finalItem.track, e, st, skipToNext),
+      youtubeID: (_) {
+        snackyy(title: lang.error, message: '$e', top: false, isError: true);
+        logger.error('Error playing video', e: e, st: st);
+      },
+    );
+  }
+
   Future<ItemPrepareConfigSelectable<Q, UriSource>> _itemToPrepareConfigSelectable(
     Q pi,
     Selectable item,
@@ -1128,27 +1164,7 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> w
         final hadPermissionBefore = await PermissionManager.platform.hasManageExternalStoragePermission();
         if (checkInterrupted()) return;
         if (hadPermissionBefore) {
-          onPauseRaw();
-          cancelPlayErrorSkipTimer();
-          playErrorRemainingSecondsToSkip.value = 7;
-
-          _playErrorSkipTimer = Timer.periodic(
-            const Duration(seconds: 1),
-            (timer) {
-              playErrorRemainingSecondsToSkip.value--;
-              if (playErrorRemainingSecondsToSkip.value <= 0) {
-                NamidaNavigator.inst.closeDialog();
-                if (currentQueue.value.length > 1) skipItem();
-                timer.cancel();
-              }
-            },
-          );
-          NamidaDialogs.inst.showTrackDialog(
-            tr,
-            errorPlayingTrack: e,
-            source: QueueSource.playerQueue,
-          );
-          logger.error('Error playing file', e: e, st: st);
+          _onTrackPlayError(tr, e, st, skipItem);
           return;
         } else {
           final hasPermission = await requestManageStoragePermission();
@@ -1211,7 +1227,7 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> w
   }
 
   @override
-  FutureOr<PlayerConfig?> getPlayerConfigForItem(Playable? item, AVPlayer player) {
+  Future<PlayerConfig?> getPlayerConfigForItem(Q? item, AVPlayer player) async {
     // -- a different speed or skipped silence would never stay in sync with the party
     if (partyGate != null) return getDefaultPlayerConfig(null).copyWith(speed: 1.0, skipSilence: false);
     final isPerTrackAudioConfigOverriden = settings.player.isPerTrackAudioConfigOverriden.value;
@@ -1220,7 +1236,9 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> w
     final key = item?.key;
     if (key == null) return null;
 
-    return Player.audioConfigs.get(key);
+    final overrides = await Player.audioConfigs.get(key);
+    if (overrides == null) return null;
+    return overrides.resolve(getDefaultPlayerConfig(item));
   }
 
   Future<void> onItemPlayYoutubeIDSetQuality({
@@ -1723,7 +1741,8 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> w
       }
 
       if (finalAudioSource == null && finalVideoSource == null) {
-        // cache is already best quality, no upgrade needed
+        // -- a picked stream without source has no usable url, otherwise cache is already best quality
+        if (audioStream != null && showErrors) snackyy(title: lang.error, message: 'Failed to get audio source', top: false, isError: true);
         return null;
       }
 
@@ -2371,6 +2390,22 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> w
       _totalListenTimeWriteLock = _totalListenTimeWriteLock.then((_) => _writeTotalListenTime(totalTimeInSeconds)).ignoreError();
       ListenTimeController.inst.flush();
     }
+  }
+
+  /// keeps the bigger total of each key between ours and [file]'s (ex: a backup), then raises them to the daily sums.
+  Future<void> importTotalListenTimeFile(File file) async {
+    final incoming = await _readTotalListenTime(file);
+    if (incoming == null) return;
+    final totals = totalListenedTimeInSec.value;
+    for (final e in incoming.entries) {
+      final key = e.key;
+      final seconds = e.value;
+      if (seconds > (totals[key] ?? 0)) totals[key] = seconds;
+    }
+    await _healTotalListenTimeFromDaily(totals);
+    totalListenedTimeInSec.refresh();
+    _totalListenTimeWriteLock = _totalListenTimeWriteLock.then((_) => _writeTotalListenTime(totals)).ignoreError();
+    await _totalListenTimeWriteLock;
   }
 
   Future<void> _writeTotalListenTime(Map<String, int> totalTimeInSeconds) async {

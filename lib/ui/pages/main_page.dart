@@ -408,7 +408,7 @@ class __MainPageFABButtonState extends State<_MainPageFABButton> {
 
   String _tooltip() => ScrollSearchController.inst.isGlobalSearchMenuShown.value ? lang.clear : settings.floatingActionButton.value.toText();
 
-  void _onSettingsTap() => NamidaSettingSearchBar.globalKey.currentState?.toggle();
+  void _onSettingsTap() => NamidaSettingSearchBar.toggle();
 
   String _settingsTooltip() => SettingsSearchController.inst.canShowSearch.value ? lang.clear : '${lang.search}: ${lang.settings}';
 
@@ -1037,7 +1037,7 @@ class _NavBarDestination extends StatelessWidget {
       rx: settings.includeVideos,
       builder: (context, includeVideos) {
         final variants = tab.availableVariants(includeVideos);
-        final hasVariants = variants.isNotEmpty;
+        final hasMenu = variants.isNotEmpty || tab.hasSectionsMenu;
         final destination = DefaultTextStyle(
           softWrap: false,
           overflow: TextOverflow.fade,
@@ -1050,10 +1050,10 @@ class _NavBarDestination extends StatelessWidget {
               color: isSelected ? AppThemes.selectedNavigationIconColor : null,
             ),
             label: tab.toShortText(),
-            tooltip: hasVariants ? '' : null,
+            tooltip: hasMenu ? '' : null,
           ),
         );
-        if (!hasVariants) return destination;
+        if (!hasMenu) return destination;
         return LibraryTabVariantsPopup(
           tab: tab,
           variants: variants,
@@ -1095,14 +1095,14 @@ class _RailTabItem extends StatelessWidget {
       rx: settings.includeVideos,
       builder: (context, includeVideos) {
         final variants = tab.availableVariants(includeVideos);
-        final hasVariants = variants.isNotEmpty;
+        final hasMenu = variants.isNotEmpty || tab.hasSectionsMenu;
         final item = AnimatedDecoration(
           duration: Duration(milliseconds: 400),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular((isSelected ? 16.0 : 24.0).multipliedRadius),
             color: isSelected ? theme.colorScheme.secondaryContainer : null,
           ),
-          child: !hasVariants
+          child: !hasMenu
               ? button
               : Stack(
                   children: [
@@ -1127,7 +1127,7 @@ class _RailTabItem extends StatelessWidget {
                   ],
                 ),
         );
-        if (!hasVariants) return item;
+        if (!hasMenu) return item;
         return LibraryTabVariantsPopup(
           tab: tab,
           variants: variants,

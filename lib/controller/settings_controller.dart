@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:io';
 import 'dart:math' show Random;
 
 import 'package:flutter/foundation.dart';
@@ -13,6 +14,7 @@ import 'package:namida/base/settings_file_writer.dart';
 import 'package:namida/class/count_per_row.dart';
 import 'package:namida/class/eggs_data.dart';
 import 'package:namida/class/lang.dart';
+import 'package:namida/class/player_config_preset.dart';
 import 'package:namida/class/queue_insertion.dart';
 import 'package:namida/class/shortcut_data.dart';
 import 'package:namida/class/track_sort_presets.dart';
@@ -65,6 +67,16 @@ class _SettingsController extends _SettingsKeysWriter {
 
   /// the main file stored the window bounds before `extra` existed, applied once both files loaded.
   Rect? _legacyWindowBounds;
+
+  /// applies each settings file of an extracted backup, see [_SettingsKeysWriter.applyBackupJson].
+  Future<void> applyBackupFiles(String Function(String filePath) backupPathOf) async {
+    final writers = <_SettingsKeysWriter>[this, equalizer, player, youtube, extra, sync, party, tutorial, if (isDesktop) shortcuts];
+    for (final writer in writers) {
+      final backupFile = File(backupPathOf(writer.filePath));
+      final json = await backupFile.readAsJson();
+      if (json is Map<String, dynamic>) writer.applyBackupJson(json);
+    }
+  }
 
   SettingsFileWriter syncWriterOf(SyncDataItem item) => switch (item) {
     SyncDataItem.settingsGeneral => this,
@@ -374,7 +386,7 @@ class _SettingsController extends _SettingsKeysWriter {
   late final pickColorsFromDeviceWallpaper = _key('pickColorsFromDeviceWallpaper', false, sync: false);
   late final onNotificationTapAction = _keyEnum('onNotificationTapAction', NotificationTapAction.openApp, NotificationTapAction.values);
   late final performanceMode = _keyEnum('performanceMode', isDesktop ? PerformanceMode.goodLooking : PerformanceMode.balanced, PerformanceMode.values, sync: false);
-  late final floatingActionButton = _keyEnum('floatingActionButton', isKuru ? FABType.search : FABType.none, FABType.values);
+  late final floatingActionButton = _keyEnum('floatingActionButton', FABType.search, FABType.values);
   late final vibrationType = _keyEnum('vibrationType', VibrationType.vibration, VibrationType.values);
 
   late final trackItem = _keyMap<TrackTilePosition, TrackTileItem>(
@@ -410,6 +422,7 @@ class _SettingsController extends _SettingsKeysWriter {
       QueueInsertionType.algorithm: QueueInsertion(numberOfTracks: 20, insertNext: true),
       QueueInsertionType.algorithmDiscoverDate: QueueInsertion(numberOfTracks: 20, insertNext: true),
       QueueInsertionType.algorithmTimeRange: QueueInsertion(numberOfTracks: 20, insertNext: true),
+      QueueInsertionType.similar: QueueInsertion(numberOfTracks: 20, insertNext: true, similarSources: SimilarTracksSource.values),
       QueueInsertionType.mix: QueueInsertion(numberOfTracks: 0, insertNext: true),
       QueueInsertionType.advancedPlay: QueueInsertion(numberOfTracks: 0, insertNext: false),
       QueueInsertionType.advancedShuffle: QueueInsertion(numberOfTracks: 0, insertNext: false, shuffle: true),
@@ -508,6 +521,15 @@ class _SettingsController extends _SettingsKeysWriter {
 
   late final fontScaleLRC = _key('fontScaleLRC', 1.0);
   late final fontScaleLRCFull = _key<double?>('fontScaleLRCFull', null);
+
+  static const _kDefaultLyricsEffects = [
+    LyricsEffect.focalScale, LyricsEffect.depthBlur, LyricsEffect.springPop, LyricsEffect.interludeDots, LyricsEffect.seekGlide, //
+    LyricsEffect.lineReveal, LyricsEffect.accentTint, LyricsEffect.glow, LyricsEffect.wordBump, LyricsEffect.shimmer, LyricsEffect.feather, //
+  ];
+  static const _kDefaultLyricsEffectsLine = [LyricsEffect.lineReveal, LyricsEffect.accentTint, LyricsEffect.glow, LyricsEffect.shimmer, LyricsEffect.feather];
+  late final lyricsEffectsLine = _keyEnumList('lyricsEffectsLine', _kDefaultLyricsEffectsLine, LyricsEffect.karaokeEffects);
+  late final lyricsEffectsNormal = _keyEnumList('lyricsEffectsNormal', _kDefaultLyricsEffects, LyricsEffect.values);
+  late final lyricsEffectsExpanded = _keyEnumList('lyricsEffectsExpanded', _kDefaultLyricsEffects, LyricsEffect.values);
 
   late final canAskForBatteryOptimizations = _key('canAskForBatteryOptimizations', true, sync: false);
 
@@ -683,7 +705,7 @@ class _SettingsController extends _SettingsKeysWriter {
 
   (Rx<List<GroupSortType>>, Rx<bool>)? groupSortingRxOf(MediaType media) => _groupSortingKeysOf(media);
 
-  (_SettingsListKey<GroupSortType>, _SettingsKey<bool>)? _groupSortingKeysOf(MediaType media) => switch (media) {
+  (_SettingsListKey<GroupSortType>, SettingsKey<bool>)? _groupSortingKeysOf(MediaType media) => switch (media) {
     MediaType.album => (albumSorts, albumSortReversed),
     MediaType.artist || MediaType.albumArtist || MediaType.composer => (artistSorts, artistSortReversed),
     MediaType.genre || MediaType.style => (genreSorts, genreSortReversed),

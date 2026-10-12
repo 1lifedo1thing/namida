@@ -138,9 +138,11 @@ class NamidaNavigator {
     closeAllDialogs();
   }
 
-  void onFirstLoad() {
-    Dimensions.inst.updateAllTileDimensions();
+  NamidaRouteWidget? _pageAfterFirstLoad;
 
+  void openAfterFirstLoad(NamidaRouteWidget page) => _pageAfterFirstLoad = page;
+
+  void onFirstLoad() {
     final initialTab = settings.extra.selectedLibraryTab.value;
     final isSearchTab = initialTab == LibraryTab.search;
     final finalTab = isSearchTab ? settings.libraryTabs.value.first : initialTab;
@@ -148,6 +150,12 @@ class NamidaNavigator {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       navigateTo(finalTab.toWidget(), durationInMs: 0);
       if (isSearchTab) ScrollSearchController.inst.animatePageController(initialTab);
+
+      final pageAfterFirstLoad = _pageAfterFirstLoad;
+      if (pageAfterFirstLoad != null) {
+        _pageAfterFirstLoad = null;
+        navigateTo(pageAfterFirstLoad);
+      }
     });
   }
 
