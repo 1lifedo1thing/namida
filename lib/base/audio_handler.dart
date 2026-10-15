@@ -150,7 +150,7 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> w
       final wasShuffled = isQueueShuffled;
       await setQueueShuffled(settings.player.shuffleQueue.value);
       final shuffled = isQueueShuffled;
-      if (wasShuffled != shuffled) MiniPlayerController.inst.animateQueueToCurrentTrack(jump: false, minZero: true);
+      if (wasShuffled != shuffled) MiniPlayerController.inst.queueFollower.animateToCurrentItem();
       refreshPlaybackStateModes();
       _refreshNotificationButtonsIfShown(NotificationButton.shuffle);
       SMTCController.instance?.updateShuffle(shuffled);
@@ -3093,6 +3093,7 @@ extension TrackToAudioSourceMediaItem on Selectable {
     final imagePath = tr.pathToImage;
     String? imagePathToUse = await File(imagePath).exists() ? imagePath : null;
     imagePathToUse ??= Indexer.inst.getFallbackFolderArtworkPath(folder: tr.folder);
+    final extraTags = tr.extraTags;
     return MediaItem(
       id: this.toMediaItemId(),
       title: tr.title,
@@ -3109,7 +3110,8 @@ extension TrackToAudioSourceMediaItem on Selectable {
         NowPlayingExtras.path: tr.path,
         NowPlayingExtras.queueIndex: currentIndex,
         NowPlayingExtras.queueLength: queueLength,
-        ...?tr.extraTags,
+        if (extraTags != null)
+          for (final e in extraTags.entries) '${NowPlayingExtras.tagIdPrefix}${e.key}': e.value,
       },
     );
   }
@@ -3159,14 +3161,17 @@ extension YoutubeIDToMediaItem on YoutubeID {
 
 Uri _fileToContentUri(String filePath) {
   if (Platform.isAndroid) {
-    try {
-      return Uri(
-        scheme: 'content',
-        host: 'com.msob7y.namida',
-        queryParameters: {'path': filePath},
-      );
-    } catch (_) {
-      // -- error in content uri means nothing more than android auto/etc not showing artworks
+    final artworkProviderAuthority = NamidaDeviceInfo.packageInfo?.packageName;
+    if (artworkProviderAuthority != null) {
+      try {
+        return Uri(
+          scheme: 'content',
+          host: artworkProviderAuthority,
+          queryParameters: {'path': filePath},
+        );
+      } catch (_) {
+        // -- error in content uri means nothing more than android auto/etc not showing artworks
+      }
     }
   }
   return Uri.file(filePath);

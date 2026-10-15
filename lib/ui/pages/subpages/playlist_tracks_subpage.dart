@@ -585,6 +585,7 @@ class _EmptyPlaylistSubpageState extends State<EmptyPlaylistSubpage> {
                   initiallyExpanded: isExpanded,
                   titleText: lang.add,
                   icon: Broken.add_circle,
+                  showRail: false,
                   onExpansionChanged: (value) => setState(() => isExpanded = value),
                   children: [
                     Container(
@@ -704,7 +705,7 @@ class _NormalPlaylistTracksPageState extends State<NormalPlaylistTracksPage>
 
           final searchResults = this.searchResults;
 
-          final sort = playlist.sortsType?.firstOrNull;
+          final sort = playlist.sortsType?.firstOrNull?.type;
           final sortReverse = playlist.sortReverse;
           final heroTag = 'playlist_${playlist.name}';
 
