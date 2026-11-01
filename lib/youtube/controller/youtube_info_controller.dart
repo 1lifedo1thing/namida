@@ -19,6 +19,7 @@ import 'package:youtipie/class/result_wrapper/search_result.dart';
 import 'package:youtipie/class/search_filters.dart';
 import 'package:youtipie/class/search_suggestion_info.dart';
 import 'package:youtipie/class/stream_info_item/stream_info_item.dart';
+import 'package:youtipie/class/streams/hls_variant.dart';
 import 'package:youtipie/class/streams/video_stream_info.dart';
 import 'package:youtipie/class/streams/video_streams_result.dart';
 import 'package:youtipie/class/thumbnail.dart';
@@ -68,10 +69,11 @@ class YoutubeInfoController {
   static const search = _SearchInfoController();
   static const feed = YoutiPie.feed;
   static const hashtag = YoutiPie.hashtag;
+  static const music = YoutiPie.music;
   static const channel = _ChannelInfoController();
   static final missingInfo = _MissingInfoController();
-  static final sponsorblock = YoutiPie.sponsorblock;
-  static final returnyoutubedislike = YoutiPie.returnyoutubedislike;
+  static const sponsorblock = YoutiPie.sponsorblock;
+  static const returnyoutubedislike = YoutiPie.returnyoutubedislike;
   static final potoken = YoutiPie.potoken;
 
   static final memoryCache = YoutiPie.memoryCache;

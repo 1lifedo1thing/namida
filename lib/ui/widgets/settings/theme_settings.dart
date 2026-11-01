@@ -2,8 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import 'package:flex_color_picker/flex_color_picker.dart';
-
 import 'package:namida/base/setting_subpage_provider.dart';
 import 'package:namida/class/lang.dart';
 import 'package:namida/controller/current_color.dart';
@@ -15,10 +13,12 @@ import 'package:namida/core/enums.dart';
 import 'package:namida/core/extensions.dart';
 import 'package:namida/core/icon_fonts/broken_icons.dart';
 import 'package:namida/core/namida_converter_ext.dart';
+import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/themes.dart';
 import 'package:namida/core/translations/arb/app_localizations.dart';
 import 'package:namida/core/translations/language.dart';
 import 'package:namida/core/utils.dart';
+import 'package:namida/ui/dialogs/color_picker_dialog.dart';
 import 'package:namida/ui/widgets/custom_widgets.dart';
 import 'package:namida/ui/widgets/jellyfish.dart';
 import 'package:namida/ui/widgets/settings/extra_settings.dart';
@@ -103,6 +103,14 @@ class ThemeSetting extends SettingSubpageProvider {
         subtitle: () => lang.usePitchBlackSubtitle,
         onChanged: _onPitchBlackChanged,
       ),
+      // SettingCustom(
+      //   title: () => lang.usePitchBlack,
+      //   keys: [settings.pitchBlackAdv],
+      //   onReset: () => _onPitchBlackChanged(false),
+      //   tile: (args) => _PitchBlackLevelTile(
+      //     bgColor: args.bgColor,
+      //   ),
+      // ),
       SettingCustom(
         title: () => lang.defaultColor,
         aliases: () => [lang.defaultColorSubtitle],
@@ -211,10 +219,10 @@ class _ToggleThemeModeContainerState extends State<ToggleThemeModeContainer> {
             final theme = AppThemes.inst.getAppTheme(CurrentColor.inst.color, !context.isDarkMode);
             return Container(
               decoration: BoxDecoration(
-                color: Color.alphaBlend(theme.listTileTheme.textColor!.withAlpha(200), Colors.white.withAlpha(160)),
+                color: Color.alphaBlend(theme.listTileTheme.textColor!.withOpacityExt(0.78), Colors.white.withOpacityExt(0.63)),
                 borderRadius: BorderRadius.circular(12.0.multipliedRadius),
                 boxShadow: [
-                  BoxShadow(color: theme.listTileTheme.iconColor!.withAlpha(80), spreadRadius: 1.0, blurRadius: widget.blurRadius, offset: const Offset(0, 2)),
+                  BoxShadow(color: theme.listTileTheme.iconColor!.withOpacityExt(0.31), spreadRadius: 1.0, blurRadius: widget.blurRadius, offset: const Offset(0, 2)),
                 ],
               ),
               width: widget.maxWidth,
@@ -229,10 +237,10 @@ class _ToggleThemeModeContainerState extends State<ToggleThemeModeContainer> {
                       child: Container(
                         width: bgSlideWidth,
                         decoration: BoxDecoration(
-                          color: theme.colorScheme.surface.withAlpha(180),
+                          color: theme.colorScheme.surface.withOpacityExt(0.71),
                           borderRadius: BorderRadius.circular(brConst.multipliedRadius),
                           // boxShadow: [
-                          //   BoxShadow(color: Colors.black.withAlpha(100), spreadRadius: 1, blurRadius: 4, offset: Offset(0, 2)),
+                          //   BoxShadow(color: Colors.black.withOpacityExt(0.39), spreadRadius: 1, blurRadius: 4, offset: Offset(0, 2)),
                           // ],
                         ),
                       ),
@@ -252,7 +260,7 @@ class _ToggleThemeModeContainerState extends State<ToggleThemeModeContainer> {
                               onTap: () => ToggleThemeModeContainer.onThemeChangeTap(e),
                               child: Icon(
                                 e.toIcon(),
-                                color: currentTheme == e ? theme.listTileTheme.iconColor : theme.colorScheme.surface.withAlpha(180),
+                                color: currentTheme == e ? theme.listTileTheme.iconColor : theme.colorScheme.surface.withOpacityExt(0.71),
                               ),
                             ),
                           ),
@@ -267,139 +275,6 @@ class _ToggleThemeModeContainerState extends State<ToggleThemeModeContainer> {
         ),
       ),
     );
-  }
-}
-
-class NamidaColorPickerDialog extends StatefulWidget {
-  final String doneText;
-  final VoidCallback? onRefreshButtonPressed;
-  final ValueChanged<Color>? onColorChanged;
-  final bool colorChangedDebouncer;
-  final bool themeFollowsColor;
-  final void Function(Color color) onDonePressed;
-  final bool cancelButton;
-  final Color initialColor;
-
-  const NamidaColorPickerDialog({
-    super.key,
-    required this.doneText,
-    this.onRefreshButtonPressed,
-    this.onColorChanged,
-    this.colorChangedDebouncer = false,
-    this.themeFollowsColor = false,
-    required this.onDonePressed,
-    required this.cancelButton,
-    required this.initialColor,
-  });
-
-  @override
-  State<NamidaColorPickerDialog> createState() => _NamidaColorPickerDialogState();
-}
-
-class _NamidaColorPickerDialogState extends State<NamidaColorPickerDialog> {
-  late Color _currentColor;
-  Timer? colorChangedDebouncer;
-  void _onColorChanged(Color color) {
-    if (widget.themeFollowsColor) {
-      setState(() => _currentColor = color);
-    } else {
-      _currentColor = color;
-    }
-
-    final onColorChanged = widget.onColorChanged;
-    if (onColorChanged != null) {
-      if (widget.colorChangedDebouncer) {
-        colorChangedDebouncer?.cancel();
-        colorChangedDebouncer = Timer(
-          const Duration(milliseconds: 300),
-          () => onColorChanged(color),
-        );
-      } else {
-        onColorChanged(color);
-      }
-    }
-  }
-
-  @override
-  void initState() {
-    _currentColor = widget.initialColor;
-    super.initState();
-  }
-
-  @override
-  void dispose() {
-    colorChangedDebouncer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = widget.themeFollowsColor ? AppThemes.inst.getAppTheme(_currentColor) : context.theme;
-    Widget pickerWidget = CustomBlurryDialog(
-      actions: [
-        if (widget.onRefreshButtonPressed != null)
-          IconButton(
-            icon: const Icon(Broken.refresh),
-            tooltip: lang.restoreDefaults,
-            onPressed: widget.onRefreshButtonPressed,
-          ),
-        if (widget.cancelButton) const CancelButton(),
-        NamidaButton(
-          text: widget.doneText,
-          onTap: () => widget.onDonePressed(_currentColor),
-        ),
-      ],
-      child: ColorPicker(
-        color: _currentColor,
-        onColorChanged: _onColorChanged,
-        hasBorder: true,
-        enableTonalPalette: true,
-        enableOpacity: true,
-        showMaterialName: false,
-        showColorCode: true,
-        colorCodeHasColor: true,
-        focusedEditHasNoColor: true,
-        showEditIconButton: false,
-        editIcon: Broken.edit_2,
-        wheelSquarePadding: 12.0,
-        wheelDiameter: 224.0,
-        wheelWidth: 24.0,
-        borderRadius: 8.0.multipliedRadius,
-        opacityThumbRadius: 16.0,
-        opacityTrackHeight: 12.0,
-        selectedPickerTypeColor: theme.colorScheme.secondary.withOpacityExt(0.4),
-        pickersEnabled: {
-          ColorPickerType.wheel: true,
-          ColorPickerType.both: true,
-          ColorPickerType.customSecondary: false,
-          ColorPickerType.custom: false,
-          ColorPickerType.primary: false,
-          ColorPickerType.accent: false,
-          ColorPickerType.bw: false,
-        },
-        pickerTypeTextStyle: theme.textTheme.displayMedium,
-        colorNameTextStyle: theme.textTheme.displaySmall,
-        materialNameTextStyle: theme.textTheme.displaySmall,
-        colorCodePrefixStyle: theme.textTheme.displaySmall?.copyWith(fontWeight: FontWeight.w300),
-        colorCodeTextStyle: theme.textTheme.displayMedium?.copyWith(fontWeight: FontWeight.w400),
-        copyPasteBehavior: ColorPickerCopyPasteBehavior(
-          copyFormat: ColorPickerCopyFormat.hexAARRGGBB,
-          ctrlC: true,
-          ctrlV: true,
-          editFieldCopyButton: true,
-          copyIcon: Broken.copy,
-        ),
-      ),
-    );
-
-    if (widget.themeFollowsColor) {
-      pickerWidget = Theme(
-        data: theme,
-        child: pickerWidget,
-      );
-    }
-
-    return pickerWidget;
   }
 }
 
@@ -461,6 +336,38 @@ class _AutoColoringTile extends StatelessWidget {
   }
 }
 
+// class _PitchBlackLevelTile extends StatelessWidget {
+//   final Color? bgColor;
+//
+//   const _PitchBlackLevelTile({required this.bgColor});
+//
+//   void _onChanged(int level) {
+//     settings.pitchBlackAdv.save(level);
+//     ThemeSetting._onPitchBlackChanged(true);
+//   }
+//
+//   @override
+//   Widget build(BuildContext context) {
+//     return Obx(
+//       (context) {
+//         final level = settings.pitchBlackAdv.valueR ?? (settings.pitchBlack.valueR ? AppThemes.pitchBlackMaxLevel : 0);
+//         return CustomListTile(
+//           bgColor: bgColor,
+//           icon: Broken.mirror,
+//           title: lang.usePitchBlack,
+//           subtitle: lang.usePitchBlackSubtitle,
+//           trailing: NamidaWheelSlider(
+//             max: AppThemes.pitchBlackMaxLevel,
+//             initValue: level,
+//             onValueChanged: _onChanged,
+//             text: '$level/${AppThemes.pitchBlackMaxLevel}',
+//           ),
+//         );
+//       },
+//     );
+//   }
+// }
+
 class _DefaultColorTile extends StatelessWidget {
   final Color? bgColor;
   final bool isDark;
@@ -493,13 +400,15 @@ class _DefaultColorTile extends StatelessWidget {
 
   void _showPicker() {
     final initialColor = isDark ? playerStaticColorDark : playerStaticColorLight;
+    final suggestedColors = CurrentColor.inst.getSuggestedColors();
     NamidaNavigator.inst.navigateDialog(
       dialog: NamidaColorPickerDialog(
         initialColor: initialColor,
         doneText: lang.done,
-        onColorChanged: _updateColor,
-        colorChangedDebouncer: true,
+        onColorChangeEnd: _updateColor,
         themeFollowsColor: true,
+        isAlphaAllowed: false,
+        suggestedColors: suggestedColors,
         onDonePressed: _onDone,
         onRefreshButtonPressed: _onRestoreDefault,
         cancelButton: false,
@@ -549,8 +458,7 @@ class _LanguageTile extends StatelessWidget {
   const _LanguageTile({required this.bgColor});
 
   void _showDialog(ThemeData theme) {
-    final textTheme = theme.textTheme;
-    final allLocalesPre = AppLocalizations.supportedLocales;
+    const allLocalesPre = AppLocalizations.supportedLocales;
     final allLanguages = allLocalesPre.map(NamidaLanguage.fromLocale).toFixedList();
     allLanguages.sortBy((e) => e.name);
 
@@ -607,7 +515,7 @@ class _LanguageTile extends StatelessWidget {
                             shape: BoxShape.circle,
                             border: Border.all(
                               width: 1.5,
-                              color: theme.colorScheme.onSurface.withAlpha(100),
+                              color: theme.colorScheme.onSurface.withOpacityExt(0.39),
                             ),
                           ),
                           child: Text(
@@ -618,13 +526,13 @@ class _LanguageTile extends StatelessWidget {
                         titleWidget: Text.rich(
                           TextSpan(
                             text: e.name,
-                            style: textTheme.displayMedium,
+                            style: NText.medium.of(context),
                             children: e.country.isEmpty
                                 ? null
                                 : [
                                     TextSpan(
                                       text: " (${e.country})",
-                                      style: textTheme.displaySmall,
+                                      style: NText.small.of(context),
                                     ),
                                   ],
                           ),
@@ -653,7 +561,6 @@ class _LanguageTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
     return ObxO(
       rx: Language.inst.currentLanguageRx,
       builder: (context, currentLanguage) => CustomListTile(
@@ -661,7 +568,7 @@ class _LanguageTile extends StatelessWidget {
         icon: Broken.language_square,
         title: lang.language,
         subtitle: currentLanguage!.name,
-        onTap: () => _showDialog(theme),
+        onTap: () => _showDialog(context.theme),
       ),
     );
   }

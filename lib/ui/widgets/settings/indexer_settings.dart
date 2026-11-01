@@ -19,10 +19,12 @@ import 'package:namida/controller/settings_controller.dart';
 import 'package:namida/controller/video_controller.dart';
 import 'package:namida/core/constants.dart';
 import 'package:namida/core/dimensions.dart';
+import 'package:namida/core/dirs_file_filter.dart';
 import 'package:namida/core/enums.dart';
 import 'package:namida/core/extensions.dart';
 import 'package:namida/core/icon_fonts/broken_icons.dart';
 import 'package:namida/core/namida_converter_ext.dart';
+import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/translations/language.dart';
 import 'package:namida/core/utils.dart';
 import 'package:namida/main.dart';
@@ -598,7 +600,7 @@ class IndexerSettings extends SettingSubpageProvider {
                                   alignment: Alignment.center,
                                   animationDurationMS: 200,
                                   borderRadius: 8.0,
-                                  bgColor: color.withOpacityExt(0.2),
+                                  bgColor: NColors.fixed(color.withOpacityExt(0.2)),
                                   padding: const EdgeInsets.all(8.0),
                                   decoration: BoxDecoration(
                                     border: isSelected
@@ -620,9 +622,9 @@ class IndexerSettings extends SettingSubpageProvider {
                                         const SizedBox(width: 12.0),
                                       ],
                                       Flexible(
-                                        child: Text(
+                                        child: NamidaText(
                                           e.toText(),
-                                          style: theme.textTheme.displayMedium,
+                                          style: NText.medium,
                                           textAlign: TextAlign.center,
                                         ),
                                       ),
@@ -633,7 +635,7 @@ class IndexerSettings extends SettingSubpageProvider {
                             },
                           )
                           .addSeparators(
-                            separator: SizedBox(width: 8.0),
+                            separator: const SizedBox(width: 8.0),
                           )
                           .toFixedList(),
                     ),
@@ -645,8 +647,8 @@ class IndexerSettings extends SettingSubpageProvider {
                       ),
                     ],
                     const SizedBox(height: 12.0),
-                    NamidaContainerDivider(
-                      margin: const EdgeInsets.symmetric(horizontal: 8.0),
+                    const NamidaContainerDivider(
+                      margin: EdgeInsets.symmetric(horizontal: 8.0),
                     ),
                     const SizedBox(height: 12.0),
                     if (legacyAuthRx != null) ...[
@@ -720,15 +722,15 @@ class IndexerSettings extends SettingSubpageProvider {
                                         .map(
                                           (e) => NamidaInkWell(
                                             borderRadius: 99.0,
-                                            bgColor: theme.cardColor,
+                                            bgColor: NColors.fixed(theme.cardColor),
                                             margin: const EdgeInsets.symmetric(horizontal: 3.0),
                                             padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 6.0),
                                             onTap: () {
                                               shareTargetController?.text = e.id;
                                             },
-                                            child: Text(
+                                            child: NamidaText(
                                               e.name,
-                                              style: context.textTheme.displayMedium,
+                                              style: NText.medium,
                                             ),
                                           ),
                                         )
@@ -774,16 +776,14 @@ class IndexerSettings extends SettingSubpageProvider {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                NamidaContainerDivider(
-                                  margin: const EdgeInsets.symmetric(horizontal: 8.0),
+                                const NamidaContainerDivider(
+                                  margin: EdgeInsets.symmetric(horizontal: 8.0),
                                 ),
                                 const SizedBox(height: 12.0),
-                                Text(
+                                NamidaText(
                                   "${lang.error}: ${err.code}\n${err.message}",
-                                  style: context.textTheme.displayMedium?.copyWith(
-                                    color: const Color.fromARGB(255, 221, 69, 58),
-                                    fontWeight: FontWeight.w600,
-                                  ),
+                                  style: const NText(.medium, weight: FontWeight.w600),
+                                  color: NColors.fixed(const Color.fromARGB(255, 221, 69, 58)),
                                 ),
                                 const SizedBox(height: 12.0),
                               ],
@@ -943,7 +943,6 @@ class IndexerSettings extends SettingSubpageProvider {
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = context.textTheme;
     const refreshIconKey = 'kururin';
 
     return SettingsCard(
@@ -1011,17 +1010,17 @@ class IndexerSettings extends SettingSubpageProvider {
           ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-            child: Text(
+            child: NamidaText(
               lang.indexerNote,
-              style: textTheme.displaySmall,
+              style: NText.small,
             ),
           ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
             child: Obx(
-              (context) => Text(
+              (context) => NamidaText(
                 '${lang.duplicatedTracks}: ${Indexer.inst.duplicatedTracksLength.valueR}\n${lang.tracksExcludedByNomedia}: ${Indexer.inst.tracksExcludedByNoMedia.valueR}\n${lang.filteredBySizeAndDuration}: ${Indexer.inst.filteredForSizeDurationTracks.valueR}',
-                style: textTheme.displaySmall,
+                style: NText.small,
               ),
             ),
           ),
@@ -1307,15 +1306,15 @@ class _ExtensionsBlacklistTile extends StatelessWidget {
                     if (blacklistItems.contains(e)) return const SizedBox();
                     return NamidaInkWell(
                       borderRadius: 12.0,
-                      bgColor: theme.cardColor,
+                      bgColor: NColors.fixed(theme.cardColor),
                       margin: const EdgeInsets.symmetric(horizontal: 2.0),
                       padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 3.0),
                       onTap: () {
                         settings.extensionsBlacklist.update((list) => list.addNoDuplicates(e));
                       },
-                      child: Text(
+                      child: NamidaText(
                         e,
-                        style: theme.textTheme.displaySmall,
+                        style: NText.small,
                       ),
                     );
                   },
@@ -1480,7 +1479,7 @@ class _ReIndexTile extends StatelessWidget {
 
   const _ReIndexTile({required this.bgColor});
 
-  Future<void> _showDialog(TextTheme textTheme) async {
+  Future<void> _showDialog() async {
     Indexer.inst.calculateAllImageSizesInStorage();
 
     final clearArtworks = false.obs;
@@ -1510,9 +1509,9 @@ class _ReIndexTile extends StatelessWidget {
           padding: const EdgeInsets.all(12.0),
           child: Column(
             children: [
-              Text(
+              NamidaText(
                 lang.reIndexWarning,
-                style: textTheme.displayMedium,
+                style: NText.medium,
               ),
               const SizedBox(
                 height: 16.0,
@@ -1540,13 +1539,12 @@ class _ReIndexTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = context.textTheme;
     return CustomListTile(
       bgColor: bgColor,
       icon: Broken.refresh,
       title: lang.reIndex,
       subtitle: lang.reIndexSubtitle,
-      onTap: () => _showDialog(textTheme),
+      onTap: _showDialog,
     );
   }
 }
@@ -1688,6 +1686,7 @@ class _ScanFolderTile extends StatelessWidget {
             onTap: () {
               settings.directoriesToScan.update((list) => list.remove(dir));
               if (dir is DirectoryIndexServer) MusicWebServerAuthDetails.manager.deleteFromDb(dir);
+              if (dir.type == DirectoryIndexType.local) NamidaStorage.inst.releaseLibraryDirectory(dir.sourceRaw).ignoreError();
               NamidaNavigator.inst.closeDialog();
               host._maybeShowRefreshPromptDialog(true);
             },
@@ -1803,9 +1802,9 @@ class _ExcludedFoldersList extends StatelessWidget {
       builder: (context, directoriesToExclude) {
         if (directoriesToExclude.isEmpty) {
           return ListTile(
-            title: Text(
+            title: NamidaText(
               lang.noExcludedFolders,
-              style: context.textTheme.displayMedium,
+              style: NText.medium,
             ),
           );
         }
@@ -1862,12 +1861,11 @@ class _FoldersCountSubtitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = context.textTheme;
     return ObxO(
       rx: foldersRx,
-      builder: (context, folders) => Text(
+      builder: (context, folders) => NamidaText(
         folders.length.displayFolderKeyword,
-        style: textTheme.displaySmall,
+        style: NText.small,
       ),
     );
   }
@@ -1968,20 +1966,20 @@ class _ChipsEditorDialog extends StatelessWidget {
 
 Future<void> showRefreshPromptDialog(bool didModifyFolder, {bool allowBypassing = false}) async {
   // [didModifyFolder] was mainly used to force recheck libraries, now it will always recheck.
-  RefreshLibraryIconController.repeat();
-  final currentFiles = await Indexer.inst.getAudioFilesForRefresh();
-  RefreshLibraryIconController.fling().ignoreError().whenComplete(RefreshLibraryIconController.stop);
+  final scan = await _RefreshPromptScan.run(allowBypassing: allowBypassing);
+  if (scan == null) return;
+  final currentFiles = scan.currentFiles;
+  final pathsDifference = scan.difference;
+  if (pathsDifference == null) {
+    VideoController.inst.rescanLocalVideosPaths();
+    await Indexer.inst.refreshLibraryAndCheckForDiff(
+      currentFiles: currentFiles,
+    );
+    return;
+  }
 
   Widget? bypassWidget;
-  if (allowBypassing) {
-    if (settings.bypassRefreshPrompt.value) {
-      VideoController.inst.rescanLocalVideosPaths();
-      await Indexer.inst.refreshLibraryAndCheckForDiff(
-        currentFiles: currentFiles,
-      );
-      return;
-    }
-
+  if (scan.canBypass) {
     bypassWidget = ListTileWithCheckMark(
       icon: Broken.message_question,
       title: lang.dontAskAgain,
@@ -1990,7 +1988,6 @@ Future<void> showRefreshPromptDialog(bool didModifyFolder, {bool allowBypassing 
     );
   }
 
-  final pathsDifference = Indexer.inst.getPathsDifference(currentFiles);
   final newPaths = pathsDifference.newPaths;
   final modifiedPaths = pathsDifference.modifiedPaths;
   final deletedPath = pathsDifference.deletedPaths;
@@ -2006,16 +2003,16 @@ Future<void> showRefreshPromptDialog(bool didModifyFolder, {bool allowBypassing 
     bodyWidgets.add(
       Padding(
         padding: const EdgeInsets.only(bottom: 12.0, left: 6.0, right: 6.0),
-        child: Text(
+        child: NamidaText(
           '${lang.theFollowingChangesWereDetected}.\n${lang.confirmRefresh}',
-          style: namida.textTheme.displayMedium,
+          style: NText.medium,
         ),
       ),
     );
 
     if (noLocalChanges) {
       bodyWidgets.add(
-        DirectoryIndexLocal('').toWidget(
+        const DirectoryIndexLocal('').toWidget(
           theme: namida.theme,
           title: lang.local,
           subtitle: lang.noChangesFound,
@@ -2024,7 +2021,7 @@ Future<void> showRefreshPromptDialog(bool didModifyFolder, {bool allowBypassing 
       bodyWidgets.add(const SizedBox(height: 8.0));
     } else {
       bodyWidgets.add(
-        DirectoryIndexLocal('').toWidget(
+        const DirectoryIndexLocal('').toWidget(
           theme: namida.theme,
           title: lang.local,
           subtitleBuilder: (context) {
@@ -2104,6 +2101,7 @@ Future<void> showRefreshPromptDialog(bool didModifyFolder, {bool allowBypassing 
     bodyWidgets.removeLast(); // remove extra bottom padding
 
     NamidaNavigator.inst.navigateDialog(
+      shouldBlockTapsOnOpen: true,
       dialogBuilder: (theme) {
         return CustomBlurryDialog(
           title: lang.confirm,
@@ -2129,6 +2127,41 @@ Future<void> showRefreshPromptDialog(bool didModifyFolder, {bool allowBypassing 
         );
       },
     );
+  }
+}
+
+// by claude
+/// refresh requests made while the files are being scanned join that scan, which reruns so one dialog shows the latest files.
+class _RefreshPromptScan {
+  static bool _isRunning = false;
+  static bool _hasNewRequest = false;
+  static bool _canBypass = false;
+
+  /// null when the request joined a running scan. [difference] is null when the prompt is bypassed.
+  static Future<_RefreshPromptScanResult?> run({required bool allowBypassing}) async {
+    if (_isRunning) {
+      _hasNewRequest = true;
+      _canBypass = _canBypass && allowBypassing;
+      return null;
+    }
+    _isRunning = true;
+    _canBypass = allowBypassing;
+    RefreshLibraryIconController.repeat();
+    try {
+      while (true) {
+        _hasNewRequest = false;
+        final currentFiles = await Indexer.inst.getAudioFilesForRefresh();
+        if (_hasNewRequest) continue;
+        final isBypassed = _canBypass && settings.bypassRefreshPrompt.value;
+        if (isBypassed) return (currentFiles: currentFiles, difference: null, canBypass: true);
+        final difference = await Indexer.inst.getPathsDifference(currentFiles);
+        if (_hasNewRequest) continue;
+        return (currentFiles: currentFiles, difference: difference, canBypass: _canBypass);
+      }
+    } finally {
+      _isRunning = false;
+      RefreshLibraryIconController.fling().ignoreError().whenComplete(RefreshLibraryIconController.stop);
+    }
   }
 }
 
@@ -2186,7 +2219,7 @@ class RefreshLibraryIconController {
 
 class RefreshLibraryIcon extends StatefulWidget {
   final String widgetKey;
-  final Color? color;
+  final NColors? color;
   final double? size;
 
   const RefreshLibraryIcon({
@@ -2218,10 +2251,10 @@ class RefreshLibraryIconState extends State<RefreshLibraryIcon> with TickerProvi
   Widget build(BuildContext context) {
     return RotationTransition(
       turns: turnsTween.animate(RefreshLibraryIconController.getController(widget.widgetKey, this)),
-      child: Icon(
+      child: NIcon(
         Broken.refresh_2,
         size: widget.size,
-        color: widget.color ?? context.defaultIconColor(),
+        color: widget.color ?? NColors.defaultIcon(),
       ),
     );
   }
@@ -2302,15 +2335,15 @@ class _LocalFilesSmallChip extends StatelessWidget {
     final pathsList = paths.toFixedList();
     if (pathsList.isEmpty) return;
 
-    final separatorWidget = NamidaContainerDivider(
-      margin: const EdgeInsets.symmetric(horizontal: 0.0, vertical: 4.0),
+    const separatorWidget = NamidaContainerDivider(
+      margin: EdgeInsets.symmetric(horizontal: 0.0, vertical: 4.0),
     );
     NamidaNavigator.inst.navigateDialog(
       dialog: CustomBlurryDialog(
         title: '$label: ${paths.length.displayFilesKeyword}',
         normalTitleStyle: true,
-        actions: [
-          const DoneButton(),
+        actions: const [
+          DoneButton(),
         ],
         child: SizedBox(
           height: namida.height * 0.5,
@@ -2332,9 +2365,9 @@ class _LocalFilesSmallChip extends StatelessWidget {
                       ),
                       const SizedBox(width: 8.0),
                       Flexible(
-                        child: Text(
+                        child: NamidaText(
                           p,
-                          style: context.textTheme.displaySmall,
+                          style: NText.small,
                         ),
                       ),
                     ],
@@ -2353,8 +2386,8 @@ class _LocalFilesSmallChip extends StatelessWidget {
     final itemsColor = Colors.white.withOpacityExt(0.75);
     return NamidaInkWell(
       borderRadius: 6.0,
-      bgColor: Color.alphaBlend(colorScheme.withOpacityExt(0.25), CurrentColor.inst.color.withOpacityExt(0.4)),
-      padding: EdgeInsetsGeometry.symmetric(horizontal: 6.0, vertical: 3.0),
+      bgColor: NColors.fixed(Color.alphaBlend(colorScheme.withOpacityExt(0.25), CurrentColor.inst.color.withOpacityExt(0.4))),
+      padding: const EdgeInsetsGeometry.symmetric(horizontal: 6.0, vertical: 3.0),
       onTap: _onTap,
       child: Row(
         mainAxisSize: .min,
@@ -2366,9 +2399,10 @@ class _LocalFilesSmallChip extends StatelessWidget {
           ),
           const SizedBox(width: 2.0),
           Flexible(
-            child: Text(
+            child: NamidaText(
               '$label: ${paths.length.displayFilesKeyword}',
-              style: context.theme.textTheme.displaySmall?.copyWith(fontSize: 12.0, color: itemsColor),
+              style: const NText(.small, size: .s12),
+              color: NColors.fixed(itemsColor),
             ),
           ),
         ],
@@ -2388,7 +2422,6 @@ class _SeparatorsTypeTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = context.textTheme;
     final separatorsRx = type.getList(isBlacklist: false).rx;
     final blacklistRx = type.getList(isBlacklist: true).rx;
     final extraFields = type.toExtraFieldsText();
@@ -2410,9 +2443,9 @@ class _SeparatorsTypeTile extends StatelessWidget {
                   const SizedBox(
                     width: 4.0,
                   ),
-                  Text(
+                  NamidaText(
                     '$blacklistCount',
-                    style: textTheme.displaySmall,
+                    style: NText.small,
                   ),
                 ],
               );
@@ -2463,7 +2496,6 @@ class _SeparatorsDialogState extends State<_SeparatorsDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = context.textTheme;
     final type = widget.type;
     final separators = type.getList(isBlacklist: false);
     final blacklist = type.getList(isBlacklist: true);
@@ -2485,9 +2517,9 @@ class _SeparatorsDialogState extends State<_SeparatorsDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
+          NamidaText(
             lang.separatorsMessage,
-            style: textTheme.displaySmall,
+            style: NText.small,
           ),
           const SizedBox(
             height: 16.0,
@@ -2495,9 +2527,9 @@ class _SeparatorsDialogState extends State<_SeparatorsDialog> {
           Row(
             children: [
               Expanded(
-                child: Text(
+                child: NamidaText(
                   lang.separators,
-                  style: textTheme.displayMedium,
+                  style: NText.medium,
                 ),
               ),
               NamidaIconButton(
@@ -2517,13 +2549,13 @@ class _SeparatorsDialogState extends State<_SeparatorsDialog> {
           const SizedBox(
             height: 16.0,
           ),
-          Text(
+          NamidaText(
             lang.blacklist,
-            style: textTheme.displayMedium,
+            style: NText.medium,
           ),
-          Text(
+          NamidaText(
             lang.separatorsBlacklistSubtitle,
-            style: textTheme.displaySmall,
+            style: NText.small,
           ),
           const SizedBox(
             height: 4.0,
@@ -2587,9 +2619,9 @@ class _SeparatorsPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final labelStyle = context.textTheme.displaySmall;
-    final emptyLabelColor = labelStyle?.color?.withOpacityExt(0.5);
-    final emptyLabelStyle = labelStyle?.copyWith(color: emptyLabelColor);
+    final labelStyle = NText.small.of(context);
+    final emptyLabelColor = labelStyle.color?.withOpacityExt(0.5);
+    final emptyLabelStyle = labelStyle.copyWith(color: emptyLabelColor);
     final separatorsRx = type.getList(isBlacklist: false).rx;
     final blacklistRx = type.getList(isBlacklist: true).rx;
     return SizedBox(
@@ -2651,13 +2683,13 @@ class _TextChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final borderColor = isHighlighted ? theme.colorScheme.secondary : Colors.transparent;
+    final colors = NColorsData.of(context);
+    final borderColor = isHighlighted ? colors.secondary : Colors.transparent;
     return NamidaInkWell(
       onTap: onRemove,
       margin: const EdgeInsets.all(4.0),
       padding: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 10.0),
-      bgColor: theme.cardTheme.color,
+      bgColor: NColors.cardTheme,
       borderRadius: 16.0,
       decoration: BoxDecoration(
         border: Border.all(
@@ -2668,9 +2700,9 @@ class _TextChip extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
+          NamidaText(
             text,
-            style: theme.textTheme.displayMedium,
+            style: NText.medium,
           ),
           if (onRemove != null) ...[
             const SizedBox(
@@ -2729,3 +2761,4 @@ enum _SeparatorsType {
 }
 
 typedef _SeparatorsList = ({RxBaseCore<List<String>> rx, void Function(void Function(List<String> list) fn) update, void Function() reset});
+typedef _RefreshPromptScanResult = ({DirsFileFilterResult currentFiles, IndexerFilesDiff? difference, bool canBypass});

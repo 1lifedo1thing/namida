@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'package:youtipie/class/youtipie_feed/playlist_basic_info.dart';
 
+import 'package:namida/base/queue_search.dart';
 import 'package:namida/base/setting_subpage_provider.dart';
 import 'package:namida/class/queue_scroll_follower.dart';
 import 'package:namida/class/route.dart';
@@ -19,7 +20,7 @@ import 'package:namida/core/enums.dart';
 import 'package:namida/core/extensions.dart';
 import 'package:namida/core/functions.dart';
 import 'package:namida/core/icon_fonts/broken_icons.dart';
-import 'package:namida/core/namida_converter_ext.dart';
+import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/translations/language.dart';
 import 'package:namida/core/utils.dart';
 import 'package:namida/packages/miniplayer_base.dart';
@@ -61,6 +62,7 @@ class YTMiniplayerQueueChipState extends State<YTMiniplayerQueueChip> with Ticke
 
   late final _queueFollower = QueueScrollFollower(currentItemStart: _currentItemStart, canFollow: () => isOpened);
   late final _canScrollQueue = true.obs;
+  late final _search = QueueSearch(onResultsChanged: _onSearchResultsChanged, onResultSelected: _onSearchResultSelected);
 
   bool get isOpened => _smallBoxAnimation.value == 1 && _bigBoxAnimation.value == 0;
   void toggleSheet() => isOpened ? dismissSheet() : openSheet();
@@ -99,6 +101,7 @@ class YTMiniplayerQueueChipState extends State<YTMiniplayerQueueChip> with Ticke
     Player.inst.currentQueue.removeListener(_queueFollower.onCurrentItemMoved);
     _queueFollower.dispose();
     _canScrollQueue.close();
+    _search.dispose();
     super.dispose();
   }
 
@@ -135,21 +138,44 @@ class YTMiniplayerQueueChipState extends State<YTMiniplayerQueueChip> with Ticke
   }
 
   void _animateBigToSmall() {
+    _search.close();
     _animate(0, 1);
     YoutubeMiniplayerUiController.inst.startDimTimer();
     NamidaYTGenerator.inst.cleanResources();
     NamidaNavigator.inst.isQueueSheetOpen = false;
   }
 
-  double _currentItemStart() => Dimensions.youtubeCardItemExtent * Player.inst.currentIndex.value;
+  void _onSearchResultsChanged(bool isNewQuery) {
+    if (!isNewQuery) {
+      _queueFollower.onCurrentItemMoved();
+      return;
+    }
+    final isFiltering = _search.results.value != null;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (isFiltering) {
+        _queueFollower.jumpToItem(0.0);
+      } else {
+        _queueFollower.jumpToCurrentItem();
+      }
+    });
+  }
+
+  void _onSearchResultSelected(int index) {
+    WidgetsBinding.instance.addPostFrameCallback((_) => _queueFollower.jumpToItem(Dimensions.youtubeCardItemExtent * index));
+  }
+
+  double? _currentItemStart() {
+    final index = Player.inst.currentIndex.value;
+    final position = _search.positionOf(index);
+    if (position == null) return null;
+    return Dimensions.youtubeCardItemExtent * position;
+  }
 
   double _smallBoxDrag = 1.0;
   double _bigBoxDrag = 0.0;
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
     final maxHeight = context.height;
     const minHeight = kYTQueueSheetMinHeight;
     const smallChipBorderRadius = 12.0;
@@ -201,14 +227,14 @@ class YTMiniplayerQueueChipState extends State<YTMiniplayerQueueChip> with Ticke
                         margin: smallChipMargin,
                         padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 6.0),
                         height: minHeight,
-                        bgColor: Color.alphaBlend(theme.cardColor.withOpacityExt(0.5), theme.scaffoldBackgroundColor).withOpacityExt(0.95),
+                        bgColor: NColors.custom((c) => Color.alphaBlend(c.card.withOpacityExt(0.5), c.scaffold).withOpacityExt(0.95)),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(
+                            const NIcon(
                               Broken.airdrop,
                               size: 24.0,
-                              color: theme.iconTheme.color?.withOpacityExt(0.65),
+                              color: NColors(.icon, opacity: 0.65),
                             ),
                             const SizedBox(width: 6.0),
                             Expanded(
@@ -226,15 +252,15 @@ class YTMiniplayerQueueChipState extends State<YTMiniplayerQueueChip> with Ticke
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      Text(
+                                      NamidaText(
                                         "${currentIndex + 1}/$queueLength",
-                                        style: textTheme.displaySmall?.copyWith(fontWeight: FontWeight.w600),
+                                        style: const NText(.small, weight: FontWeight.w600),
                                       ),
                                       // const SizedBox(height: 2.0),
                                       if (nextItemName != null && nextItemName != '')
-                                        Text(
+                                        NamidaText(
                                           "${lang.next}: $nextItemName",
-                                          style: textTheme.displaySmall?.copyWith(fontWeight: FontWeight.w500),
+                                          style: const NText(.small, weight: FontWeight.w500),
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
                                         ),
@@ -260,8 +286,7 @@ class YTMiniplayerQueueChipState extends State<YTMiniplayerQueueChip> with Ticke
                                 },
                                 icon: null,
                                 iconWidget: NamidaMiniPlayerBase.getLrcButton(
-                                  theme,
-                                  color: _ActionItemAlt.getIconColor(context),
+                                  color: _ActionItemAlt.iconColor,
                                   iconSize: 22.0,
                                 ),
                               ),
@@ -314,8 +339,8 @@ class YTMiniplayerQueueChipState extends State<YTMiniplayerQueueChip> with Ticke
           animation: _bigBoxAnimation,
           child: Stack(
             children: [
-              ColoredBox(
-                color: Color.alphaBlend(theme.cardColor.withOpacityExt(0.5), theme.scaffoldBackgroundColor),
+              NColoredBox(
+                color: NColors.custom((colors) => Color.alphaBlend(colors.card.withOpacityExt(0.5), colors.scaffold)),
                 child: Listener(
                   onPointerMove: (event) {
                     if (Player.inst.isModifyingQueue) return;
@@ -361,6 +386,10 @@ class YTMiniplayerQueueChipState extends State<YTMiniplayerQueueChip> with Ticke
                       children: [
                         YTQueueChipHeaderRow(
                           onArrowDownPressed: _animateBigToSmall,
+                          onSearchTap: _search.toggle,
+                        ),
+                        QueueSearchBox(
+                          search: _search,
                         ),
                         Expanded(
                           child: VideoTilePropertiesProvider(
@@ -380,52 +409,59 @@ class YTMiniplayerQueueChipState extends State<YTMiniplayerQueueChip> with Ticke
                                 thumbnails: [],
                               ),
                             ),
-                            builder: (properties) => Obx(
-                              (context) {
-                                final queue = Player.inst.currentQueue.valueR;
-                                final canScroll = _canScrollQueue.valueR;
-                                return IgnorePointer(
-                                  ignoring: !canScroll,
-                                  child: NamidaListView(
-                                    listBottomPadding: 0,
-                                    scrollController: _queueFollower.scrollController,
-                                    itemCount: queue.length,
-                                    itemExtent: Dimensions.youtubeCardItemExtent,
-                                    onReorderStart: (index) => Player.inst.invokeQueueModifyLock(),
-                                    onReorderEnd: (index) => Player.inst.invokeQueueModifyLockRelease(),
-                                    onReorder: (oldIndex, newIndex) => Player.inst.reorderTrack(oldIndex, newIndex),
-                                    onReorderCancel: () => Player.inst.invokeQueueModifyOnModifyCancel(),
-                                    physics: canScroll ? const ClampingScrollPhysicsModified() : const NeverScrollableScrollPhysics(),
-                                    itemBuilder: (context, i) {
-                                      final video = queue[i] as YoutubeID;
-                                      return FadeDismissible(
-                                        key: Key("Diss_${video.id}_$i"),
-                                        onDismissed: (direction) async {
-                                          await Player.inst.removeFromQueueWithUndo(i);
-                                          Player.inst.invokeQueueModifyLockRelease();
-                                        },
-                                        onDismissStart: (_) => Player.inst.invokeQueueModifyLock(),
-                                        onDismissCancel: (_) => Player.inst.invokeQueueModifyOnModifyCancel(),
-                                        child: YTHistoryVideoCard(
-                                          key: Key("${i}_${video.id}"),
-                                          properties: properties,
-                                          videos: queue,
-                                          index: i,
-                                          day: null,
-                                          isImportantInCache: true,
-                                          thumbnailHeight: Dimensions.youtubeThumbnailHeight,
-                                          preferFetchNewInfo: true,
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                );
-                              },
+                            builder: (properties) => ObxO(
+                              rx: _search.results,
+                              builder: (context, results) => Obx(
+                                (context) {
+                                  final queue = Player.inst.currentQueue.valueR;
+                                  final canScroll = _canScrollQueue.valueR;
+                                  final onResultTap = results == null ? null : _search.selectResult;
+                                  return IgnorePointer(
+                                    ignoring: !canScroll,
+                                    child: NamidaListView(
+                                      listBottomPadding: 0,
+                                      scrollController: _queueFollower.scrollController,
+                                      itemCount: results?.length ?? queue.length,
+                                      itemExtent: Dimensions.youtubeCardItemExtent,
+                                      onReorderStart: (index) => Player.inst.invokeQueueModifyLock(),
+                                      onReorderEnd: (index) => Player.inst.invokeQueueModifyLockRelease(),
+                                      onReorder: results != null ? null : (oldIndex, newIndex) => Player.inst.reorderTrack(oldIndex, newIndex),
+                                      onReorderCancel: () => Player.inst.invokeQueueModifyOnModifyCancel(),
+                                      physics: canScroll ? const ClampingScrollPhysicsModified() : const NeverScrollableScrollPhysics(),
+                                      itemBuilder: (context, i) {
+                                        final index = results == null ? i : results[i];
+                                        final video = queue[index] as YoutubeID;
+                                        final onTap = onResultTap == null ? null : () => onResultTap(index);
+                                        return FadeDismissible(
+                                          key: Key("Diss_${video.id}_$index"),
+                                          onDismissed: (direction) async {
+                                            await Player.inst.removeFromQueueWithUndo(index);
+                                            Player.inst.invokeQueueModifyLockRelease();
+                                          },
+                                          onDismissStart: (_) => Player.inst.invokeQueueModifyLock(),
+                                          onDismissCancel: (_) => Player.inst.invokeQueueModifyOnModifyCancel(),
+                                          child: YTHistoryVideoCard(
+                                            key: Key("${index}_${video.id}"),
+                                            properties: properties,
+                                            videos: queue,
+                                            index: index,
+                                            day: null,
+                                            isImportantInCache: true,
+                                            thumbnailHeight: Dimensions.youtubeThumbnailHeight,
+                                            preferFetchNewInfo: true,
+                                            onTap: onTap,
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                  );
+                                },
+                              ),
                             ),
                           ),
                         ),
-                        ColoredBox(
-                          color: theme.scaffoldBackgroundColor,
+                        NColoredBox(
+                          color: NColors.scaffold,
                           child: SizedBox(
                             width: context.width,
                             height: kQueueBottomRowHeight,
@@ -489,11 +525,13 @@ class LocalQueueChipHeaderRow extends StatelessWidget {
   final bool addLeftMargin;
   final bool showPlaybackActions;
   final void Function()? onArrowDownPressed;
+  final void Function()? onSearchTap;
   const LocalQueueChipHeaderRow({
     super.key,
     required this.addLeftMargin,
     this.showPlaybackActions = false,
     required this.onArrowDownPressed,
+    this.onSearchTap,
   });
 
   @override
@@ -503,6 +541,7 @@ class LocalQueueChipHeaderRow extends StatelessWidget {
       addLeftMargin: addLeftMargin,
       showPlaybackActions: showPlaybackActions,
       onArrowDownPressed: onArrowDownPressed,
+      onSearchTap: onSearchTap,
       durationFormatter: (items) => items.map((e) => e as Selectable).totalDurationFormatted,
     );
   }
@@ -512,11 +551,13 @@ class YTQueueChipHeaderRow extends StatelessWidget {
   final bool addLeftMargin;
   final bool showPlaybackActions;
   final void Function()? onArrowDownPressed;
+  final void Function()? onSearchTap;
   const YTQueueChipHeaderRow({
     super.key,
     this.addLeftMargin = false,
     this.showPlaybackActions = false,
     required this.onArrowDownPressed,
+    this.onSearchTap,
   });
 
   @override
@@ -526,6 +567,7 @@ class YTQueueChipHeaderRow extends StatelessWidget {
       addLeftMargin: addLeftMargin,
       showPlaybackActions: showPlaybackActions,
       onArrowDownPressed: onArrowDownPressed,
+      onSearchTap: onSearchTap,
       durationFormatter: null,
     );
   }
@@ -535,11 +577,13 @@ class MixedQueueChipHeaderRow extends StatelessWidget {
   final bool addLeftMargin;
   final bool showPlaybackActions;
   final void Function()? onArrowDownPressed;
+  final void Function()? onSearchTap;
   const MixedQueueChipHeaderRow({
     super.key,
     this.addLeftMargin = false,
     this.showPlaybackActions = false,
     required this.onArrowDownPressed,
+    this.onSearchTap,
   });
 
   @override
@@ -550,6 +594,7 @@ class MixedQueueChipHeaderRow extends StatelessWidget {
       addLeftMargin: addLeftMargin,
       showPlaybackActions: showPlaybackActions,
       onArrowDownPressed: onArrowDownPressed,
+      onSearchTap: onSearchTap,
       durationFormatter: null,
     );
   }
@@ -561,6 +606,7 @@ class QueueChipHeaderRow extends StatelessWidget {
   final bool addLeftMargin;
   final bool showPlaybackActions;
   final void Function()? onArrowDownPressed;
+  final void Function()? onSearchTap;
   final String Function(Iterable<Playable> items)? durationFormatter;
 
   const QueueChipHeaderRow({
@@ -570,6 +616,7 @@ class QueueChipHeaderRow extends StatelessWidget {
     required this.addLeftMargin,
     this.showPlaybackActions = false,
     required this.onArrowDownPressed,
+    this.onSearchTap,
     required this.durationFormatter,
   });
 
@@ -657,10 +704,8 @@ class QueueChipHeaderRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
-    final textStyle = textTheme.displaySmall?.copyWith(fontWeight: FontWeight.w600);
-    final playbackActionsIconColor = showPlaybackActions ? CustomIconButtonTonal.getIconColor(context) : null;
+    final textStyle = NText.small.of(context).copyWith(fontWeight: FontWeight.w600);
+    final playbackActionsIconColor = showPlaybackActions ? CustomIconButtonTonal.iconColor : null;
     return ConstrainedBox(
       constraints: BoxConstraints(minHeight: 42.0, maxHeight: (context.height * 0.15).withMinimum(42.0)),
       child: Padding(
@@ -687,9 +732,9 @@ class QueueChipHeaderRow extends StatelessWidget {
                             builder: (context, currentQueue) => Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
+                                NamidaText(
                                   lang.queue,
-                                  style: textTheme.displayMedium,
+                                  style: NText.medium,
                                 ),
 
                                 if (durationFormatter != null)
@@ -749,6 +794,14 @@ class QueueChipHeaderRow extends StatelessWidget {
                                   )
                                 : const SizedBox(),
                           ),
+                          if (onSearchTap != null) ...[
+                            _ActionItem(
+                              icon: Broken.filter_search,
+                              tooltip: lang.search,
+                              onTap: onSearchTap,
+                            ),
+                            const SizedBox(width: 6.0),
+                          ],
                           if (showPlaybackActions) ...[
                             RepeatModeIconButton(
                               iconSize: _ActionItem.iconSize,
@@ -846,7 +899,7 @@ class QueueChipHeaderRow extends StatelessWidget {
                           if (onArrowDownPressed != null) ...[
                             SizedBox(width: isLocal ? 4.0 : 6.0),
                             NamidaIconButton(
-                              iconColor: context.defaultIconColor().withOpacityExt(0.95),
+                              iconColor: NColors.defaultIcon(opacity: 0.95),
                               icon: Broken.arrow_down_2,
                               onPressed: onArrowDownPressed,
                             ),
@@ -907,10 +960,11 @@ class _ActionItemAlt extends StatelessWidget {
     required this.onTap,
   });
 
-  static Color? getIconColor(BuildContext context) => context.theme.iconTheme.color?.withAlpha(150);
+  static const iconColor = NColors(.icon, opacity: 0.59);
 
   @override
   Widget build(BuildContext context) {
+    final colors = NColorsData.of(context);
     return IconButton(
       padding: EdgeInsets.zero,
       visualDensity: VisualDensity.compact,
@@ -922,7 +976,7 @@ class _ActionItemAlt extends StatelessWidget {
             icon,
             size: iconSize,
           ),
-      color: getIconColor(context),
+      color: iconColor.resolve(colors),
       iconSize: iconSize,
       onPressed: onTap,
     );
@@ -948,7 +1002,7 @@ class _QueueConfigureOptions extends StatelessWidget {
               SettingEntryTile(
                 entry: YoutubeSettings.autoStartRadio,
               ),
-              NamidaContainerDivider(
+              const NamidaContainerDivider(
                 margin: EdgeInsets.symmetric(horizontal: 12.0, vertical: 6.0),
               ),
             ],

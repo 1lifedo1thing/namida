@@ -30,7 +30,6 @@ class _MembershipTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
     return FutureBuilder(
       future: requiresMembership,
       builder: (context, snapshot) {
@@ -41,22 +40,27 @@ class _MembershipTile extends StatelessWidget {
             final hasMembership = userMembershipType != null && userMembershipType.index >= MembershipType.cutie.index;
             return Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
-              child: CustomListTile(
-                borderR: 12.0,
-                dense: true,
-                titleStyle: context.theme.textTheme.displaySmall,
-                onTap: const YoutubeManageSubscriptionPage().navigate,
-                title: hasMembership ? lang.membershipManage : lang.partyMembershipRequired(name: MembershipType.cutie.name),
-                subtitle: hasMembership ? null : lang.signingInAllowsBasicUsageSubtitle,
-                icon: Broken.money_3,
-                bgColor: Color.alphaBlend(
-                  theme.cardTheme.color?.withOpacityExt(0.3) ?? Colors.transparent,
-                  theme.colorScheme.secondaryContainer,
-                ).withOpacityExt(0.35),
-                trailingRaw: const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 6.0),
-                  child: MembershipCard(displayName: false),
-                ),
+              child: NBuilder(
+                builder: (context, colors) {
+                  final bgColor = Color.alphaBlend(
+                    colors.cardTheme.withOpacityExt(0.3),
+                    colors.secondaryContainer,
+                  ).withOpacityExt(0.35);
+                  return CustomListTile(
+                    borderR: 12.0,
+                    dense: true,
+                    titleStyle: NText.small.of(context),
+                    onTap: const YoutubeManageSubscriptionPage().navigate,
+                    title: hasMembership ? lang.membershipManage : lang.partyMembershipRequired(name: MembershipType.cutie.name),
+                    subtitle: hasMembership ? null : lang.signingInAllowsBasicUsageSubtitle,
+                    icon: Broken.money_3,
+                    bgColor: bgColor,
+                    trailingRaw: const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 6.0),
+                      child: MembershipCard(displayName: false),
+                    ),
+                  );
+                },
               ),
             );
           },
@@ -239,6 +243,38 @@ class _SubmitButton extends StatelessWidget {
   }
 }
 
+class _PublicRoomTile extends StatelessWidget {
+  final bool value;
+  final bool isLan;
+  final void Function(bool isTrue) onChanged;
+
+  const _PublicRoomTile({
+    required this.value,
+    required this.isLan,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final subtitle = isLan ? '${lang.partyPublicRoomSubtitle}\n${lang.performanceNote}' : lang.partyPublicRoomSubtitle;
+    final warningWidget = isLan
+        ? NIcon(
+            Broken.danger,
+            size: 18.0,
+            color: NColors.defaultIcon(),
+          )
+        : null;
+    return CustomSwitchListTile(
+      icon: Broken.global,
+      title: lang.partyPublicRoom,
+      subtitle: subtitle,
+      value: value,
+      onChanged: onChanged,
+      trailingBeforeSwitch: warningWidget,
+    );
+  }
+}
+
 class _CreateCard extends StatefulWidget {
   const _CreateCard();
 
@@ -253,9 +289,9 @@ class _CreateCardState extends State<_CreateCard> {
   final _serverPasswordController = TextEditingController();
 
   bool _listening = settings.party.listenOnThisDevice.value;
-  bool _approval = false;
-  bool _seedQueue = true;
-  bool _hostOnThisDevice = false;
+  bool _approval = settings.party.createApproval.value;
+  bool _seedQueue = settings.party.createWithQueue.value;
+  bool _hostOnThisDevice = settings.party.hostOnThisDevice.value;
   bool _isPublic = settings.party.createPublic.value;
   bool _sharePlaying = settings.party.sharePlaying.value;
   bool _isLoading = false;
@@ -396,19 +432,23 @@ class _CreateCardState extends State<_CreateCard> {
             icon: Broken.shield_tick,
             title: lang.partyRequireApproval,
             value: _approval,
-            onChanged: (isTrue) => setState(() => _approval = !isTrue),
+            onChanged: (isTrue) {
+              settings.party.createApproval.save(!isTrue);
+              setState(() => _approval = !isTrue);
+            },
           ),
           CustomSwitchListTile(
             icon: Broken.music_playlist,
             title: lang.partyStartWithCurrentQueue,
             value: _seedQueue,
-            onChanged: (isTrue) => setState(() => _seedQueue = !isTrue),
+            onChanged: (isTrue) {
+              settings.party.createWithQueue.save(!isTrue);
+              setState(() => _seedQueue = !isTrue);
+            },
           ),
-          CustomSwitchListTile(
-            icon: Broken.global,
-            title: lang.partyPublicRoom,
-            subtitle: lang.partyPublicRoomSubtitle,
+          _PublicRoomTile(
             value: _isPublic,
+            isLan: _hostOnThisDevice,
             onChanged: (isTrue) {
               settings.party.createPublic.save(!isTrue);
               setState(() => _isPublic = !isTrue);
@@ -430,7 +470,10 @@ class _CreateCardState extends State<_CreateCard> {
             title: lang.partyHostOnThisDevice,
             subtitle: lang.partyHostOnThisDeviceSubtitle,
             value: _hostOnThisDevice,
-            onChanged: (isTrue) => setState(() => _hostOnThisDevice = !isTrue),
+            onChanged: (isTrue) {
+              settings.party.hostOnThisDevice.save(!isTrue);
+              setState(() => _hostOnThisDevice = !isTrue);
+            },
           ),
           if (!_hostOnThisDevice)
             NamidaExpansionTile(
@@ -608,7 +651,7 @@ class _BrowseSectionState extends State<_BrowseSection> {
     }
     setState(() => _isLoading = true);
     await PartyController.inst.joinRoom(
-      server: PartyController.preferredServer,
+      server: room.server,
       code: room.code,
       password: password,
       listening: settings.party.listenOnThisDevice.value,
@@ -829,9 +872,9 @@ class _OpenRoomsListState extends State<_OpenRoomsList> {
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
-          child: Text(
+          child: NamidaText(
             '${lang.partyRoomsLimit}\n${lang.partyOpenRoomsOtherDevices}',
-            style: context.theme.textTheme.displaySmall,
+            style: NText.small,
           ),
         ),
         for (final room in _rooms)
@@ -998,31 +1041,30 @@ class _HistoryTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = context.theme.textTheme;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
       child: Row(
         children: [
-          Icon(
+          NIcon(
             entry.isLocal ? Broken.musicnote : Broken.video_square,
             size: 18.0,
-            color: context.defaultIconColor(),
+            color: NColors.defaultIcon(),
           ),
           const SizedBox(width: 12.0),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
+                NamidaText(
                   entry.title,
-                  style: textTheme.displayMedium,
+                  style: NText.medium,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
                 if (entry.artist.isNotEmpty)
-                  Text(
+                  NamidaText(
                     entry.artist,
-                    style: textTheme.displaySmall,
+                    style: NText.small,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -1030,9 +1072,9 @@ class _HistoryTile extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8.0),
-          Text(
+          NamidaText(
             entry.durationMS.milliSecondsLabel,
-            style: textTheme.displaySmall,
+            style: NText.small,
           ),
         ],
       ),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:namida/base/queue_search.dart';
 import 'package:namida/class/queue_scroll_follower.dart';
 import 'package:namida/class/route.dart';
 import 'package:namida/class/track.dart';
@@ -11,6 +12,7 @@ import 'package:namida/core/enums.dart';
 import 'package:namida/core/extensions.dart';
 import 'package:namida/core/functions.dart';
 import 'package:namida/core/icon_fonts/broken_icons.dart';
+import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/translations/language.dart';
 import 'package:namida/core/utils.dart';
 import 'package:namida/ui/widgets/custom_widgets.dart';
@@ -76,15 +78,15 @@ class _EmptyQueue extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
+          const NIcon(
             Broken.menu_board,
             size: 48.0,
-            color: context.theme.disabledColor,
+            color: NColors.disabled,
           ),
           const SizedBox(height: 12.0),
-          Text(
+          NamidaText(
             lang.noTracksFound,
-            style: context.textTheme.displayMedium,
+            style: NText.medium,
           ),
         ],
       ),
@@ -96,15 +98,15 @@ class _QueueListBase extends StatefulWidget {
   final double itemExtent;
   final double Function(int index)? itemExtentOf;
   final bool addPageBottomPadding;
-  final Widget? header;
+  final Widget Function(void Function() onSearchTap)? headerBuilder;
   final Widget Function(Widget scrollQueueWidget)? utilsRowBuilder;
-  final Widget Function(BuildContext context, int index, List<Playable> queue) itemBuilder;
+  final Widget Function(BuildContext context, int index, List<Playable> queue, QueueSearchResults? searchResults) itemBuilder;
 
   const _QueueListBase({
     required this.itemExtent,
     this.itemExtentOf,
     required this.addPageBottomPadding,
-    required this.header,
+    required this.headerBuilder,
     required this.utilsRowBuilder,
     required this.itemBuilder,
   });
@@ -116,15 +118,15 @@ class _QueueListBase extends StatefulWidget {
 class _QueueListBaseState extends State<_QueueListBase> {
   late final _queueFollower = QueueScrollFollower(currentItemStart: _currentItemStart);
   double? _mixedCurrentItemStart;
+  QueueSearch? _search;
 
   @override
   void initState() {
     super.initState();
+    if (widget.headerBuilder != null) _search = QueueSearch(onResultsChanged: _onSearchResultsChanged, onResultSelected: _onSearchResultSelected);
     Player.inst.currentIndex.addListener(_onCurrentItemMoved);
     Player.inst.currentQueue.addListener(_onCurrentItemMoved);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _queueFollower.jumpToCurrentItem();
-    });
+    WidgetsBinding.instance.addPostFrameCallback(_jumpToCurrentItem);
   }
 
   @override
@@ -132,7 +134,12 @@ class _QueueListBaseState extends State<_QueueListBase> {
     Player.inst.currentIndex.removeListener(_onCurrentItemMoved);
     Player.inst.currentQueue.removeListener(_onCurrentItemMoved);
     _queueFollower.dispose();
+    _search?.dispose();
     super.dispose();
+  }
+
+  void _jumpToCurrentItem(Duration _) {
+    if (mounted) _queueFollower.jumpToCurrentItem();
   }
 
   void _onCurrentItemMoved() {
@@ -140,27 +147,69 @@ class _QueueListBaseState extends State<_QueueListBase> {
     _queueFollower.onCurrentItemMoved();
   }
 
-  double _currentItemStart() {
-    final index = Player.inst.currentIndex.value;
+  void _jumpToStart(Duration _) {
+    if (mounted) _queueFollower.jumpToItem(0.0);
+  }
+
+  void _onSearchResultsChanged(bool isNewQuery) {
+    _mixedCurrentItemStart = null;
+    if (!isNewQuery) {
+      _queueFollower.onCurrentItemMoved();
+      return;
+    }
+    final isFiltering = _search?.results.value != null;
+    WidgetsBinding.instance.addPostFrameCallback(isFiltering ? _jumpToStart : _jumpToCurrentItem);
+  }
+
+  void _onSearchResultSelected(int index) {
+    _mixedCurrentItemStart = null;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _queueFollower.jumpToItem(_itemStartOf(index));
+    });
+  }
+
+  double _itemStartOf(int index) {
     final itemExtentOf = widget.itemExtentOf;
     if (itemExtentOf == null) return widget.itemExtent * index;
-    final cached = _mixedCurrentItemStart;
-    if (cached != null) return cached;
     double start = 0.0;
     for (int i = 0; i < index; i++) {
       start += itemExtentOf(i);
+    }
+    return start;
+  }
+
+  double? _currentItemStart() {
+    final index = Player.inst.currentIndex.value;
+    final search = _search;
+    final results = search?.results.value;
+    final position = search == null ? index : search.positionOf(index);
+    if (position == null) return null;
+    final itemExtentOf = widget.itemExtentOf;
+    if (itemExtentOf == null) return widget.itemExtent * position;
+    final cached = _mixedCurrentItemStart;
+    if (cached != null) return cached;
+    double start = 0.0;
+    for (int i = 0; i < position; i++) {
+      final queueIndex = results == null ? i : results[i];
+      start += itemExtentOf(queueIndex);
     }
     return _mixedCurrentItemStart = start;
   }
 
   @override
   Widget build(BuildContext context) {
+    final search = _search;
+    final headerBuilder = widget.headerBuilder;
+    final header = headerBuilder != null && search != null ? headerBuilder(search.toggle) : null;
+    final searchBox = search == null
+        ? null
+        : QueueSearchBox(
+            search: search,
+          );
     return ObxO(
       rx: Player.inst.currentQueue,
       builder: (context, queue) {
-        final queueLength = queue.length;
-        if (queueLength == 0) return const _EmptyQueue();
-        final header = widget.header;
+        if (queue.isEmpty) return const _EmptyQueue();
         final utilsRowBuilder = widget.utilsRowBuilder;
         final itemExtentOf = widget.itemExtentOf;
         final scrollController = _queueFollower.scrollController;
@@ -170,15 +219,12 @@ class _QueueListBaseState extends State<_QueueListBase> {
             controller: scrollController,
             slivers: [
               const SliverPadding(padding: EdgeInsets.only(top: Dimensions.tileBottomMargin6)),
-              NamidaSliverReorderableList(
-                itemCount: queueLength,
+              QueueSliverList(
+                queue: queue,
+                search: search,
                 itemExtent: itemExtentOf == null ? widget.itemExtent : null,
-                itemExtentBuilder: itemExtentOf == null ? null : (index, _) => itemExtentOf(index),
-                onReorderStart: (index) => Player.inst.invokeQueueModifyLock(),
-                onReorderEnd: (index) => Player.inst.invokeQueueModifyLockRelease(),
-                onReorder: (oldIndex, newIndex) => Player.inst.reorderTrack(oldIndex, newIndex),
-                onReorderCancel: () => Player.inst.invokeQueueModifyOnModifyCancel(),
-                itemBuilder: (context, i) => widget.itemBuilder(context, i, queue),
+                itemExtentOf: itemExtentOf,
+                itemBuilder: widget.itemBuilder,
               ),
               if (widget.addPageBottomPadding) kBottomPaddingWidgetSliver else const SliverPadding(padding: EdgeInsets.only(bottom: 12.0)),
             ],
@@ -207,6 +253,7 @@ class _QueueListBaseState extends State<_QueueListBase> {
             crossAxisAlignment: .end,
             children: [
               ?header,
+              ?searchBox,
               if (utilsRowBuilder != null)
                 SizedBox(
                   height: kQueueBottomRowHeight,
@@ -256,7 +303,7 @@ class _FloatingJumpButton extends StatelessWidget {
         borderRadius: 10.0,
         onTap: onTap,
         padding: const EdgeInsets.symmetric(vertical: 8.0),
-        bgColor: context.theme.colorScheme.secondary.withOpacityExt(0.3),
+        bgColor: const NColors(.secondary, opacity: 0.3),
         child: Row(
           mainAxisSize: .min,
           children: [
@@ -266,9 +313,9 @@ class _FloatingJumpButton extends StatelessWidget {
               size: 18.0,
             ),
             const SizedBox(width: 6.0),
-            Text(
+            NamidaText(
               lang.jump,
-              style: context.textTheme.displayMedium,
+              style: NText.medium,
             ),
             const SizedBox(width: 12.0),
           ],
@@ -319,11 +366,12 @@ class _LocalQueueList extends StatelessWidget {
       builder: (properties) => _QueueListBase(
         itemExtent: Dimensions.inst.trackTileItemExtent,
         addPageBottomPadding: addPageBottomPadding,
-        header: showHeaderAndFooter
-            ? const LocalQueueChipHeaderRow(
+        headerBuilder: showHeaderAndFooter
+            ? (onSearchTap) => LocalQueueChipHeaderRow(
                 addLeftMargin: true,
                 showPlaybackActions: true,
                 onArrowDownPressed: null,
+                onSearchTap: onSearchTap,
               )
             : null,
         utilsRowBuilder: showHeaderAndFooter
@@ -333,13 +381,13 @@ class _LocalQueueList extends StatelessWidget {
                 scrollQueueWidget: scrollQueueWidget,
               )
             : null,
-        itemBuilder: (context, i, queue) => _localQueueItem(context, i, queue, properties),
+        itemBuilder: (context, i, queue, searchResults) => _localQueueItem(context, i, queue, properties, searchResults),
       ),
     );
   }
 }
 
-Widget _localQueueItem(BuildContext context, int i, List<Playable> queue, TrackTileProperties properties) {
+Widget _localQueueItem(BuildContext context, int i, List<Playable> queue, TrackTileProperties properties, QueueSearchResults? searchResults) {
   final track = queue[i] as Selectable;
   final key = Key("${i}_${track.track.path}");
   return _dismissibleWrapper(
@@ -354,13 +402,13 @@ Widget _localQueueItem(BuildContext context, int i, List<Playable> queue, TrackT
         index: i,
         trackOrTwd: track,
         tracks: queue,
+        rangeOrder: searchResults,
         fadeOpacity: isPlayed ? 0.3 : 0.0,
         onPlaying: () {
-          // -- to improve performance, skipping process of checking new queues, etc..
-          if (i == Player.inst.currentIndex.value) {
-            Player.inst.togglePlayPause();
+          if (searchResults == null) {
+            Player.inst.playQueueItem(i);
           } else {
-            Player.inst.skipToQueueItem(i);
+            searchResults.onResultTap(i);
           }
         },
       ),
@@ -388,11 +436,12 @@ class _YoutubeQueueList extends StatelessWidget {
       builder: (properties) => _QueueListBase(
         itemExtent: Dimensions.youtubeCardItemExtent,
         addPageBottomPadding: addPageBottomPadding,
-        header: showHeaderAndFooter
-            ? const YTQueueChipHeaderRow(
+        headerBuilder: showHeaderAndFooter
+            ? (onSearchTap) => YTQueueChipHeaderRow(
                 addLeftMargin: true,
                 showPlaybackActions: true,
                 onArrowDownPressed: null,
+                onSearchTap: onSearchTap,
               )
             : null,
         utilsRowBuilder: showHeaderAndFooter
@@ -402,15 +451,16 @@ class _YoutubeQueueList extends StatelessWidget {
                 scrollQueueWidget: scrollQueueWidget,
               )
             : null,
-        itemBuilder: (context, i, queue) => _youtubeQueueItem(context, i, queue, properties),
+        itemBuilder: (context, i, queue, searchResults) => _youtubeQueueItem(context, i, queue, properties, searchResults),
       ),
     );
   }
 }
 
-Widget _youtubeQueueItem(BuildContext context, int i, List<Playable> queue, VideoTileProperties properties) {
+Widget _youtubeQueueItem(BuildContext context, int i, List<Playable> queue, VideoTileProperties properties, QueueSearchResults? searchResults) {
   final video = queue[i] as YoutubeID;
   final key = Key("${i}_${video.id}");
+  final onTap = searchResults == null ? null : () => searchResults.onResultTap(i);
   return _dismissibleWrapper(
     index: i,
     childKey: key,
@@ -426,6 +476,7 @@ Widget _youtubeQueueItem(BuildContext context, int i, List<Playable> queue, Vide
         thumbnailHeight: Dimensions.youtubeThumbnailHeight,
         fadeOpacity: isPlayed ? 0.3 : 0.0,
         preferFetchNewInfo: true,
+        onTap: onTap,
       ),
     ),
   );
@@ -461,11 +512,12 @@ class _MixedQueueList extends StatelessWidget {
             return index < queue.length && queue[index] is Selectable ? Dimensions.inst.trackTileItemExtent : Dimensions.youtubeCardItemExtent;
           },
           addPageBottomPadding: addPageBottomPadding,
-          header: showHeaderAndFooter
-              ? const MixedQueueChipHeaderRow(
+          headerBuilder: showHeaderAndFooter
+              ? (onSearchTap) => MixedQueueChipHeaderRow(
                   addLeftMargin: true,
                   showPlaybackActions: true,
                   onArrowDownPressed: null,
+                  onSearchTap: onSearchTap,
                 )
               : null,
           utilsRowBuilder: showHeaderAndFooter
@@ -475,8 +527,9 @@ class _MixedQueueList extends StatelessWidget {
                   scrollQueueWidget: scrollQueueWidget,
                 )
               : null,
-          itemBuilder: (context, i, queue) =>
-              queue[i] is Selectable ? _localQueueItem(context, i, queue, trackTileProperties) : _youtubeQueueItem(context, i, queue, videoTileProperties),
+          itemBuilder: (context, i, queue, searchResults) => queue[i] is Selectable
+              ? _localQueueItem(context, i, queue, trackTileProperties, searchResults)
+              : _youtubeQueueItem(context, i, queue, videoTileProperties, searchResults),
         ),
       ),
     );

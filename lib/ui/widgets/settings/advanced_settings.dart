@@ -18,7 +18,6 @@ import 'package:namida/controller/indexer_controller.dart';
 import 'package:namida/controller/lossless_check_controller.dart';
 import 'package:namida/controller/music_web_server/music_web_server_base.dart';
 import 'package:namida/controller/navigator_controller.dart';
-import 'package:namida/controller/now_playing_broadcaster.dart';
 import 'package:namida/controller/rhythm_controller.dart';
 import 'package:namida/controller/settings_controller.dart';
 import 'package:namida/controller/storage_cache_manager.dart';
@@ -28,6 +27,7 @@ import 'package:namida/core/enums.dart';
 import 'package:namida/core/extensions.dart';
 import 'package:namida/core/icon_fonts/broken_icons.dart';
 import 'package:namida/core/namida_converter_ext.dart';
+import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/translations/language.dart';
 import 'package:namida/core/utils.dart';
 import 'package:namida/main.dart';
@@ -149,17 +149,21 @@ class AdvancedSettings extends SettingSubpageProvider {
 
   @override
   Widget build(BuildContext context) {
+    final hasAdvancedFlags = RhythmController.inst.isSupported || LosslessCheckController.inst.isSupported;
+    final flagsButton = hasAdvancedFlags
+        ? NamidaIconButton(
+            icon: Broken.flag,
+            tooltip: () => lang.configure,
+            iconColor: NColors.defaultIcon(),
+            onPressed: _showAdvancedFlagsDialog,
+          )
+        : null;
     return SettingsCard(
       title: lang.advancedSettings,
       subtitle: lang.advancedSettingsSubtitle,
       icon: Broken.hierarchy_3,
       // icon: Broken.danger,
-      trailing: NamidaIconButton(
-        icon: Broken.flag,
-        tooltip: () => lang.configure,
-        iconColor: context.defaultIconColor(),
-        onPressed: _showAdvancedFlagsDialog,
-      ),
+      trailing: flagsButton,
       child: SettingSectionsColumn(
         page: this,
       ),
@@ -172,9 +176,23 @@ class _PerformanceModeTile extends StatelessWidget {
 
   const _PerformanceModeTile({required this.bgColor});
 
+  static Iterable<NamidaPopupItem> _getModeItems() => PerformanceMode.values.map(
+    (e) {
+      void onTap() {
+        e.executeAndSave();
+        NamidaNavigator.inst.popMenu();
+      }
+
+      return NamidaPopupItem(
+        selected: e == settings.performanceMode.value,
+        icon: e.toIcon(),
+        title: e.toText(),
+        onTap: onTap,
+      );
+    },
+  );
+
   void _onTap(BuildContext context) {
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
     const artworkPartsMultiplier = 100;
     NamidaNavigator.inst.navigateDialog(
       dialog: CustomBlurryDialog(
@@ -188,33 +206,23 @@ class _PerformanceModeTile extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const SizedBox(height: 12.0),
-              CustomListTile(
-                icon: Broken.cpu_setting,
-                title: lang.performanceMode,
-                trailing: NamidaPopupWrapper(
-                  childrenDefault: () => PerformanceMode.values.map(
-                    (e) {
-                      void onTap() {
-                        e.executeAndSave();
-                        NamidaNavigator.inst.popMenu();
-                      }
-
-                      return NamidaPopupItem(
-                        selected: e == settings.performanceMode.value,
-                        icon: e.toIcon(),
-                        title: e.toText(),
-                        onTap: onTap,
-                      );
-                    },
-                  ),
-                  child: ObxO(
-                    rx: settings.performanceMode,
-                    builder: (context, performanceMode) => Text(
-                      performanceMode.toText(),
-                      style: textTheme.displayMedium,
-                      textAlign: TextAlign.end,
+              NamidaPopupWrapper(
+                childrenDefault: _getModeItems,
+                childBuilder: (openMenu) => CustomListTile(
+                  icon: Broken.cpu_setting,
+                  title: lang.performanceMode,
+                  trailing: NamidaPopupWrapper(
+                    childrenDefault: _getModeItems,
+                    child: ObxO(
+                      rx: settings.performanceMode,
+                      builder: (context, performanceMode) => NamidaText(
+                        performanceMode.toText(),
+                        style: NText.medium,
+                        textAlign: TextAlign.end,
+                      ),
                     ),
                   ),
+                  onTap: openMenu,
                 ),
               ),
               const SizedBox(height: 6.0),
@@ -270,6 +278,7 @@ class _PerformanceModeTile extends StatelessWidget {
               const EffectThemeTile.overlay(),
               const VisualizerTile(),
               const PlayerBackgroundTile(),
+              const LyricsBackgroundTile(),
               CustomListTile(
                 icon: Broken.card_pos,
                 title: lang.artwork,
@@ -299,17 +308,15 @@ class _PerformanceModeTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
     return CustomListTile(
       bgColor: bgColor,
       icon: Broken.cpu_setting,
       title: lang.performanceMode,
       trailing: ObxO(
         rx: settings.performanceMode,
-        builder: (context, performanceMode) => Text(
+        builder: (context, performanceMode) => NamidaText(
           performanceMode.toText(),
-          style: textTheme.displayMedium,
+          style: NText.medium,
           textAlign: TextAlign.end,
         ),
       ),
@@ -505,9 +512,9 @@ class _RemoveSourceFromHistoryTile extends StatelessWidget {
                   const Icon(Broken.danger),
                   const SizedBox(width: 8.0),
                   Obx(
-                    (context) => Text(
+                    (context) => NamidaText(
                       '${lang.totalTracks}: ${totalTracksToBeRemoved.valueR}',
-                      style: context.textTheme.displayMedium,
+                      style: NText.medium,
                     ),
                   ),
                 ],
@@ -537,7 +544,7 @@ class _RemoveSourceFromHistoryTile extends StatelessWidget {
                   );
                 },
               ),
-              NamidaContainerDivider(
+              const NamidaContainerDivider(
                 margin: EdgeInsets.symmetric(horizontal: 12.0, vertical: 6.0),
               ),
               Obx(
@@ -1103,8 +1110,8 @@ class UpdateDirectoryPathListTile extends StatelessWidget {
       leading: StackedIcon(
         baseIcon: Broken.folder,
         secondaryIcon: Broken.music,
-        baseIconColor: colorScheme,
-        secondaryIconColor: colorScheme,
+        baseIconColor: NColors.fixed(colorScheme),
+        secondaryIconColor: NColors.fixed(colorScheme),
         delightenColors: true,
       ),
       title: lang.updateDirectoryPath,
@@ -1369,7 +1376,7 @@ class _CompressImagesListTile extends StatelessWidget {
             ),
             Obx(
               (context) => CustomSwitchListTile(
-                icon: Broken.document_code_2,
+                icon: keepOriginalFileDates.valueR ? Broken.calendar_tick : Broken.calendar_edit,
                 title: lang.keepFileDates,
                 value: keepOriginalFileDates.valueR,
                 onChanged: (isTrue) => keepOriginalFileDates.value = !isTrue,
@@ -1424,206 +1431,9 @@ class _AdvancedFlagsOptions extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (NamidaFeaturesVisibility.showAndroidIntegrations) ...[
-            ObxO(
-              rx: settings.mediaBrowserQueue,
-              builder: (context, enabled) => CustomSwitchListTile(
-                icon: Broken.car,
-                title: 'android_auto_and_wear'.toUpperCase(),
-                value: enabled,
-                onChanged: (isTrue) => settings.mediaBrowserQueue.save(!isTrue),
-              ),
-            ),
-            ObxO(
-              rx: settings.nowPlayingBroadcast,
-              builder: (context, enabled) => CustomSwitchListTile(
-                icon: Broken.radar_2,
-                title: 'now_playing_broadcast'.toUpperCase(),
-                subtitle: 'Intents for Tasker & automation apps',
-                value: enabled,
-                onChanged: (isTrue) => settings.nowPlayingBroadcast.save(!isTrue),
-              ),
-            ),
-            const _LyricsIntegrationsListTile(),
-          ],
-          const _WebhookListTile(),
-          ObxO(
-            rx: settings.reportPlaybackToServers,
-            builder: (context, enabled) => CustomSwitchListTile(
-              icon: Broken.cloud_change,
-              title: 'server_playback_reports'.toUpperCase(),
-              subtitle: 'Subsonic & Jellyfin: now playing, play counts',
-              value: enabled,
-              onChanged: (isTrue) => settings.reportPlaybackToServers.save(!isTrue),
-            ),
-          ),
           if (RhythmController.inst.isSupported) const _RhythmScanListTile(),
           if (LosslessCheckController.inst.isSupported) const _LosslessCheckListTile(),
         ],
-      ),
-    );
-  }
-}
-
-class _LyricsIntegrationsListTile extends StatelessWidget {
-  const _LyricsIntegrationsListTile();
-
-  void _toggle(LyricsIntegration integration) {
-    settings.lyricsIntegrations.update((value) {
-      if (!value.remove(integration)) value.add(integration);
-    });
-  }
-
-  List<NamidaPopupItem> _items() {
-    final enabled = settings.lyricsIntegrations.value;
-    return LyricsIntegration.values
-        .map(
-          (e) => NamidaPopupItem(
-            selected: enabled.contains(e),
-            icon: e.toIcon(),
-            title: e.toText(),
-            subtitle: e.sendsPerLine ? lang.performanceNote : '',
-            onTap: () => _toggle(e),
-          ),
-        )
-        .toFixedList();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return NamidaPopupWrapper(
-      childrenDefault: _items,
-      refreshListenable: settings.lyricsIntegrations,
-      child: ObxO(
-        rx: settings.lyricsIntegrations,
-        builder: (context, enabled) => CustomListTile(
-          icon: Broken.message_text,
-          title: 'status_bar_lyrics'.toUpperCase(),
-          trailing: Text(
-            '${enabled.length}/${LyricsIntegration.values.length}',
-            style: context.textTheme.displayMedium,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _WebhookListTile extends StatelessWidget {
-  const _WebhookListTile();
-
-  void _openDialog() {
-    final urlController = TextEditingController(text: settings.webhookUrl.value);
-    final formKey = GlobalKey<FormState>();
-    final savedEvents = settings.webhookEvents.value;
-    final draftEvents = {for (final e in WebhookEvent.values) e: savedEvents.contains(e).obs};
-
-    void onSave() {
-      final isValid = formKey.currentState?.validate() ?? false;
-      if (!isValid) return;
-      final url = urlController.text.trim();
-      final events = <WebhookEvent>{
-        for (final e in WebhookEvent.values)
-          if (draftEvents[e]!.value) e,
-      };
-      settings.transaction(() {
-        settings.webhookUrl.save(url);
-        settings.webhookEvents.replace(events);
-      });
-      NamidaNavigator.inst.closeDialog();
-    }
-
-    final eventsListenable = Listenable.merge(draftEvents.values.toList());
-
-    List<NamidaPopupItem> eventItems() {
-      return WebhookEvent.values.map(
-        (e) {
-          final rx = draftEvents[e]!;
-          return NamidaPopupItem(
-            selected: rx.value,
-            icon: e.toIcon(),
-            title: e.toText(),
-            onTap: () => rx.value = !rx.value,
-          );
-        },
-      ).toFixedList();
-    }
-
-    String? validateUrl(String? value) {
-      value ??= '';
-      if (value.trim().isEmpty) return null;
-      final uri = NowPlayingBroadcaster.parseWebhookUrl(value);
-      return uri == null ? 'Invalid URL' : null;
-    }
-
-    NamidaNavigator.inst.navigateDialog(
-      onDisposing: () {
-        urlController.dispose();
-        for (final rx in draftEvents.values) {
-          rx.close();
-        }
-      },
-      dialog: Form(
-        key: formKey,
-        child: CustomBlurryDialog(
-          title: 'webhook'.toUpperCase(),
-          normalTitleStyle: true,
-          icon: Broken.link_2,
-          actions: [
-            const CancelButton(),
-            NamidaButton(
-              text: lang.save,
-              onTap: onSave,
-            ),
-          ],
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SizedBox(height: 12.0),
-              CustomTagTextField(
-                controller: urlController,
-                hintText: 'https://',
-                labelText: 'URL',
-                keyboardType: TextInputType.url,
-                validator: validateUrl,
-              ),
-              const SizedBox(height: 12.0),
-              NamidaPopupWrapper(
-                childrenDefault: eventItems,
-                refreshListenable: eventsListenable,
-                child: CustomListTile(
-                  icon: Broken.notification_status,
-                  title: 'Events',
-                  trailing: Obx(
-                    (context) {
-                      int activeCount = 0;
-                      for (final rx in draftEvents.values) {
-                        if (rx.valueR) activeCount++;
-                      }
-                      return Text(
-                        '$activeCount/${WebhookEvent.values.length}',
-                        style: context.textTheme.displayMedium,
-                      );
-                    },
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return ObxO(
-      rx: settings.webhookUrl,
-      builder: (context, url) => CustomListTile(
-        icon: Broken.link_2,
-        title: 'webhook'.toUpperCase(),
-        subtitle: url.isEmpty ? null : url,
-        onTap: _openDialog,
       ),
     );
   }
@@ -1688,7 +1498,6 @@ class _RhythmTagsWriteDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = context.textTheme;
     final tracksCount = plan.tagsPerTrack.length;
     final notAnalyzedCount = plan.notAnalyzedCount;
     return CustomBlurryDialog(
@@ -1710,21 +1519,22 @@ class _RhythmTagsWriteDialog extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
+            NamidaText(
               'Analyzed BPM will be written into $tracksCount files. Tracks that already have a BPM tag or no steady beat are skipped.',
-              style: textTheme.displayMedium,
+              style: NText.medium,
             ),
             if (notAnalyzedCount > 0) ...[
               const SizedBox(height: 8.0),
-              Text(
+              NamidaText(
                 '$notAnalyzedCount tracks are not analyzed yet, analyze first to include them.',
-                style: textTheme.displaySmall,
+                style: NText.small,
               ),
             ],
             const SizedBox(height: 12.0),
-            Text(
+            NamidaText(
               'This edits files across your whole library, back up your music files first.',
-              style: textTheme.displayMedium?.copyWith(color: Colors.red),
+              style: NText.medium,
+              color: NColors.fixed(Colors.red),
             ),
           ],
         ),
@@ -1790,7 +1600,6 @@ class _LosslessFindingsDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = context.textTheme;
     final hasFindings = findings.isNotEmpty;
     final listWidget = ConstrainedBox(
       constraints: BoxConstraints(maxHeight: context.height * 0.5),
@@ -1821,9 +1630,9 @@ class _LosslessFindingsDialog extends StatelessWidget {
       ],
       child: hasFindings
           ? listWidget
-          : Text(
+          : NamidaText(
               lang.noTracksFound,
-              style: textTheme.displayMedium,
+              style: NText.medium,
             ),
     );
   }

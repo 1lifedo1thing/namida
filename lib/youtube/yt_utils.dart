@@ -41,6 +41,7 @@ import 'package:namida/core/enums.dart';
 import 'package:namida/core/extensions.dart';
 import 'package:namida/core/functions.dart';
 import 'package:namida/core/icon_fonts/broken_icons.dart';
+import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/translations/language.dart';
 import 'package:namida/core/utils.dart';
 import 'package:namida/main.dart';
@@ -104,9 +105,7 @@ class YTUtils {
     double? fontMultiplier,
     required RxBaseCore<LikeStatus?>? likeStatusRx,
   }) {
-    iconsColor ??= context.theme.iconTheme.color;
     final listens = overrideListens.isNotEmpty ? overrideListens : YoutubeHistoryController.inst.topTracksMapListens.value[videoId] ?? [];
-    final textTheme = context.textTheme;
     return [
       if (likeStatusRx != null) ...[
         ObxO(
@@ -118,16 +117,21 @@ class YTUtils {
               LikeStatus.disliked => (true, Broken.dislike_filled, Broken.dislike),
               LikeStatus.undefined || LikeStatus.unknown => (false, Broken.like_filled, Broken.like_1),
             };
-            final likeButtonColor = iconsColor?.withOpacityExt(likeStatus == LikeStatus.unknown ? 0.1 : 0.6);
-            return NamidaRawLikeButton(
-              isLiked: isFilled,
-              likedIcon: likedIcon,
-              normalIcon: normalIcon,
-              enabledColor: likeButtonColor,
-              disabledColor: likeButtonColor,
-              size: 14.0,
-              removeConfirmationAction: null,
-              onTap: null,
+            return NBuilder(
+              builder: (context, colors) {
+                final baseColor = iconsColor ?? colors.icon;
+                final likeButtonColor = baseColor.withOpacityExt(likeStatus == LikeStatus.unknown ? 0.1 : 0.6);
+                return NamidaRawLikeButton(
+                  isLiked: isFilled,
+                  likedIcon: likedIcon,
+                  normalIcon: normalIcon,
+                  enabledColor: likeButtonColor,
+                  disabledColor: likeButtonColor,
+                  size: 14.0,
+                  removeConfirmationAction: null,
+                  onTap: null,
+                );
+              },
             );
           },
         ),
@@ -141,18 +145,18 @@ class YTUtils {
             onTap: () => showVideoListensDialog(videoId),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 5.0, vertical: 1.0), // extra hittest margin
-              child: DecoratedBox(
-                decoration: BoxDecoration(
+              child: NDecoratedBox(
+                decoration: (colors) => BoxDecoration(
                   borderRadius: BorderRadius.circular(6.0.multipliedRadius),
-                  color: context.theme.scaffoldBackgroundColor.withOpacityExt(0.5),
+                  color: colors.scaffold.withOpacityExt(0.5),
                 ),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 1.0),
                   child: Text(
                     listens.length.formatDecimal(),
                     style: fontMultiplier != null
-                        ? textTheme.displaySmall?.copyWith(fontSize: (textTheme.displaySmall?.fontSize ?? 12.0) * fontMultiplier)
-                        : textTheme.displaySmall,
+                        ? NText.small.of(context).copyWith(fontSize: (NText.small.of(context).fontSize ?? 12.0) * fontMultiplier)
+                        : NText.small.of(context),
                   ),
                 ),
               ),
@@ -165,23 +169,19 @@ class YTUtils {
       if (displayCacheIcons) ...[
         Tooltip(
           message: lang.videoCache,
-          child: Icon(
-            Broken.video,
-            size: 15.0,
-            color: iconsColor?.withValues(
-              alpha: VideoController.inst.hasNVCachedFromID(videoId) ? 0.6 : 0.1,
-            ),
+          child: _CacheStatusIcon(
+            icon: Broken.video,
+            isCached: VideoController.inst.hasNVCachedFromID(videoId),
+            iconsColor: iconsColor,
           ),
         ),
         const SizedBox(width: 4.0),
         Tooltip(
           message: lang.audioCache,
-          child: Icon(
-            Broken.audio_square,
-            size: 15.0,
-            color: iconsColor?.withValues(
-              alpha: AudioCacheController.inst.isAvailableOffline(videoId) ? 0.6 : 0.1,
-            ),
+          child: _CacheStatusIcon(
+            icon: Broken.audio_square,
+            isCached: AudioCacheController.inst.isAvailableOffline(videoId),
+            iconsColor: iconsColor,
           ),
         ),
       ],
@@ -195,12 +195,12 @@ class YTUtils {
       onTap: () => Player.inst.playOrPause(0, videos, queueSource),
       trailing: showPlayAllReverse
           ? IconButton(
-              style: ButtonStyle(
+              style: const ButtonStyle(
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 visualDensity: VisualDensity.compact,
               ),
               tooltip: "${lang.playAll} (${lang.reverseOrder})",
-              icon: StackedIcon(
+              icon: const StackedIcon(
                 baseIcon: Broken.play_cricle,
                 secondaryIcon: Broken.arrow_swap,
                 iconSize: 20.0,
@@ -871,7 +871,7 @@ class YTUtils {
         RouteType.YOUTUBE_HISTORY_SUBPAGE,
       );
     }
-    if (shouldNavigate) await YoutubeHistoryPage().navigate();
+    if (shouldNavigate) await const YoutubeHistoryPage().navigate();
   }
 
   static Future<void> onYoutubeLikedPlaylistTap() {
@@ -942,7 +942,7 @@ class YTUtils {
 
   void showVideoClearDialog(
     String videoId, {
-    final void Function(Map<String, bool> pathsDeleted)? afterDeleting,
+    void Function(Map<String, bool> pathsDeleted)? afterDeleting,
     List<NamidaClearDialogExpansionTile<dynamic>> Function(RxMap<String, bool> pathsToDelete, Rx<int> totalSizeToDelete, Rx<bool> allSelected)? extraTiles,
   }) async {
     final pathsToDelete = <String, bool>{}.obs;
@@ -1166,7 +1166,7 @@ class YTUtils {
 
   static void showFilenameBuilderOutputSheet({
     required String groupName,
-    required bool showEditTags,
+    required String Function(String template) previewBuilder,
     required void Function(String text) onChanged,
   }) async {
     final controller = TextEditingController(text: settings.youtube.downloadFilenameBuilder.value);
@@ -1188,6 +1188,13 @@ class YTUtils {
           }
           return null;
         },
+        trailing: NamidaIconButton(
+          tooltip: () => lang.restoreDefaults,
+          icon: Broken.refresh,
+          iconSize: 20.0,
+          horizontalPadding: 4.0,
+          onPressed: () => controller.text = settings.youtube.defaultFilenameBuilder,
+        ),
       ),
       buttonText: lang.save,
       onButtonTap: (text) {
@@ -1195,51 +1202,11 @@ class YTUtils {
         settings.youtube.downloadFilenameBuilder.save(text);
         return true;
       },
-      extraPreItemsBuilder: !showEditTags
-          ? null
-          : (formState) {
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 12.0),
-                child: CustomListTile(
-                  icon: Broken.edit,
-                  title: lang.editTags,
-                  trailing: const Icon(
-                    Broken.arrow_right_3,
-                    size: 22.0,
-                  ),
-                  onTap: () async {
-                    final tagMaps = Map.of(settings.youtube.initialDefaultMetadataTags.value);
-                    await showVideoDownloadOptionsSheet(
-                      videoTitle: null,
-                      videoUploader: null,
-                      tagMaps: tagMaps,
-                      tagMapsForFillingInfoOnly: YTUtils.getDefaultTagsFieldsBuilders(settings.youtube.autoExtractVideoTagsFromInfo.value),
-                      showSpecificFileOptions: false,
-                      onDownloadFilenameChanged: (filename) {}, // not visible
-                      onDownloadGroupNameChanged: (newGroupName) {}, // not visible
-                      preWidget: (controllerFn, onChangedFn) => Padding(
-                        padding: const EdgeInsets.only(top: 12.0, bottom: 4.0),
-                        child: YTDownloadFilenameBuilderRow(
-                          controller: null,
-                          controllerCallback: controllerFn,
-                          onChanged: onChangedFn,
-                        ),
-                      ),
-                      initialGroupName: groupName,
-                    );
-                    settings.youtube.initialDefaultMetadataTags.replace(tagMaps);
-                  },
-                ),
-              );
-            },
-      extraItemsBuilder: (formState) {
-        return Padding(
-          padding: const EdgeInsets.only(top: 12.0, bottom: 4.0),
-          child: YTDownloadFilenameBuilderRow(
-            controller: controller,
-          ),
-        );
-      },
+      extraPreItemsBuilder: (formState) => const _DefaultTagsTile(),
+      extraItemsBuilder: (formState) => _FilenameBuilderOutputExtras(
+        controller: controller,
+        previewBuilder: previewBuilder,
+      ),
     );
     controller.disposeAfterAnimation();
   }
@@ -1278,5 +1245,133 @@ extension YoutiPieNotificationResultUtils on YoutiPieNotificationResult {
       QueueSourceYoutubeID.ytNotificationsHosted,
     );
     YTUtils.expandMiniplayer();
+  }
+}
+
+class _CacheStatusIcon extends StatelessWidget {
+  final IconData icon;
+  final bool isCached;
+  final Color? iconsColor;
+
+  const _CacheStatusIcon({
+    required this.icon,
+    required this.isCached,
+    required this.iconsColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = NColorsData.of(context);
+    final baseColor = iconsColor ?? colors.icon;
+    return Icon(
+      icon,
+      size: 15.0,
+      color: baseColor.withValues(alpha: isCached ? 0.6 : 0.1),
+    );
+  }
+}
+
+class _DefaultTagsTile extends StatelessWidget {
+  const _DefaultTagsTile();
+
+  Future<void> _onTap() async {
+    final tagMaps = Map.of(settings.youtube.initialDefaultMetadataTags.value);
+    final defaultTagsBuilders = YTUtils.getDefaultTagsFieldsBuilders(settings.youtube.autoExtractVideoTagsFromInfo.value);
+    await showVideoDownloadOptionsSheet(
+      videoTitle: null,
+      videoUploader: null,
+      tagMaps: tagMaps,
+      tagMapsForFillingInfoOnly: defaultTagsBuilders,
+      showSpecificFileOptions: false,
+      preWidget: (controllerFn, onChangedFn) => Padding(
+        padding: const EdgeInsets.only(top: 12.0, bottom: 4.0),
+        child: YTDownloadFilenameBuilderRow(
+          controller: null,
+          controllerCallback: controllerFn,
+          onChanged: onChangedFn,
+        ),
+      ),
+    );
+    settings.youtube.initialDefaultMetadataTags.replace(tagMaps);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return NamidaInkWell(
+      bgColor: NColors.card,
+      borderRadius: 12.0,
+      margin: const EdgeInsets.only(bottom: 20.0),
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+      onTap: _onTap,
+      child: Row(
+        children: [
+          const Icon(
+            Broken.edit,
+            size: 20.0,
+          ),
+          const SizedBox(width: 12.0),
+          Expanded(
+            child: NamidaText(
+              lang.editTags,
+              style: NText.medium,
+            ),
+          ),
+          const Icon(
+            Broken.arrow_right_3,
+            size: 18.0,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FilenameBuilderOutputExtras extends StatelessWidget {
+  final TextEditingController controller;
+  final String Function(String template) previewBuilder;
+
+  const _FilenameBuilderOutputExtras({
+    required this.controller,
+    required this.previewBuilder,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 4.0),
+        YTDownloadFilenameBuilderRow(
+          controller: controller,
+        ),
+        const SizedBox(height: 6.0),
+        Row(
+          children: [
+            const SizedBox(width: 4.0),
+            Expanded(
+              child: ValueListenableBuilder(
+                valueListenable: controller,
+                builder: (context, value, _) {
+                  final filenamePreview = previewBuilder(value.text);
+                  return Text.rich(
+                    TextSpan(
+                      text: "${lang.preview}: ",
+                      style: NText.small.of(context),
+                      children: [
+                        TextSpan(
+                          text: filenamePreview,
+                          style: NText.medium.of(context),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
   }
 }

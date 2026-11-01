@@ -143,14 +143,14 @@ class SettingsSearchController {
     if (isOpen) {
       _searchIndex.clear();
       final settingsWidgets = [
-        ThemeSetting(),
-        IndexerSettings(),
-        PlaybackSettings(),
-        CustomizationSettings(),
-        YoutubeSettings(),
-        ExtrasSettings(),
-        BackupAndRestore(),
-        AdvancedSettings(),
+        const ThemeSetting(),
+        const IndexerSettings(),
+        const PlaybackSettings(),
+        const CustomizationSettings(),
+        const YoutubeSettings(),
+        const ExtrasSettings(),
+        const BackupAndRestore(),
+        const AdvancedSettings(),
       ];
       for (final p in settingsWidgets) {
         subpagesDetails[p.settingPage] = p.settingPage.toSettingSubPageDetails();
@@ -256,24 +256,28 @@ class SettingsSearchController {
   }) async {
     onSearchTap(isOpen: false);
 
-    final details = subpagesDetails[settingPage];
-    final page = settingPage?.toSettingSubPageDetails(initialItem: key)?.page;
-    if (NamidaNavigator.inst.currentRoute?.route == RouteType.SETTINGS_subpage) {
-      // -- navigate back if inside subpage.
+    while (NamidaNavigator.inst.currentRoute?.route.isSettingsSubpage == true) {
+      // -- navigate back if inside subpage (nested ones too).
       // -- we can skip and just jump, but we
       // -- need the blink animation & bgColor to update.
       await NamidaNavigator.inst.popPage(waitForAnimation: true);
     }
-    if (page != null) {
-      SettingsSubPage(
-        title: () => details?.title() ?? '',
-        child: page(),
-      ).navigate();
-    }
+    if (settingPage != null) openSubpage(settingPage, initialItem: key);
     WidgetsBinding.instance.addPostFrameCallback((timeStamp) {
       final c = _targetKeys[key]?.currentContext;
       if (c != null) Scrollable.ensureVisible(c, alignment: 0.3);
     });
+  }
+
+  void openSubpage(SettingSubpageEnum settingPage, {SettingEntry? initialItem}) {
+    final details = settingPage.toSettingSubPageDetails(initialItem: initialItem);
+    if (details == null) return;
+    final page = details.page;
+    if (page == null) return;
+    SettingsSubPage(
+      title: details.title,
+      child: page(),
+    ).navigate();
   }
 }
 

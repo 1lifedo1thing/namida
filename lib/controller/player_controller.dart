@@ -16,6 +16,7 @@ import 'package:youtipie/class/streams/video_streams_result.dart';
 import 'package:namida/base/audio_handler.dart';
 import 'package:namida/class/audio_cache_detail.dart';
 import 'package:namida/class/custom_mpv_player.dart';
+import 'package:namida/class/progress_span.dart';
 import 'package:namida/class/track.dart';
 import 'package:namida/class/video.dart';
 import 'package:namida/controller/audio_output_controller.dart';
@@ -36,6 +37,7 @@ import 'package:namida/core/extensions.dart';
 import 'package:namida/core/functions.dart';
 import 'package:namida/core/icon_fonts/broken_icons.dart';
 import 'package:namida/core/namida_converter_ext.dart';
+import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/translations/language.dart';
 import 'package:namida/core/utils.dart';
 import 'package:namida/ui/dialogs/common_dialogs.dart';
@@ -164,6 +166,21 @@ class Player {
   }
 
   RxBaseCore<Duration> get buffered => _audioHandler.buffered;
+
+  /// null when the current item is not live.
+  RxBaseCore<LiveWindow?> get currentLiveWindow => _audioHandler.currentLiveWindow;
+  Duration? get liveJoinPosition => _audioHandler.liveJoinPosition;
+
+  ProgressSpan getProgressSpan(int durationMS) {
+    final window = currentLiveWindow.value;
+    return window == null ? ProgressSpan.item(durationMS) : ProgressSpan.live(window);
+  }
+
+  ProgressSpan getProgressSpanR(int durationMS) {
+    final window = currentLiveWindow.valueR;
+    return window == null ? ProgressSpan.item(durationMS) : ProgressSpan.live(window);
+  }
+
   RxBaseCore<int> get numberOfRepeats => _audioHandler.numberOfRepeats;
   int get latestInsertedIndex => _audioHandler.latestInsertedIndex;
 
@@ -226,6 +243,7 @@ class Player {
   }
 
   bool get isModifyingQueue => _audioHandler.isModifyingQueue;
+  bool get isAutoSkipping => _audioHandler.isAutoSkipping;
 
   void refreshPlatformIcons() => _audioHandler.refreshPlatformIcons();
 
@@ -242,7 +260,8 @@ class Player {
   StreamSubscription? _notificationClickedSub;
 
   Future<void> initializePlayer() async {
-    if (Platform.isAndroid || Platform.isIOS) {
+    // -- macos gets now playing & media keys from audio_service, windows/linux go through [SMTCController].
+    if (Platform.isAndroid || Platform.isIOS || Platform.isMacOS) {
       final handler = NamidaAudioVideoHandler<Playable>();
       _audioHandler = handler;
       await AudioService.init(
@@ -549,11 +568,28 @@ class Player {
 
   FutureOr<void> shuffleTracks(bool allTracks) async {
     if (_audioHandler.partyGate?.interceptQueueRewrite(allTracks ? .shuffleAll : .shuffleNext) == true) return;
+    if (settings.player.shuffleQueue.value) {
+      // -- awaited directly, the shuffleQueue listener doesn't wait for the original order to be restored
+      await _audioHandler.setQueueShuffled(false);
+      settings.player.shuffleQueue.save(false);
+    }
     if (allTracks) {
       _audioHandler.shuffleAllItems();
       MiniPlayerController.inst.queueFollower.jumpToCurrentItem();
     } else {
       await _audioHandler.shuffleNextItems();
+    }
+  }
+
+  FutureOr<void> shuffleByMode(ShuffleButtonMode mode) {
+    switch (mode) {
+      case ShuffleButtonMode.toggle:
+        final shuffleQueue = settings.player.shuffleQueue.value;
+        settings.player.shuffleQueue.save(!shuffleQueue);
+      case ShuffleButtonMode.next:
+        return shuffleTracks(false);
+      case ShuffleButtonMode.all:
+        return shuffleTracks(true);
     }
   }
 
@@ -892,6 +928,8 @@ class Player {
 
   void refreshCrossfadeTransition() => _audioHandler.refreshCrossfadeTransition();
 
+  int getOwnCrossfadeMS() => _audioHandler.getOwnCrossfadeMS();
+
   Future<void> pauseRaw() async {
     await _audioHandler.onPauseRaw();
   }
@@ -917,16 +955,32 @@ class Player {
     await _audioHandler.userSkipToQueueItem(index);
   }
 
+  /// plays an item already in the queue without the new queue checks of [playOrPause], toggles playback for the current item.
+  /// (just to improve performance, skipping process of checking new queues, etc..)
+  void playQueueItem(int index) {
+    if (index == currentIndex.value) {
+      togglePlayPause();
+    } else {
+      skipToQueueItem(index);
+    }
+  }
+
   Future<void> seek(Duration position) async {
     await _audioHandler.userSeek(position);
   }
 
+  Future<void> seekToLiveEdge() => _audioHandler.userSeekToLiveEdge();
+
   bool isCurrentItem(Playable item) {
     final current = _audioHandler.currentItem.value;
     if (current == null) return false;
+    return _isSameItem(item, current);
+  }
+
+  static bool _isSameItem(Playable item, Playable other) {
     final isSame = item.execute(
-      selectable: (finalItem) => current is Selectable && current.track == finalItem.track,
-      youtubeID: (finalItem) => current is YoutubeID && current.id == finalItem.id,
+      selectable: (finalItem) => other is Selectable && other.track == finalItem.track,
+      youtubeID: (finalItem) => other is YoutubeID && other.id == finalItem.id,
     );
     return isSame == true;
   }
@@ -947,7 +1001,7 @@ class Player {
 
   /// Default value is set to user preference [seekDurationInSeconds]
   Future<void> seekSecondsForward({int? seconds, void Function(int finalSeconds)? onSecondsReady}) async {
-    final newSeconds = _secondsToSeek(seconds);
+    final newSeconds = getSecondsToSeek(seconds);
     if (newSeconds == 0) return;
     onSecondsReady?.call(newSeconds);
     await _audioHandler.userSeek(Duration(milliseconds: nowPlayingPosition.value + newSeconds * 1000));
@@ -955,13 +1009,13 @@ class Player {
 
   /// Default value is set to user preference [seekDurationInSeconds]
   Future<void> seekSecondsBackward({int? seconds, void Function(int finalSeconds)? onSecondsReady}) async {
-    final newSeconds = _secondsToSeek(seconds);
+    final newSeconds = getSecondsToSeek(seconds);
     if (newSeconds == 0) return;
     onSecondsReady?.call(newSeconds);
     await _audioHandler.userSeek(Duration(milliseconds: nowPlayingPosition.value - newSeconds * 1000));
   }
 
-  int _secondsToSeek([int? seconds]) {
+  int getSecondsToSeek([int? seconds]) {
     int? newSeconds = seconds;
     if (newSeconds == null) {
       if (settings.player.isSeekDurationPercentage.value) {
@@ -993,6 +1047,31 @@ class Player {
     if (shouldReplace) await playOrPause(index, queueList, source, canAskBeforeReplacing: false);
   }
 
+  /// plays [queue] inside the current queue, a single item that's already in it is skipped to instead of being added again.
+  Future<void> playKeepingQueue(List<Playable> queue, QueueSourceBase source) async {
+    if (queue.isEmpty) return;
+    if (_audioHandler.partyGate != null || currentQueue.value.isEmpty) {
+      await playOrPause(0, queue, source);
+      return;
+    }
+    final currentIndex = this.currentIndex.value;
+    if (queue.length == 1) {
+      final item = queue.first;
+      final existingIndex = currentQueue.value.indexWhere((e) => _isSameItem(item, e));
+      if (existingIndex == currentIndex) {
+        if (!isPlaying.value) await play();
+        return;
+      }
+      if (existingIndex >= 0) {
+        await skipToQueueItem(existingIndex);
+        return;
+      }
+    }
+    _audioHandler.setPlayWhenReady(true);
+    await _audioHandler.insertInQueue(queue, currentIndex);
+    await _audioHandler.userSkipToQueueItem(currentIndex);
+  }
+
   Future<void> playOrPause(
     int index,
     Iterable<Playable> queue,
@@ -1013,6 +1092,9 @@ class Player {
 
     /// false when the play options were already picked, see [playWithOptions].
     bool canAskBeforeReplacing = true,
+
+    /// false leaves the player as is when it already plays [queue] at [index], instead of toggling play/pause.
+    bool shouldToggleIfSame = true,
   }) async {
     if (gentlePlay) {
       if (index == 0 && queue.hasSingleItem()) {
@@ -1029,6 +1111,9 @@ class Player {
         showSnackBar: false,
       );
       if (startPosition != null) _audioHandler.requestStartPosition(queue.elementAt(index), startPosition);
+      // -- adding to an empty queue (or one cleared for switching local/youtube) already plays the first item
+      final didStartFromEmptyQueue = _audioHandler.currentQueue.value.length == queue.length;
+      if (didStartFromEmptyQueue) return;
       await next();
       return;
     }
@@ -1086,7 +1171,7 @@ class Player {
       playAtIndex: index,
       queue: queue,
       maximumItems: maximumItems,
-      onIndexAndQueueSame: togglePlayPauseExclusive,
+      onIndexAndQueueSame: shouldToggleIfSame ? togglePlayPauseExclusive : null,
       onQueueDifferent: (finalizedQueue, originalIndices) {
         if (updateQueue) {
           QueueController.inst.updateLatestQueue(
@@ -1185,6 +1270,7 @@ class Player {
     int? sourceDurationMS,
     required bool isFile,
     bool videoOnly = false,
+    int? startOffsetMS,
   }) async {
     await _audioHandler.setVideoSource(
       source: source,
@@ -1192,6 +1278,7 @@ class Player {
       sourceDurationMS: sourceDurationMS,
       isFile: isFile,
       videoOnly: videoOnly,
+      startOffsetMS: startOffsetMS,
     );
   }
 
@@ -1265,7 +1352,7 @@ class _AudioConfigsManager {
   Iterable<MapEntry<String, PlayerConfigOverrides>> buildSyncEntries() => _mapRx.value.entries;
 
   /// [incomingWins] skips the newest wins check, ex: restoring a backup.
-  Future<void> import(Iterable<MapEntry<String, PlayerConfigOverrides>> incomingConfigs, String senderDeviceId, {bool incomingWins = false}) async {
+  Future<int> import(Iterable<MapEntry<String, PlayerConfigOverrides>> incomingConfigs, String senderDeviceId, {bool incomingWins = false}) async {
     final dbEntries = <MapEntry<String, Map<String, dynamic>>>[];
     for (final e in incomingConfigs) {
       final incoming = e.value;
@@ -1275,9 +1362,10 @@ class _AudioConfigsManager {
       _mapRx.value[key] = incoming;
       dbEntries.add(MapEntry(key, incoming.toMap()));
     }
-    if (dbEntries.isEmpty) return;
+    if (dbEntries.isEmpty) return 0;
     _mapRx.refresh();
     await _dBManager.putAll(dbEntries, (e) => e);
+    return dbEntries.length;
   }
 
   final _dirtyKeys = <String>{};

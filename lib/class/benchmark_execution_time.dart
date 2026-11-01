@@ -59,7 +59,7 @@ class BenchmarkExecutionTime {
   void showResultsSheet() {
     NamidaNavigator.inst.showSheet(
       builder: (context, bottomPadding, maxWidth, maxHeight) => Padding(
-        padding: EdgeInsetsGeometry.all(32.0),
+        padding: const EdgeInsetsGeometry.all(32.0),
         child: Text(getResults()),
       ),
     );
@@ -97,6 +97,8 @@ class BenchmarkExecutionTimeWithLogger extends BenchmarkExecutionTime {
         android: () => '/storage/emulated/0/Documents/',
         windows: () => Directory.systemTemp.path,
         linux: () => Directory.systemTemp.path,
+        ios: () => Directory.systemTemp.path,
+        macos: () => Directory.systemTemp.path,
       );
 
       final file = FileParts.join(dirPath, filename);

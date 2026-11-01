@@ -366,6 +366,7 @@ enum LibraryTab {
   search,
   youtube(hasSectionsMenu: true),
   ytHome(isInDrawerOnlyWhenActive: true),
+  ytMusic(isInDrawerOnlyWhenActive: true),
   ytNotifications(isInDrawerOnlyWhenActive: true),
   ytChannels(isInDrawerOnlyWhenActive: true),
   ytPlaylists(isInDrawerOnlyWhenActive: true),
@@ -479,6 +480,7 @@ enum QueueSourceYoutubeIDEnum {
   ytHomeFeed(false),
   ytHomePageItem(false),
   ytHashtag(false),
+  ytMusic(false),
   ytNotificationsHosted(false),
   ytRelatedVideos(false),
   ytHistoryFilteredHosted(false),
@@ -638,6 +640,7 @@ class QueueSourceYoutubeID extends QueueSourceBase<QueueSourceYoutubeIDEnum> {
   static const ytHomeFeed = QueueSourceYoutubeID._(QueueSourceYoutubeIDEnum.ytHomeFeed);
   static const ytHomePageItem = QueueSourceYoutubeID._(QueueSourceYoutubeIDEnum.ytHomePageItem);
   static QueueSourceYoutubeID ytHashtag(String? hashtag) => QueueSourceYoutubeID._(QueueSourceYoutubeIDEnum.ytHashtag, title: hashtag);
+  static QueueSourceYoutubeID ytMusic(String? shelfTitle) => QueueSourceYoutubeID._(QueueSourceYoutubeIDEnum.ytMusic, title: shelfTitle);
   static const ytNotificationsHosted = QueueSourceYoutubeID._(QueueSourceYoutubeIDEnum.ytNotificationsHosted);
   static const ytRelatedVideos = QueueSourceYoutubeID._(QueueSourceYoutubeIDEnum.ytRelatedVideos);
   static const ytHistoryFilteredHosted = QueueSourceYoutubeID._(QueueSourceYoutubeIDEnum.ytHistoryFilteredHosted);
@@ -695,37 +698,51 @@ class QueueSourceYoutubeID extends QueueSourceBase<QueueSourceYoutubeIDEnum> {
 }
 
 enum TagField {
-  title,
-  artist,
-  album,
-  albumArtist,
-  composer,
-  genre,
-  style,
-  mood,
-  year,
-  trackNumber,
-  discNumber,
-  comment,
-  description,
-  synopsis,
-  lyrics,
-  language,
-  remixer,
-  trackTotal,
-  discTotal,
-  lyricist,
-  recordLabel,
-  releaseType,
-  country,
-  rating,
-  tags,
+  title(TagFieldMultiEdit.hidden),
+  artist(TagFieldMultiEdit.always),
+  album(TagFieldMultiEdit.always),
+  albumArtist(TagFieldMultiEdit.always),
+  composer(TagFieldMultiEdit.always),
+  genre(TagFieldMultiEdit.always),
+  style(TagFieldMultiEdit.always),
+  mood(TagFieldMultiEdit.hidden), // -- edited by TrackStatsEditSections
+  year(TagFieldMultiEdit.always, isNumeric: true),
+  trackNumber(TagFieldMultiEdit.hidden, isNumeric: true),
+  discNumber(TagFieldMultiEdit.always, isNumeric: true),
+  comment(TagFieldMultiEdit.always),
+  description(TagFieldMultiEdit.always),
+  synopsis(TagFieldMultiEdit.always),
+  lyrics(TagFieldMultiEdit.hidden),
+  language(TagFieldMultiEdit.whenHasValues),
+  remixer(TagFieldMultiEdit.whenHasValues),
+  trackTotal(TagFieldMultiEdit.always, isNumeric: true),
+  discTotal(TagFieldMultiEdit.always, isNumeric: true),
+  lyricist(TagFieldMultiEdit.whenHasValues),
+  recordLabel(TagFieldMultiEdit.whenHasValues),
+  releaseType(TagFieldMultiEdit.whenHasValues),
+  country(TagFieldMultiEdit.whenHasValues),
+  bpm(TagFieldMultiEdit.whenHasValues, isNumeric: true),
+  musicalKey(TagFieldMultiEdit.whenHasValues),
+  rating(TagFieldMultiEdit.hidden, isNumeric: true), // -- edited by TrackStatsEditSections
+  tags(TagFieldMultiEdit.hidden), // -- edited by TrackStatsEditSections
 
-  titleSort,
-  albumSort,
-  albumArtistSort,
-  artistSort,
-  composerSort,
+  titleSort(TagFieldMultiEdit.hidden),
+  albumSort(TagFieldMultiEdit.whenHasValues),
+  albumArtistSort(TagFieldMultiEdit.whenHasValues),
+  artistSort(TagFieldMultiEdit.whenHasValues),
+  composerSort(TagFieldMultiEdit.whenHasValues),
+  ;
+
+  final TagFieldMultiEdit multiEdit;
+  final bool isNumeric;
+
+  const TagField(this.multiEdit, {this.isNumeric = false});
+}
+
+enum TagFieldMultiEdit {
+  always,
+  whenHasValues,
+  hidden,
 }
 
 enum WakelockMode {
@@ -766,7 +783,7 @@ enum RouteType {
   PAGE_stats,
   PAGE_yourYear,
   PAGE_about(isOpenableFromSettings: true),
-  PAGE_Sync(isOpenableFromSettings: true),
+  PAGE_Sync(isOpenableFromSettings: true, isSettingsSubpage: true),
   PAGE_party(isOpenableFromSettings: true),
 
   // ----- Subpages -----
@@ -791,7 +808,7 @@ enum RouteType {
 
   // ----- Subpages -----
   SETTINGS_page(isOpenableFromSettings: true),
-  SETTINGS_subpage(isOpenableFromSettings: true),
+  SETTINGS_subpage(isOpenableFromSettings: true, isSettingsSubpage: true),
 
   // ----- Search Results -----
   SEARCH_albumResults,
@@ -811,6 +828,7 @@ enum RouteType {
   YOUTUBE_MOST_PLAYED_SUBPAGE,
   YOUTUBE_CHANNEL_SUBPAGE,
   YOUTUBE_HASHTAG_SUBPAGE,
+  YOUTUBE_MUSIC_BROWSE_SUBPAGE,
   YOUTUBE_USER_CHANNELS_PAGE_HOSTED,
 
   YOUTUBE_USER_MANAGE_ACCOUNT_SUBPAGE(isOpenableFromSettings: true),
@@ -826,7 +844,8 @@ enum RouteType {
 
   final bool isDrawerEdgeSwipeOnly;
   final bool isOpenableFromSettings;
-  const RouteType({this.isDrawerEdgeSwipeOnly = false, this.isOpenableFromSettings = false});
+  final bool isSettingsSubpage;
+  const RouteType({this.isDrawerEdgeSwipeOnly = false, this.isOpenableFromSettings = false, this.isSettingsSubpage = false});
 }
 
 /// Used for search and sort.
@@ -1033,6 +1052,25 @@ enum NotificationButton {
   const NotificationButton({this.isTransport = false});
 
   static final transportButtons = values.where((button) => button.isTransport).toFixedList();
+
+  static List<NotificationButton> getNowPlayingButtons({required bool isSeekBackward, required bool isSeekForward}) {
+    final previousButton = isSeekBackward ? seekBackward : previous;
+    final nextButton = isSeekForward ? seekForward : next;
+    return [previousButton, playPause, nextButton];
+  }
+}
+
+enum ShuffleButtonMode {
+  toggle,
+  next(rightEdges: 2),
+  all(leftEdges: 1, rightEdges: 1),
+  ;
+
+  final int leftEdges;
+  final int rightEdges;
+  const ShuffleButtonMode({this.leftEdges = 0, this.rightEdges = 0});
+
+  bool get hasEdges => leftEdges > 0 || rightEdges > 0;
 }
 
 enum SearchType {
@@ -1059,6 +1097,15 @@ enum OnYoutubeLinkOpenAction {
   alwaysAsk,
 }
 
+enum OnExternalFileOpenAction {
+  replaceQueue,
+  keepQueue,
+  playNext,
+  playLast,
+  alwaysAsk,
+  showMenu,
+}
+
 enum PerformanceMode {
   highPerformance,
   balanced,
@@ -1081,6 +1128,43 @@ enum PlayerBackground {
   none,
   artwork,
   image,
+  meshGradient(ambient: AmbientBackdrop.meshGradient),
+  ambientLights(ambient: AmbientBackdrop.ambientLights),
+  bokeh(ambient: AmbientBackdrop.bokeh),
+  ;
+
+  final AmbientBackdrop? ambient;
+
+  const PlayerBackground({this.ambient});
+}
+
+enum LyricsBackground {
+  artwork,
+  ambientLights(ambient: AmbientBackdrop.ambientLights),
+  bokeh(ambient: AmbientBackdrop.bokeh),
+  ;
+
+  final AmbientBackdrop? ambient;
+
+  const LyricsBackground({this.ambient});
+}
+
+enum LyricsVisualizer {
+  none,
+  bars(style: MiniplayerVisualizer.bars),
+  mirroredBars(style: MiniplayerVisualizer.mirroredBars),
+  waves(style: MiniplayerVisualizer.waves),
+  ;
+
+  final MiniplayerVisualizer? style;
+
+  const LyricsVisualizer({this.style});
+}
+
+enum AmbientBackdrop {
+  meshGradient,
+  ambientLights,
+  bokeh,
 }
 
 enum EffectTheme {
@@ -1130,6 +1214,7 @@ enum FABType {
 enum YTHomeSource {
   local,
   youtube(requiresAccount: true),
+  youtubeMusic,
   ;
 
   final bool requiresAccount;
@@ -1139,6 +1224,7 @@ enum YTHomeSource {
 
 enum YTHomePages {
   home([YTHomeSource.local, YTHomeSource.youtube]),
+  music([YTHomeSource.youtubeMusic], showsSource: false),
   notifications([YTHomeSource.youtube]),
   channels([YTHomeSource.local, YTHomeSource.youtube]),
   playlists([YTHomeSource.local, YTHomeSource.youtube]),
@@ -1301,7 +1387,7 @@ enum InternalPlayerType {
   static List<InternalPlayerType> getAvailableForCurrentPlatform() {
     final nativePlayers = NamidaPlatformBuilder.initValue(
       android: const [InternalPlayerType.exoplayer, InternalPlayerType.exoplayer_sw],
-      ios: const [InternalPlayerType.exoplayer],
+      ios: const [InternalPlayerType.mpv],
       windows: const [InternalPlayerType.mpv],
       macos: const [InternalPlayerType.mpv],
       linux: const [InternalPlayerType.mpv],
@@ -1317,7 +1403,7 @@ enum InternalPlayerType {
   factory InternalPlayerType._getForPlatform() {
     return NamidaPlatformBuilder.initValue(
       android: InternalPlayerType.exoplayer,
-      ios: InternalPlayerType.exoplayer,
+      ios: InternalPlayerType.mpv,
       windows: InternalPlayerType.mpv,
       macos: InternalPlayerType.mpv,
       linux: InternalPlayerType.mpv,
@@ -1355,7 +1441,8 @@ enum ReplayGainType {
   final bool _isValidMode;
   const ReplayGainType(this._isValidMode);
 
-  static ReplayGainType getPlatformDefault() => NamidaFeaturesVisibility.loudnessEnhancerAvailable && (!Platform.isWindows && !Platform.isLinux) ? loudness_enhancer : volume;
+  /// mpv's own volume goes past 100%, only android has a separate loudness effect.
+  static ReplayGainType getPlatformDefault() => Platform.isAndroid ? loudness_enhancer : volume;
 
   bool get isLoudnessEnhancerEnabled => this == loudness_enhancer || (this == platform_default && getPlatformDefault() == loudness_enhancer);
   bool get isVolumeEnabled => this == volume || (this == platform_default && getPlatformDefault() == volume);
@@ -1456,14 +1543,28 @@ enum WebhookEvent {
   pause,
 }
 
+enum DiscordPresenceStatus {
+  idle,
+  connecting,
+  connected,
+  unreachable,
+}
+
 enum LyricsIntegration {
-  lyricInfo,
-  superLyric(sendsPerLine: true),
-  flymeTicker(sendsPerLine: true),
+  lyricInfo(availability: NamidaFeaturesAvailablity.android),
+  superLyric(availability: NamidaFeaturesAvailablity.android, sendsPerLine: true),
+  flymeTicker(availability: NamidaFeaturesAvailablity.android, sendsPerLine: true),
+  menuBar(availability: NamidaFeaturesAvailablity.macos, sendsPerLine: true),
+  liveActivity(availability: NamidaFeaturesAvailablity.ios16_2and_plus, sendsPerLine: true),
   ;
 
+  final NamidaFeaturesAvailablity availability;
   final bool sendsPerLine;
-  const LyricsIntegration({this.sendsPerLine = false});
+  const LyricsIntegration({required this.availability, this.sendsPerLine = false});
+
+  bool isAvailable() => availability.resolve();
+
+  static final valuesForPlatform = values.where((e) => e.isAvailable()).toFixedList();
 }
 
 enum SoundEffectType {

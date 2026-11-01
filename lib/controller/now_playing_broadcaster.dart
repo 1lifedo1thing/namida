@@ -1,19 +1,30 @@
 // by claude
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:audio_service/audio_service.dart';
+import 'package:crypto/crypto.dart';
 
+import 'package:namida/class/progress_span.dart';
 import 'package:namida/controller/directory_index.dart';
 import 'package:namida/controller/logs_controller.dart';
 import 'package:namida/controller/music_web_server/music_web_server_base.dart';
 import 'package:namida/controller/platform/namida_channel/namida_channel.dart';
+import 'package:namida/controller/player_controller.dart';
 import 'package:namida/controller/settings_controller.dart';
 import 'package:namida/core/constants.dart';
 import 'package:namida/core/enums.dart';
+import 'package:namida/core/extensions.dart';
+import 'package:namida/core/utils.dart';
+
+part 'now_playing_broadcaster.discord.dart';
+part 'now_playing_broadcaster.discord_gateway.dart';
 
 /// fans out playback changes to whatever the user enabled: android broadcasts (tasker & co),
-/// server playback reports, and a webhook url. nothing is built while no sink is active.
+/// server playback reports, a webhook url and discord presence. nothing is built while no sink is active.
 class NowPlayingBroadcaster {
   static final inst = NowPlayingBroadcaster._();
 
@@ -23,12 +34,14 @@ class NowPlayingBroadcaster {
     settings.webhookEvents.addListener(_rebuildSinks);
     settings.reportPlaybackToServers.addListener(_rebuildSinks);
     settings.directoriesToScan.addListener(_rebuildSinks);
+    settings.discordPresence.addListener(_rebuildSinks);
     _rebuildSinks();
   }
 
   final _sinks = <_NowPlayingSink>[];
   MediaItem? _lastMedia;
   final _serverReporter = ServerNowPlayingReporter();
+  _DiscordPresenceSink? _discordSink;
 
   void _rebuildSinks() {
     _sinks.clear();
@@ -42,7 +55,52 @@ class NowPlayingBroadcaster {
     } else {
       _serverReporter.end();
     }
+    if (settings.discordPresence.value) {
+      final discordSink = _discordSink ??= _createDiscordSink();
+      _sinks.add(discordSink);
+    } else {
+      _discordSink?.close();
+      _discordSink = null;
+    }
   }
+
+  _DiscordPresenceSink _createDiscordSink() {
+    final sink = _DiscordPresenceSink();
+    final media = _lastMedia;
+    if (media != null) {
+      final isPlaying = Player.inst.isPlaying.value;
+      final positionMS = _reportedPositionMS(media, Player.inst.nowPlayingPosition.value);
+      sink.send(_NowPlayingEvent(media, WebhookEvent.trackChanged, isPlaying, positionMS));
+    }
+    return sink;
+  }
+
+  RxBaseCore<DiscordPresenceStatus> get discordStatus => _DiscordPresenceReport.inst.status;
+  RxBaseCore<DiscordAccount?> get discordAccount => _DiscordPresenceReport.inst.account;
+  RxBaseCore<bool> get isDiscordSharing => _DiscordPresenceReport.inst.isSharing;
+
+  /// only mobile logs in, desktop goes through the discord app.
+  bool get discordRequiresLogin => _DiscordPresenceTransport.usesGateway;
+
+  /// false when the login was cancelled, throws when it failed.
+  Future<bool> ensureDiscordLogin() async {
+    if (!_DiscordPresenceTransport.usesGateway) return true;
+    final oauth = _DiscordOAuth.inst;
+    final hasLogin = await oauth.hasLogin();
+    if (hasLogin) return true;
+    final didLogIn = await oauth.logIn();
+    if (didLogIn) _discordSink?.resend();
+    return didLogIn;
+  }
+
+  Future<void> logOutOfDiscord() async {
+    settings.discordPresence.save(false);
+    await _DiscordOAuth.inst.logOut();
+  }
+
+  void refreshDiscordStatus() => _discordSink?.probe();
+
+  bool handleDiscordAuthRedirect(String link) => _DiscordOAuth.inst.handleRedirect(link);
 
   bool _shouldReportToServers() {
     if (!settings.reportPlaybackToServers.value) return false;
@@ -60,14 +118,32 @@ class NowPlayingBroadcaster {
 
   void onItemChanged(MediaItem media, {required bool isPlaying, required int positionMS}) {
     _lastMedia = media;
-    _send(media, WebhookEvent.trackChanged, isPlaying, positionMS);
+    final reportedPositionMS = _reportedPositionMS(media, positionMS);
+    _send(media, WebhookEvent.trackChanged, isPlaying, reportedPositionMS);
   }
 
   void onPlayingChanged(bool isPlaying, {required int positionMS}) {
     final media = _lastMedia;
     if (media == null) return;
     final type = isPlaying ? WebhookEvent.play : WebhookEvent.pause;
-    _send(media, type, isPlaying, positionMS);
+    final reportedPositionMS = _reportedPositionMS(media, positionMS);
+    _send(media, type, isPlaying, reportedPositionMS);
+  }
+
+  void onSeek(int positionMS) {
+    final discordSink = _discordSink;
+    final media = _lastMedia;
+    if (discordSink == null || media == null) return;
+    final reportedPositionMS = _reportedPositionMS(media, positionMS);
+    discordSink.onSeek(reportedPositionMS);
+  }
+
+  /// a live position sits somewhere in the stream window (hours in on android), so it goes out as the time watched.
+  static int _reportedPositionMS(MediaItem media, int positionMS) {
+    if (media.isLive != true) return positionMS;
+    final liveWindow = Player.inst.currentLiveWindow.value;
+    if (liveWindow == null) return 0;
+    return liveWindow.watchedMS(positionMS, Player.inst.liveJoinPosition);
   }
 
   void _send(MediaItem media, WebhookEvent type, bool isPlaying, int positionMS) {
@@ -199,4 +275,46 @@ class _NowPlayingEvent {
     const prefix = NowPlayingExtras.tagIdPrefix;
     return key.startsWith(prefix) ? key.substring(prefix.length) : key;
   }
+}
+
+class DiscordAccount {
+  final String id;
+  final String name;
+  final String avatarUrl;
+
+  const DiscordAccount({required this.id, required this.name, required this.avatarUrl});
+
+  factory DiscordAccount.fromUserJson(Map<String, dynamic> json) {
+    final id = json['id'] as String;
+    final username = json['username'] as String;
+    final displayName = json['global_name'] as String?;
+    final avatarHash = json['avatar'] as String?;
+    final discriminator = json['discriminator'] as String?;
+    final avatarUrl = avatarHash == null ? _getDefaultAvatarUrl(id, discriminator) : 'https://cdn.discordapp.com/avatars/$id/$avatarHash.png?size=128';
+    return DiscordAccount(id: id, name: displayName ?? username, avatarUrl: avatarUrl);
+  }
+
+  factory DiscordAccount.fromJson(Map<String, dynamic> json) {
+    return DiscordAccount(id: json['id'] as String, name: json['name'] as String, avatarUrl: json['avatarUrl'] as String);
+  }
+
+  /// discord's own fallback for accounts without an avatar, legacy accounts still have a discriminator.
+  static String _getDefaultAvatarUrl(String id, String? discriminator) {
+    final legacyDiscriminator = int.tryParse(discriminator ?? '') ?? 0;
+    if (legacyDiscriminator != 0) return 'https://cdn.discordapp.com/embed/avatars/${legacyDiscriminator % 5}.png';
+    final index = (int.parse(id) >> 22) % 6;
+    return 'https://cdn.discordapp.com/embed/avatars/$index.png';
+  }
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    'avatarUrl': avatarUrl,
+  };
+
+  @override
+  bool operator ==(Object other) => other is DiscordAccount && other.id == id && other.name == name && other.avatarUrl == avatarUrl;
+
+  @override
+  int get hashCode => Object.hash(id, name, avatarUrl);
 }

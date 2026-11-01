@@ -19,7 +19,7 @@ class _Room implements PartyHostDelegate {
   List<String>? reactions;
 
   _Room() {
-    host = PartyHost.create(state: hostState, selfN: 1, selfName: 'host', roomName: 'room', listening: true, repeat: PartyRepeat.initial, delegate: this);
+    host = PartyHost.create(state: hostState, selfN: 1, selfName: 'host', roomName: 'room', listening: true, repeat: PartyRepeat.initial, crossfadeMS: 0, delegate: this);
   }
 
   PartyState join(int n, {String? name}) {
@@ -263,8 +263,25 @@ void main() {
     expect(room.kicked, [3]);
     room.send(2, PartyMsg.role(3, PartyRole.admin));
     expect(room.hostState.members[3]!.role, PartyRole.guest);
-    room.host.onMemberLeft(3);
+    room.host.onMemberLeft(3, lost: false);
     room.members.remove(3);
+    room.expectConverged();
+  });
+
+  test('an admin keeps the role across a dropped connection, not after leaving', () {
+    final room = _Room();
+    room.join(2);
+    room.send(1, PartyMsg.role(2, PartyRole.admin));
+
+    room.host.onMemberLeft(2, lost: true);
+    expect(room.successors.last, isEmpty);
+    room.join(2);
+    expect(room.hostState.members[2]!.role, PartyRole.admin);
+    expect(room.successors.last, [2]);
+
+    room.host.onMemberLeft(2, lost: false);
+    room.join(2);
+    expect(room.hostState.members[2]!.role, PartyRole.guest);
     room.expectConverged();
   });
 
@@ -370,6 +387,20 @@ void main() {
     room.host.dispose();
   });
 
+  test('host crossfade moves the transition earlier, late joiners get it in the snapshot', () async {
+    final room = _Room();
+    final member = room.join(2);
+    room.send(1, PartyMsg.add([_yt('a', durationMS: 100000), _yt('b')]));
+    room.host.setCrossfade(99950);
+    expect(member.crossfadeMS, 99950);
+    await Future<void>.delayed(const Duration(milliseconds: 900));
+    expect(room.hostState.currentIndex, 1);
+    final late = room.join(3);
+    expect(late.crossfadeMS, 99950);
+    room.expectConverged();
+    room.host.dispose();
+  });
+
   test('repeat modes decide what the timeline does at the end of an entry', () {
     final room = _Room();
     room.join(2);
@@ -443,8 +474,9 @@ void main() {
 
     final takeover = _Room();
     takeover.members.clear();
-    final newHost = PartyHost.takeOver(state: guest, selfN: 2, connected: {2: 'm2', 3: 'm3'}, delegate: takeover);
-    expect(guest.epoch, 2);
+    final oldEpoch = guest.epoch;
+    final newHost = PartyHost.takeOver(state: guest, selfN: 2, connected: {2: 'm2', 3: 'm3'}, crossfadeMS: 0, delegate: takeover);
+    expect(guest.epoch, greaterThan(oldEpoch));
     expect(guest.members[2]!.role, PartyRole.host);
     expect(guest.members[3]!.role, PartyRole.admin);
     expect(guest.members.containsKey(1), false);
@@ -455,12 +487,13 @@ void main() {
     expect(guest.entries.last.id, 3);
 
     final stale = PartyMsg.snapshot(
-      epoch: 1,
+      epoch: oldEpoch,
       roomName: 'old',
       members: const [],
       perms: const PartyPermissions(),
       anchor: PartyAnchor.empty,
       repeat: PartyRepeat.initial,
+      crossfadeMS: 0,
       chat: const [],
       entries: const [],
       more: false,

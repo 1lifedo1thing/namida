@@ -77,10 +77,11 @@ class _YoutubeInfoUtils {
       viewsCount: tempVideoInfosFromStreams[videoId]?.viewsCount,
       isPrivate: null,
       isUnlisted: null,
-      isLive: null,
+      isLiveNow: null,
+      isLiveContent: null,
       category: null,
-      publishDate: tempVideoInfosFromStreams[videoId]?.publishedAt ?? PublishTime.unknown(),
-      uploadDate: tempVideoInfosFromStreams[videoId]?.publishedAt ?? PublishTime.unknown(),
+      publishDate: tempVideoInfosFromStreams[videoId]?.publishedAt ?? const PublishTime.unknown(),
+      uploadDate: tempVideoInfosFromStreams[videoId]?.publishedAt ?? const PublishTime.unknown(),
     );
   }
 
@@ -115,7 +116,9 @@ class _YoutubeInfoUtils {
               _lazyResolvedMissingIds.add(videoId);
             }
           },
-          onError: (_) => _lazyResolvedMissingIds.add(videoId),
+          onError: (_) {
+            _lazyResolvedMissingIds.add(videoId);
+          },
         )
         .whenComplete(() => _lazyResolvingIds.remove(videoId));
   }

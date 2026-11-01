@@ -13,12 +13,14 @@ import 'package:namida/class/track.dart';
 import 'package:namida/controller/edit_delete_controller.dart';
 import 'package:namida/controller/indexer_controller.dart';
 import 'package:namida/controller/search_sort_controller.dart';
+import 'package:namida/controller/selected_tracks_controller.dart';
 import 'package:namida/controller/settings_controller.dart';
 import 'package:namida/core/dimensions.dart';
 import 'package:namida/core/enums.dart';
 import 'package:namida/core/extensions.dart';
 import 'package:namida/core/icon_fonts/broken_icons.dart';
 import 'package:namida/core/namida_converter_ext.dart';
+import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/translations/language.dart';
 import 'package:namida/core/utils.dart';
 import 'package:namida/ui/dialogs/common_dialogs.dart';
@@ -66,8 +68,8 @@ class ArtistTracksPage extends StatefulWidget with NamidaRouteWidget {
 
 class _ArtistTracksPageState extends State<ArtistTracksPage> with PortsProvider<TracksSearchParams>, TracksSearchWidgetMixin<ArtistTracksPage> {
   @override
-  Iterable<TrackExtended> getTracksExtended() {
-    return widget.tracks.map((e) => e.track.toTrackExt());
+  List<Selectable> getSearchableTracks() {
+    return widget.tracks;
   }
 
   @override
@@ -84,6 +86,7 @@ class _ArtistTracksPageState extends State<ArtistTracksPage> with PortsProvider<
         : QueueSource.artist(name);
     final tracks = widget.tracks;
     final searchResults = this.searchResults;
+    final rangeOrder = searchResults == null ? null : FilteredRangeOrder(searchResults);
     final heroTag = 'artist_$name';
     return AnimationLimiter(
       child: BackgroundWrapper(
@@ -197,6 +200,7 @@ class _ArtistTracksPageState extends State<ArtistTracksPage> with PortsProvider<
                       index: index,
                       trackOrTwd: track,
                       tracks: tracks,
+                      rangeOrder: rangeOrder,
                     ),
                   );
                 },
@@ -329,67 +333,72 @@ class _AlbumsRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final leading = _AlbumsRowLeading(
+      icon: icon,
+    );
+    final children = albums.isEmpty
+        ? const <Widget>[]
+        : <Widget>[
+            SizedBox(
+              height: 134.0 + 6.0,
+              child: SuperSmoothListView.builder(
+                padding: const EdgeInsets.only(top: 6.0),
+                clipBehavior: Clip.none,
+                scrollDirection: Axis.horizontal,
+                itemExtent: 100.0,
+                itemCount: albums.length,
+                itemBuilder: (context, i) {
+                  final album = albums[i];
+                  return Padding(
+                    padding: const EdgeInsets.only(left: 2.0),
+                    child: AlbumCard(
+                      identifier: album.key,
+                      album: album.value,
+                      staggered: false,
+                      compact: true,
+                      width: 98.0,
+                      height: 134.0,
+                    ),
+                  );
+                },
+              ),
+            ),
+          ];
     return Padding(
       padding: const EdgeInsetsGeometry.symmetric(horizontal: 8.0),
       child: BorderRadiusClip(
         borderRadius: BorderRadiusGeometry.circular(8.0.multipliedRadius),
-        child: NamidaExpansionTile(
-          bgColor: context.theme.cardColor,
-          leading: _AlbumsRowLeading(
-            icon: icon,
-          ),
-          titleText: "$title: ${albums.length}",
-          showRail: false,
-          initiallyExpanded: albums.isNotEmpty && initiallyExpanded,
-          onExpansionChanged: albums.isEmpty ? null : onExpansionChanged,
-          trailingBuilder: (iconWidget) => Row(
-            mainAxisSize: .min,
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(top: 1.0),
-                child: NamidaIconButton(
-                  icon: Broken.export_2,
-                  iconSize: 18.0,
-                  disableColor: true,
-                  onPressed: () {
-                    final albumIdentifiers = albums.map((e) => e.key).toFixedList();
-                    final page = AlbumCustomResultsPage(
-                      albumIdentifiers: albumIdentifiers,
-                    );
-                    page.navigate();
-                  },
-                ),
-              ),
-              iconWidget,
-            ],
-          ),
-          children: albums.isEmpty
-              ? const []
-              : [
-                  SizedBox(
-                    height: 130.0 + 28.0,
-                    child: SuperSmoothListView.builder(
-                      padding: const EdgeInsets.symmetric(vertical: 14.0),
-                      scrollDirection: Axis.horizontal,
-                      itemExtent: 100.0,
-                      itemCount: albums.length,
-                      itemBuilder: (context, i) {
-                        final album = albums[i];
-                        return Padding(
-                          padding: const EdgeInsets.only(left: 2.0),
-                          child: AlbumCard(
-                            identifier: album.key,
-                            album: album.value,
-                            staggered: false,
-                            compact: true,
-                            width: 98.0,
-                            height: 130.0,
-                          ),
-                        );
-                      },
-                    ),
+        child: NBuilder(
+          builder: (context, colors) => NamidaExpansionTile(
+            bgColor: colors.card,
+            leading: leading,
+            titleText: "$title: ${albums.length}",
+            showRail: false,
+            initiallyExpanded: albums.isNotEmpty && initiallyExpanded,
+            onExpansionChanged: albums.isEmpty ? null : onExpansionChanged,
+            trailingBuilder: (iconWidget) => Row(
+              mainAxisSize: .min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 1.0),
+                  child: NamidaIconButton(
+                    icon: Broken.export_2,
+                    iconSize: 18.0,
+                    disableColor: true,
+                    onPressed: () {
+                      final albumIdentifiers = albums.map((e) => e.key).toFixedList();
+                      final page = AlbumCustomResultsPage(
+                        albumIdentifiers: albumIdentifiers,
+                      );
+                      page.navigate();
+                    },
                   ),
-                ],
+                ),
+                iconWidget,
+              ],
+            ),
+            children: children,
+          ),
         ),
       ),
     );

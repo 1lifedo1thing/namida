@@ -15,12 +15,13 @@ class _WindowManagerDesktop extends NamidaWindowManager {
   @override
   Future<void> restorePosition() async {
     final windowOptions = WindowOptions(
-      size: Size(428, 812),
+      size: const Size(428, 812),
       center: true,
       // -- on windows this makes dwm fill the window with a gray accent until flutter draws
       backgroundColor: Platform.isWindows ? null : Colors.transparent,
       skipTaskbar: false,
       titleBarStyle: usingCustomWindowTitleBar ? TitleBarStyle.hidden : TitleBarStyle.normal,
+      windowButtonVisibility: _isWindowButtonVisible(),
     );
 
     await windowManager.waitUntilReadyToShow(windowOptions);
@@ -36,6 +37,9 @@ class _WindowManagerDesktop extends NamidaWindowManager {
     } else {
       windowManager.addListener(_NamidaWindowListener());
     }
+
+    if (Platform.isMacOS) AppLifecycleListener(onExitRequested: Namida.onExitRequested);
+    if (NamidaWindowManager.usesNativeWindowButtons) settings.desktopTitlebar.addListener(_onDesktopTitlebarChanged);
 
     screenRetriever.addListener(
       _CustomScreenListener(
@@ -53,6 +57,9 @@ class _WindowManagerDesktop extends NamidaWindowManager {
 
   @override
   Future<void> ensurePositionRestored({required bool restoreBounds}) async {
+    // -- screenshots render offscreen, the window never shows
+    if (kScreenshotsMode && !ScreenshotsDriver.inst.isInteractive) return;
+
     if (NamidaWindowManager.isMiniLyricsMode.value) {
       await windowManager.show();
       await windowManager.focus();
@@ -144,9 +151,18 @@ class _WindowManagerDesktop extends NamidaWindowManager {
     }
     await windowManager.setTitleBarStyle(
       usingCustomWindowTitleBar ? TitleBarStyle.hidden : TitleBarStyle.normal,
-      windowButtonVisibility: !usingCustomWindowTitleBar,
+      windowButtonVisibility: _isWindowButtonVisible(),
     );
     await ensurePositionRestored(restoreBounds: true);
+  }
+
+  /// the traffic lights sit in the title bar, they hide with it.
+  bool _isWindowButtonVisible() => (NamidaWindowManager.usesNativeWindowButtons && settings.desktopTitlebar.value) || !usingCustomWindowTitleBar;
+
+  void _onDesktopTitlebarChanged() {
+    if (NamidaWindowManager.isMiniLyricsMode.value) return;
+    final windowButtonVisibility = _isWindowButtonVisible();
+    windowManager.setTitleBarStyle(TitleBarStyle.hidden, windowButtonVisibility: windowButtonVisibility);
   }
 
   Future<Rect> _resolveMiniLyricsBounds() async {

@@ -12,7 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:dartssh2/dartssh2.dart';
 // ignore: depend_on_referenced_packages
 import 'package:dio/dio.dart';
-import 'package:ftpconnect/ftpconnect.dart';
+import 'package:lrc/lrc.dart';
 import 'package:namico_db_wrapper/namico_db_wrapper.dart';
 import 'package:opensubsonic_api/opensubsonic_api.dart';
 import 'package:path/path.dart' as p;
@@ -46,12 +46,14 @@ import 'package:namida/core/constants.dart';
 import 'package:namida/core/enums.dart';
 import 'package:namida/core/extensions.dart';
 import 'package:namida/core/namida_converter_ext.dart';
+import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/translations/language.dart';
 import 'package:namida/core/utils.dart';
 import 'package:namida/ui/widgets/custom_widgets.dart';
 import 'package:namida/ui/widgets/settings/indexer_settings.dart';
 
 part 'file_transfer_server.dart';
+part 'ftp_client.dart';
 part 'ftp_server.dart';
 part 'jellyfin_api.dart';
 part 'jellyfin_server.dart';
@@ -83,6 +85,9 @@ abstract class MusicWebServer {
   Future<List<WebServerPlaylist>?> fetchPlaylists({required int? Function(String remoteId) knownChangedMS}) async => null;
   FutureOr<WebStreamUriDetails?> getStreamUrl(String id, {void Function(File cachedFile)? onFetchedIfLocal});
   Future<Uint8List?> getImage(String id);
+
+  /// for servers that can't give lyrics while indexing. '' when the track has none, null when unsupported or failed.
+  Future<String?> _fetchLyricsOnPlay(String id) async => null;
 
   Future<void> _reportPlayback(String id, _PlaybackReport report, int positionMS) async {}
   Duration? get _playbackProgressInterval => null;
@@ -130,6 +135,14 @@ abstract class MusicWebServer {
     );
   }
 
+  static Future<String?>? baseUrlToLyrics(String baseUrl) {
+    return _executeIfHasServer(
+      baseUrl,
+      (s, id) => s._fetchLyricsOnPlay(id),
+      (_, _) => null,
+    );
+  }
+
   static DirectoryIndexType? baseUrlToType(String baseUrl) {
     final baseUri = Uri.parse(baseUrl);
     return DirectoryIndexType.values.getEnum(baseUri.queryParameters['namida_t']);
@@ -153,6 +166,17 @@ abstract class MusicWebServer {
     }
     return fallback(server, dir);
   }
+}
+
+/// the id goes in `d` instead of the path, the yt id matcher would catch it there.
+String _serverTrackPath(Uri serverUriParsed, String id) {
+  final uri = serverUriParsed.replace(
+    queryParameters: {
+      ...serverUriParsed.queryParameters,
+      'd': id,
+    },
+  );
+  return uri.toString();
 }
 
 final _remotePathSeparatorRegex = RegExp(r'[/\\]');
@@ -330,6 +354,25 @@ class _ServerDiffManager {
 
     return false;
   }
+}
+
+// by claude
+class _ServerLyricsWriter {
+  final _buffer = StringBuffer();
+
+  _ServerLyricsWriter({required int? offsetMS}) {
+    if (offsetMS != null && offsetMS != 0) _buffer.writeln('[offset:$offsetMS]');
+  }
+
+  void writeLine(int? startMS, String text) {
+    if (startMS != null) {
+      final timestamp = LrcLine.formatTimestamp(Duration(milliseconds: startMS));
+      _buffer.write('[$timestamp]');
+    }
+    _buffer.writeln(text);
+  }
+
+  String toText() => _buffer.toString();
 }
 
 class MusicWebServerError {
@@ -654,9 +697,9 @@ class _MusicWebServerAuthManager {
           children: [
             Padding(
               padding: const EdgeInsets.only(bottom: 12.0, left: 6.0, right: 6.0),
-              child: Text(
+              child: NamidaText(
                 warningText,
-                style: theme.textTheme.displayMedium,
+                style: NText.medium,
               ),
             ),
             ...missingAuthDir

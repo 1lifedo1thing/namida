@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:isolate';
 import 'dart:math' as math;
-import 'dart:typed_data' show Uint32List;
+import 'dart:typed_data' show Int32List, Uint32List;
 
 import 'package:history_manager/history_manager.dart';
 import 'package:lrc/lrc.dart';
@@ -36,8 +36,12 @@ class TracksSearchWrapper {
     this.textCleanedMinorForSearch,
   );
 
-  static TracksSearchParams generateParams(SendPort sendPort, Iterable<TrackExtended> tracks, ListensSortedMap<Track> topTracksMapListens) {
-    final filters = settings.trackSearchFilter.value;
+  static TracksSearchParams generateParams(
+    SendPort sendPort,
+    Iterable<TrackExtended> tracks,
+    ListensSortedMap<Track> topTracksMapListens, {
+    required List<TrackSearchFilter> filters,
+  }) {
     final addDescription = filters.contains(TrackSearchFilter.description);
     final addLyrics = filters.contains(TrackSearchFilter.lyrics);
     final addMoods = filters.contains(TrackSearchFilter.moods);
@@ -112,18 +116,20 @@ class TracksSearchWrapper {
     if (tsf.isEmpty) stitle = true;
 
     // -- already matched as artists, keeping them would score the title higher than tracks by these artists
-    final removeFeatArtistsFromTitle = stitle && sartist && splitConfig.artistsConfig.addFeatArtist;
+    final removeArtistsFromTitle = stitle && sartist;
+    final removeFeatArtistsFromTitle = removeArtistsFromTitle && splitConfig.artistsConfig.addFeatArtist;
 
     final textCleanedForSearch = _functionOfCleanup(cleanup);
     final textCleanedMinorForSearch = cleanup ? _functionOfCleanup(false) : null;
 
-    _Property? splitThis(String? property, bool split, {bool tryCutBeforeBrackets = false}) {
+    _Property? splitThis(String? property, bool split, {bool tryCutBeforeBrackets = false, _Property? namesToRemove}) {
       if (!split || property == null) return null;
       return _splitTextCleanedAndCleanedMinor(
         property,
         textCleanedForSearch,
         textCleanedMinorForSearch,
         tryCutBeforeBrackets: tryCutBeforeBrackets,
+        namesToRemove: namesToRemove,
       );
     }
 
@@ -137,15 +143,32 @@ class TracksSearchWrapper {
       final year = trMap.year;
       final track = Track.decide(path, isVideo);
       final folderName = sfolder ? trMap.networkFolderName ?? track.folderName : null;
+      // -- lowercase only, a full cleanup is slower and over-matches long texts
+      final description = sdescription ? trMap.description?.toLowerCase() : null;
 
       final listensCount = trMap.listensCount;
       final listensMultiplier = _listensMultiplierOf(listensCount, maxListensLog);
+
+      final splitArtist = sartist
+          ? _mapListCleanedAndCleanedMinor(
+              Indexer.splitArtist(
+                title: title,
+                originalArtist: trMap.artist,
+                tagged: trMap.multiValues?.artists,
+                config: splitConfig.artistsConfig,
+              ),
+              textCleanedForSearch,
+              textCleanedMinorForSearch,
+            )
+          : null;
+      final titleForSearch = removeFeatArtistsFromTitle ? Indexer.removeFeatArtistsFromTitle(title) : title;
+      final titleNamesToRemove = removeArtistsFromTitle ? splitArtist : null;
 
       tracksExtended.add(
         _CustomTrackExtended(
           ogIndex: index,
           track: track,
-          splitTitle: splitThis(removeFeatArtistsFromTitle ? Indexer.removeFeatArtistsFromTitle(title) : title, stitle, tryCutBeforeBrackets: true),
+          splitTitle: splitThis(titleForSearch, stitle, tryCutBeforeBrackets: true, namesToRemove: titleNamesToRemove),
           splitFilename: splitThis(path.getFilename, sfilename),
           splitFolder: splitThis(folderName, sfolder),
           splitAlbum: salbum
@@ -160,18 +183,7 @@ class TracksSearchWrapper {
                 )
               : null,
           splitAlbumArtist: splitThis(trMap.albumArtist, salbumartist),
-          splitArtist: sartist
-              ? _mapListCleanedAndCleanedMinor(
-                  Indexer.splitArtist(
-                    title: title,
-                    originalArtist: trMap.artist,
-                    tagged: trMap.multiValues?.artists,
-                    config: splitConfig.artistsConfig,
-                  ),
-                  textCleanedForSearch,
-                  textCleanedMinorForSearch,
-                )
-              : null,
+          splitArtist: splitArtist,
           splitGenre: sgenre
               ? _mapListCleanedAndCleanedMinor(
                   Indexer.splitGenre(
@@ -206,7 +218,7 @@ class TracksSearchWrapper {
                 )
               : null,
           splitComment: splitThis(trMap.comment, scomment),
-          description: !sdescription ? null : _PropertySimple.orNull(trMap.description),
+          description: _PropertySimple.orNull(description),
           splitMoods: smoods
               ? _mapListCleanedAndCleanedMinorOrNull(
                   trMap.moods,
@@ -308,13 +320,14 @@ class TracksSearchWrapper {
           lyricsBuffer.writeln(line.readableText);
         }
       } else {
-        final split = LineSplitter().convert(lrcContent);
+        final split = const LineSplitter().convert(lrcContent);
         for (final line in split) {
           lyricsBuffer.writeln(line);
         }
       }
     }
-    return _PropertySimple.orNull(lyricsBuffer.toString());
+    final lyricsText = lyricsBuffer.toString().toLowerCase();
+    return _PropertySimple.orNull(lyricsText);
   }
 
   static _Property _splitTextCleanedAndCleanedMinor(
@@ -322,14 +335,27 @@ class TracksSearchWrapper {
     String Function(String) textCleanedForSearch,
     String Function(String)? textCleanedMinorForSearch, {
     bool tryCutBeforeBrackets = false,
+    _Property? namesToRemove,
   }) {
-    final joinedCleaned = textCleanedForSearch(text);
-    final joinedCleanedMinor = textCleanedMinorForSearch?.call(text);
+    final joinedCleanedFull = textCleanedForSearch(text);
+    final joinedCleanedMinorFull = textCleanedMinorForSearch?.call(text);
+
+    final namesCleaned = namesToRemove?.cleaned;
+    final namesCleanedMinor = namesToRemove?.cleanedMinor;
+    final isMinorSame = joinedCleanedMinorFull == joinedCleanedFull && identical(namesCleanedMinor, namesCleaned);
+    final joinedCleanedWithoutNames = namesCleaned == null ? null : _withoutNames(joinedCleanedFull, namesCleaned);
+    final joinedCleanedMinorWithoutNames = isMinorSame
+        ? joinedCleanedWithoutNames
+        : joinedCleanedMinorFull == null || namesCleanedMinor == null
+        ? null
+        : _withoutNames(joinedCleanedMinorFull, namesCleanedMinor);
+    final joinedCleaned = joinedCleanedWithoutNames ?? joinedCleanedFull;
+    final joinedCleanedMinor = joinedCleanedMinorWithoutNames ?? joinedCleanedMinorFull;
 
     final cleaned = _MatchText.splitJoined(joinedCleaned);
     final cleanedMinor = joinedCleanedMinor == null
         ? null
-        : joinedCleanedMinor == joinedCleaned
+        : isMinorSame || joinedCleanedMinor == joinedCleaned
         ? cleaned // -- cleanup changed nothing, share the same instance
         : _MatchText.splitJoined(joinedCleanedMinor);
 
@@ -338,8 +364,13 @@ class TracksSearchWrapper {
     if (tryCutBeforeBrackets) {
       final cutAtIndex = _indexOfFirstBracketPart(text);
       if (cutAtIndex != null) {
-        joinedCutCleaned = cleaned.parts.take(cutAtIndex).join(' ');
-        joinedCutCleanedMinor = cleanedMinor?.parts.take(cutAtIndex).join(' ');
+        // -- the index counts parts of the full text, so names are removed after cutting
+        joinedCutCleaned = joinedCleanedWithoutNames == null ? cleaned.parts.take(cutAtIndex).join(' ') : _cutWithoutNames(joinedCleanedFull, cutAtIndex, namesCleaned!);
+        joinedCutCleanedMinor = isMinorSame
+            ? joinedCutCleaned
+            : joinedCleanedMinorWithoutNames == null
+            ? cleanedMinor?.parts.take(cutAtIndex).join(' ')
+            : _cutWithoutNames(joinedCleanedMinorFull!, cutAtIndex, namesCleanedMinor!);
       }
     }
 
@@ -361,6 +392,63 @@ class TracksSearchWrapper {
       charOffset += item.length;
     }
     return null;
+  }
+
+  static String _cutWithoutNames(String joinedFull, int partsCount, _MatchText names) {
+    final cut = joinedFull.split(' ').where((e) => e.isNotEmpty).take(partsCount).join(' ');
+    return _withoutNames(cut, names) ?? cut;
+  }
+
+  /// [text] without any of [names] standing as whole words, null when none was found.
+  /// a name is kept when removing it would leave nothing (ex: a self-titled track).
+  static String? _withoutNames(String text, _MatchText names) {
+    final items = names.items;
+    if (items == null) return _withoutName(text, names.text);
+    String? result;
+    for (final name in items) {
+      final current = result ?? text;
+      final withoutName = _withoutName(current, name);
+      if (withoutName != null) result = withoutName;
+    }
+    return result;
+  }
+
+  static String? _withoutName(String text, String name) {
+    if (name.isEmpty) return null;
+    int index = text.indexOf(name);
+    if (index == -1) return null;
+    String? result;
+    while (index != -1) {
+      final current = result ?? text;
+      final end = index + name.length;
+      if (_isWordEdge(current, index - 1) && _isWordEdge(current, end)) {
+        final removed = _removeRangeWithAdjacentSpace(current, index, end);
+        if (!_hasWordChar(removed)) break;
+        result = removed;
+        index = removed.indexOf(name);
+      } else {
+        index = current.indexOf(name, index + 1);
+      }
+    }
+    return result?.trim();
+  }
+
+  static String _removeRangeWithAdjacentSpace(String text, int start, int end) {
+    if (end < text.length && text.codeUnitAt(end) == 0x20) return text.replaceRange(start, end + 1, '');
+    if (start > 0 && text.codeUnitAt(start - 1) == 0x20) return text.replaceRange(start - 1, end, '');
+    return text.replaceRange(start, end, '');
+  }
+
+  static bool _isWordEdge(String text, int index) => index < 0 || index >= text.length || !_isWordChar(text.codeUnitAt(index));
+
+  /// ascii letters & digits, anything non-ascii counts as a letter.
+  static bool _isWordChar(int c) => (c >= 0x30 && c <= 0x39) || (c >= 0x61 && c <= 0x7A) || (c >= 0x41 && c <= 0x5A) || c >= 0x80;
+
+  static bool _hasWordChar(String text) {
+    for (int i = 0; i < text.length; i++) {
+      if (_isWordChar(text.codeUnitAt(i))) return true;
+    }
+    return false;
   }
 
   static _Property? _mapListCleanedAndCleanedMinorOrNull(
@@ -433,6 +521,20 @@ class TracksSearchWrapper {
     void onMatch(_CustomTrackExtended trExt) => result.add(trExt.ogIndex);
     _filter(text, onMatch, onMatch);
     return result;
+  }
+
+  /// rank of each track by its index, 1 is the best match and 0 is no match.
+  /// less relevant tracks rank after all relevant ones, like [filterSplitByRelevance].
+  ({Int32List ranks, int matchesCount}) filterRanks(String text) {
+    final ranks = Int32List(_tracksExtended.length);
+    final lessRelevant = <_CustomTrackExtended>[];
+    int matchesCount = 0;
+    void onRelevantMatch(_CustomTrackExtended trExt) => ranks[trExt.ogIndex] = ++matchesCount;
+    _filter(text, onRelevantMatch, lessRelevant.add);
+    for (final trExt in lessRelevant) {
+      ranks[trExt.ogIndex] = ++matchesCount;
+    }
+    return (ranks: ranks, matchesCount: matchesCount);
   }
 
   void _filter(
@@ -639,7 +741,7 @@ class _ScoreCalculator {
     }
   }
 
-  void scoreProperty(_Property? property, {int multiplier = 1, bool allowFuzzy = false, bool preferPrefix = false}) {
+  void scoreProperty(_Property? property, {int multiplier = 1, int? exactMultiplier, bool allowFuzzy = false, bool preferPrefix = false}) {
     if (property == null) return;
 
     final cleaned = property.cleaned;
@@ -653,11 +755,12 @@ class _ScoreCalculator {
 
     // -- exact match, or of any single value in multi-value properties
     // -- ex: `"still here"` == `"still here"`, `"lil texas"` in `["dimitri k", "lil texas"]`
+    final exactMatchMultiplier = exactMultiplier ?? multiplier;
     if (cleaned.matchesExactly(query.text)) {
-      score += 400 * multiplier;
+      score += 400 * exactMatchMultiplier;
       return;
     } else if (cleanedMinor != null && queryMinorText != null && cleanedMinor.matchesExactly(queryMinorText)) {
-      score += 400 * multiplier;
+      score += 400 * exactMatchMultiplier;
       return;
     }
 
@@ -703,7 +806,7 @@ class _ScoreCalculator {
 
     // -- no early exit on a high score, it would rank below weaker matches that kept adding up (ex: filename repeating the title)
     scoreProperty(trExt.splitTitle, multiplier: 6, allowFuzzy: true);
-    scoreProperty(trExt.splitArtist, multiplier: 2, allowFuzzy: true);
+    scoreProperty(trExt.splitArtist, multiplier: 2, exactMultiplier: 6, allowFuzzy: true);
     scoreProperty(trExt.splitAlbum, multiplier: 2, allowFuzzy: true);
     scoreProperty(trExt.splitFilename, multiplier: 1, allowFuzzy: true);
     // -- prevent scoring more if already found in main properties

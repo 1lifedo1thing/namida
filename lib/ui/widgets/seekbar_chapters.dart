@@ -5,6 +5,7 @@ import 'package:namida/class/media_chapter.dart';
 import 'package:namida/controller/chapters_controller.dart';
 import 'package:namida/controller/player_controller.dart';
 import 'package:namida/core/extensions.dart';
+import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/utils.dart';
 
 /// cuts a thin gap into [child] where each chapter of the current item starts.
@@ -50,17 +51,14 @@ class _ChapterGapsClipper extends CustomClipper<Path> {
     final path = Path();
     final width = size.width;
     final height = size.height;
+    final startsMS = ChaptersController.seekbarStartsMS(chapters, durationMS, width);
     double previousEnd = 0.0;
-    for (final chapter in chapters) {
-      final startMS = chapter.startMS;
-      if (startMS <= 0) continue;
-      final x = startMS / durationMS * width;
-      if (x >= width) break;
-      final gapStart = x - _kGapWidth / 2;
-      if (gapStart > previousEnd) path.addRect(Rect.fromLTRB(previousEnd, 0.0, gapStart, height));
+    for (final startMS in startsMS) {
+      final gapStart = startMS / durationMS * width - _kGapWidth / 2;
+      path.addRect(Rect.fromLTRB(previousEnd, 0.0, gapStart, height));
       previousEnd = gapStart + _kGapWidth;
     }
-    if (previousEnd < width) path.addRect(Rect.fromLTRB(previousEnd, 0.0, width, height));
+    path.addRect(Rect.fromLTRB(previousEnd, 0.0, width, height));
     return path;
   }
 
@@ -78,15 +76,15 @@ class ChapterProgressBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = context.theme.colorScheme;
+    final colors = NColorsData.of(context);
     return RepaintBoundary(
       child: CustomPaint(
         size: Size.infinite,
         painter: _ChapterProgressPainter(
           startMS: rangeMS.$1,
           endMS: rangeMS.$2,
-          trackColor: colorScheme.onSecondaryContainer.withOpacityExt(0.15),
-          fillColor: colorScheme.primary,
+          trackColor: colors.onSecondaryContainer.withOpacityExt(0.15),
+          fillColor: colors.primary,
         ),
       ),
     );

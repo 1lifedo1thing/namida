@@ -43,18 +43,20 @@ flatpak build-bundle linux/packaging/flatpak/repo Namida-x86_64.flatpak app.nami
 
 A Flatpak cannot depend on host packages: inside the sandbox only the runtime
 (`org.freedesktop.Platform`) and what the manifest installs exist, so "use the
-system ffmpeg" never resolves there, and the runtime ships neither libmpv nor
-the ffmpeg CLI. The custom ffmpeg/ffprobe binaries from `external/ffmpeg_build`
-are built against a newer glibc than the runtime, so the manifest compiles
-ffmpeg (LGPL config) and links `/app/namida/bin/ffmpeg{,probe}` to it.
+system ffmpeg" never resolves there, and the runtime doesn't ship libmpv. The
+manifest compiles ffmpeg (LGPL config, libraries only) and mpv for that.
+The app's own ffmpeg is `lib/libffmpegkit.so` from the tarball, which runs in
+process and needs nothing from the runtime besides glibc and libstdc++.
 
 ## Flathub
 
-Submission prepared in a clone of the flathub fork (`C:\Programming\flathub`, branch
-`add-app.namida.Namida` off `new-pr`). Steps:
+Submission prepared in a clone of the flathub fork (`C:\Programming\flathub`, `/mnt/System/Programming/flathub`
+on linux, branch `add-app.namida.Namida` off `new-pr`). Steps:
 
 1. Release, then fill `url` + `sha256` in that clone's `namida-source.json`
    (`sha256sum Namida-x86_64-<ver>-flatpak-payload.tar.gz`), and copy `app.namida.Namida.yml` from here.
+   Flathub takes the metainfo (screenshots included) from that payload, so the release must come after the
+   metainfo change, and the namida-assets push before it (Flathub mirrors the screenshot urls at build time).
 2. Push the branch to the fork, open a PR against `flathub/flathub:new-pr` titled `Add app.namida.Namida`,
    with the text below. Answer the review, then comment `bot, build`.
 3. After the merge, accept the invite to `flathub/app.namida.Namida` (2FA required, within a week).

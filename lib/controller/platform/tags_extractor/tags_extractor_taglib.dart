@@ -160,7 +160,7 @@ class _TagsExtractorTagLib extends TagsExtractor {
     bool overrideArtwork = false,
     required bool isNetwork,
   }) {
-    final threadsCount = Platform.numberOfProcessors;
+    const threadsCount = 32; // -- readers mostly wait on disk, ssds and sdcards serve more requests in parallel than there are cores
     // final pathKeysCount = threadsCount.withMaximum(paths.length);
     // final pathKeys = List.generate(pathKeysCount, (_) => keyWrapper.next(), growable: false); // -- one shown path per reading thread
     final controller = StreamController<FAudioModel>();
@@ -194,7 +194,7 @@ class _TagsExtractorTagLib extends TagsExtractor {
       remaining--;
       if (remaining == 0) {
         // for (final pathKey in pathKeys) {
-          // currentPathsBeingExtracted.remove(pathKey);
+        // currentPathsBeingExtracted.remove(pathKey);
         // }
         controller.close();
       }

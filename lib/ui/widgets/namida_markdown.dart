@@ -13,6 +13,7 @@ import 'package:markdown/src/util.dart' show decodeHtmlCharacters;
 import 'package:namida/core/constants.dart';
 import 'package:namida/core/extensions.dart';
 import 'package:namida/core/icon_fonts/broken_icons.dart';
+import 'package:namida/core/ntheme.dart';
 import 'package:namida/ui/widgets/custom_widgets.dart';
 
 const _kHtmlTag = '__html';
@@ -119,6 +120,7 @@ class NamidaMarkdownDocument {
     _InlineHtmlSyntax(),
     _CommitPrefixSyntax(),
     _GithubUrlSyntax(),
+    _CommitLinkSyntax(),
     _IssueRefSyntax(),
     md.StrikethroughSyntax(),
     md.EmojiSyntax(),
@@ -218,6 +220,18 @@ class _GithubUrlSyntax extends _BoundedSyntax {
         ? _BoundedSyntax.ref(repoPrefix.isEmpty ? commit.substring(0, 7) : '$repoPrefix@${commit.substring(0, 7)}', match[0]!, _kCommitClass)
         : _BoundedSyntax.ref('$repoPrefix#${match[3]}', match[0]!, _kRefClass);
     parser.addNode(node);
+    return true;
+  }
+}
+
+/// `[abc1234](https://github.com/owner/repo/commit/abc1234)`, displayed as `abc1234` for any repo.
+class _CommitLinkSyntax extends md.InlineSyntax {
+  _CommitLinkSyntax() : super(r'\[([0-9a-f]{7,40})\]\((https://github\.com/[\w.-]+/[\w.-]+/commit/[0-9a-f]{7,40})\)', startCharacter: 0x5B); // [
+
+  @override
+  bool onMatch(md.InlineParser parser, Match match) {
+    final shortHash = match[1]!.substring(0, 7);
+    parser.addNode(_BoundedSyntax.ref(shortHash, match[2]!, _kCommitClass));
     return true;
   }
 }
@@ -624,9 +638,9 @@ class _MdBlocksBuilder {
       var children = items[i].children ?? const <md.Node>[];
       bool? checked;
       (children, checked) = _extractCheckbox(children);
-      final itemCommit = commit || _startsWithCommit(children);
       final splitIndex = children.indexWhere((c) => c is md.Element && (c.tag == 'ul' || c.tag == 'ol'));
       final head = splitIndex == -1 ? children : children.sublist(0, splitIndex);
+      final itemCommit = commit || _isCommitRow(head);
 
       final _MdMarkerType marker;
       if (checked != null) {
@@ -680,11 +694,14 @@ class _MdBlocksBuilder {
     return ([paragraph, ...children.skip(1)], checked);
   }
 
-  static bool _startsWithCommit(List<md.Node> children) {
-    var first = children.firstOrNull;
-    if (first is md.Element && first.tag == 'p') first = first.children?.firstOrNull;
-    return first is md.Element && first.tag == 'a' && first.attributes['class'] == _kCommitClass;
+  static bool _isCommitRow(List<md.Node> head) {
+    var inlines = head;
+    final first = head.firstOrNull;
+    if (first is md.Element && first.tag == 'p') inlines = first.children ?? const <md.Node>[];
+    return _isCommitRef(inlines.firstOrNull) || _isCommitRef(inlines.lastOrNull);
   }
+
+  static bool _isCommitRef(md.Node? node) => node is md.Element && node.tag == 'a' && node.attributes['class'] == _kCommitClass;
 
   static TextAlign? _alignOf(md.Element element) {
     final attrs = element.attributes;
@@ -849,7 +866,7 @@ class _MdRenderer {
     return Center(
       child: NamidaInkWell(
         onTap: link == null ? null : () => NamidaLinkUtils.openLink(link),
-        bgColor: theme.cardTheme.color?.withOpacityExt(0.8),
+        bgColor: NColors.fixed(theme.cardTheme.color?.withOpacityExt(0.8)),
         borderRadius: 18.0,
         decoration: BoxDecoration(
           border: Border.all(
@@ -1308,7 +1325,7 @@ class _MdDetailsState extends State<_MdDetails> with SingleTickerProviderStateMi
       children: [
         NamidaInkWell(
           onTap: _toggle,
-          bgColor: renderer.surfaceColor,
+          bgColor: NColors.fixed(renderer.surfaceColor),
           borderRadius: 10.0,
           padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 8.0),
           child: Row(

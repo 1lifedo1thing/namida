@@ -12,9 +12,7 @@ import 'package:namida/controller/search_sort_controller.dart';
 import 'package:namida/controller/settings_controller.dart';
 import 'package:namida/core/dimensions.dart';
 import 'package:namida/core/enums.dart';
-import 'package:namida/core/extensions.dart';
 import 'package:namida/core/functions.dart';
-import 'package:namida/core/icon_fonts/broken_icons.dart';
 import 'package:namida/core/namida_converter_ext.dart';
 import 'package:namida/core/translations/language.dart';
 import 'package:namida/core/utils.dart';
@@ -73,86 +71,73 @@ class GenresPage extends StatelessWidget with NamidaRouteWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = context.textTheme;
     const libraryTab = LibraryTab.genres;
     final scrollController = libraryTab.scrollController;
     final countPerRowResolved = countPerRow.resolve(context);
-    final genreTypeColor = context.theme.colorScheme.onSecondaryContainer.withOpacityExt(0.8);
 
     const listHeader = ExpandableBoxEmptyAnimatedPadding(tab: libraryTab);
 
     return BackgroundWrapper(
-      child: NamidaScrollbar(
-        controller: scrollController,
-        thumbLabel: _createThumbLabel,
-        child: AnimationLimiter(
-          child: Obx(
-            (context) {
-              final genreType = settings.activeGenreType.valueR;
-              final sorting = settings.groupSortingOfR(genreType);
-              final sort = sorting.entries.first.type;
-              final sortReverse = sorting.reverse;
+      child: AnimationLimiter(
+        child: Obx(
+          (context) {
+            final genreType = settings.activeGenreType.valueR;
+            final sorting = settings.groupSortingOfR(genreType);
+            final sort = sorting.entries.first.type;
+            final sortReverse = sorting.reverse;
 
-              final sortTextIsUseless = sort == GroupSortType.genresList || sort == GroupSortType.numberOfTracks || sort == GroupSortType.duration;
-              final extraTextResolver = sortTextIsUseless ? null : SearchSortController.inst.getGenresExtraTextResolver(genreType, sort);
+            final sortTextIsUseless = sort == GroupSortType.genresList || sort == GroupSortType.numberOfTracks || sort == GroupSortType.duration;
+            final extraTextResolver = sortTextIsUseless ? null : SearchSortController.inst.getGenresExtraTextResolver(genreType, sort);
 
-              final String Function({required int count}) countToText = switch (genreType) {
-                MediaType.style => lang.countStyles,
-                _ => lang.countGenres,
-              };
-              final finalGenresLength = SearchSortController.inst.genreSearchList.valueR.length;
-              final totalGenresLength = Indexer.inst.getGenreMapFor(genreType).valueR.length;
-              String leftText = finalGenresLength != totalGenresLength ? '$finalGenresLength/${countToText(count: totalGenresLength)}' : countToText(count: finalGenresLength);
+            final String Function({required int count}) countToText = switch (genreType) {
+              MediaType.style => lang.countStyles,
+              _ => lang.countGenres,
+            };
+            final finalGenresLength = SearchSortController.inst.genreSearchList.valueR.length;
+            final totalGenresLength = Indexer.inst.getGenreMapFor(genreType).valueR.length;
+            String leftText = finalGenresLength != totalGenresLength ? '$finalGenresLength/${countToText(count: totalGenresLength)}' : countToText(count: finalGenresLength);
 
-              return ExpandableBoxColumn(
-                tab: libraryTab,
-                header: ExpandableBox(
-                  enableHero: enableHero,
-                  gridWidget: const ChangeGridCountWidget(
-                    tab: libraryTab,
-                  ),
-                  isBarVisible: libraryTab.isBarVisible.valueR,
-                  leftText: '',
-                  leftWidgets: [
-                    NamidaPopupWrapper(
-                      childrenDefault: _getTypeChooserChildren,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Broken.arrange_circle,
-                            size: 14.0,
-                            color: genreTypeColor,
-                          ),
-                          const SizedBox(width: 4.0),
-                          Text(
-                            leftText,
-                            style: textTheme.displayMedium?.copyWith(
-                              color: genreTypeColor,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                  onSearchBoxVisibilityChange: (newShow) => ScrollSearchController.inst.onSearchBoxVisibiltyChange(libraryTab, newShow),
-                  onCloseButtonPressed: () => ScrollSearchController.inst.clearSearchTextField(libraryTab),
-                  sortByMenuWidget: SortByMenu(
-                    title: sort.toText(),
-                    popupMenuChild: const SortByMenuGenres(),
-                    isCurrentlyReversed: sortReverse,
-                    onReverseIconTap: () => SearchSortController.inst.sortMedia(settings.activeGenreType.value, reverse: !sortReverse),
-                  ),
-                  textField: CustomTextField(
-                    textFieldController: libraryTab.textSearchControllerR,
-                    textFieldHintText: lang.filterGenres,
-                    onTextFieldValueChanged: (value) => SearchSortController.inst.searchMedia(value, settings.activeGenreType.value),
-                  ),
+            return ExpandableBoxColumn(
+              tab: libraryTab,
+              header: ExpandableBox(
+                enableHero: enableHero,
+                gridWidget: const ChangeGridCountWidget(
+                  tab: libraryTab,
                 ),
-                page: SmoothCustomScrollView(
+                isBarVisible: libraryTab.isBarVisible.valueR,
+                leftText: '',
+                leftWidgets: [
+                  NamidaPopupWrapper(
+                    childrenDefault: _getTypeChooserChildren,
+                    childBuilder: (openMenu) => ExpandableBoxChip(
+                      icon: genreType.toIcon(),
+                      label: leftText,
+                      showArrow: true,
+                      onTap: openMenu,
+                    ),
+                  ),
+                ],
+                onSearchBoxVisibilityChange: (newShow) => ScrollSearchController.inst.onSearchBoxVisibiltyChange(libraryTab, newShow),
+                onCloseButtonPressed: () => ScrollSearchController.inst.clearSearchTextField(libraryTab),
+                sortByMenuWidget: SortByMenu(
+                  title: sort.toText(),
+                  popupMenuChild: const SortByMenuGenres(),
+                  isCurrentlyReversed: sortReverse,
+                  onReverseIconTap: () => SearchSortController.inst.sortMedia(settings.activeGenreType.value, reverse: !sortReverse),
+                ),
+                textField: CustomTextField(
+                  textFieldController: libraryTab.textSearchControllerR,
+                  textFieldHintText: lang.filterGenres,
+                  onTextFieldValueChanged: (value) => SearchSortController.inst.searchMedia(value, settings.activeGenreType.value),
+                ),
+              ),
+              page: NamidaScrollbar(
+                controller: scrollController,
+                thumbLabel: _createThumbLabel,
+                child: SmoothCustomScrollView(
                   controller: scrollController,
                   slivers: [
-                    SliverToBoxAdapter(child: listHeader),
+                    const SliverToBoxAdapter(child: listHeader),
                     ObxPrefer(
                       enabled: sort.requiresHistory,
                       rx: HistoryController.inst.topTracksMapListens,
@@ -197,9 +182,9 @@ class GenresPage extends StatelessWidget with NamidaRouteWidget {
                     kBottomPaddingWidgetSliver,
                   ],
                 ),
-              );
-            },
-          ),
+              ),
+            );
+          },
         ),
       ),
     );

@@ -8,12 +8,15 @@ import 'package:namida/base/setting_subpage_provider.dart';
 import 'package:namida/controller/current_color.dart';
 import 'package:namida/controller/file_browser.dart';
 import 'package:namida/controller/indexer_controller.dart';
+import 'package:namida/controller/logs_controller.dart';
 import 'package:namida/controller/lyrics_controller.dart';
 import 'package:namida/controller/miniplayer_controller.dart';
 import 'package:namida/controller/navigator_controller.dart';
+import 'package:namida/controller/now_playing_broadcaster.dart';
 import 'package:namida/controller/platform/namida_channel/namida_channel.dart';
 import 'package:namida/controller/player_controller.dart';
 import 'package:namida/controller/romanizer/romanizer.dart';
+import 'package:namida/controller/romanizer/romanizer_engine.dart';
 import 'package:namida/controller/scroll_search_controller.dart';
 import 'package:namida/controller/search_sort_controller.dart';
 import 'package:namida/controller/settings_controller.dart';
@@ -21,8 +24,10 @@ import 'package:namida/core/constants.dart';
 import 'package:namida/core/dimensions.dart';
 import 'package:namida/core/enums.dart';
 import 'package:namida/core/extensions.dart';
+import 'package:namida/core/functions.dart';
 import 'package:namida/core/icon_fonts/broken_icons.dart';
 import 'package:namida/core/namida_converter_ext.dart';
+import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/translations/language.dart';
 import 'package:namida/core/utils.dart';
 import 'package:namida/main.dart';
@@ -30,8 +35,10 @@ import 'package:namida/ui/dialogs/edit_tags_dialog.dart';
 import 'package:namida/ui/widgets/custom_widgets.dart';
 import 'package:namida/ui/widgets/jellyfish.dart';
 import 'package:namida/ui/widgets/lyrics_karaoke_text.dart';
+import 'package:namida/ui/widgets/reorderable_active_items_list.dart';
 import 'package:namida/ui/widgets/settings/effects_tiles.dart';
 import 'package:namida/ui/widgets/settings_card.dart';
+import 'package:namida/youtube/widgets/yt_thumbnail.dart';
 
 part 'extra_settings.lyrics_effects.dart';
 
@@ -55,13 +62,40 @@ class ExtrasSettings extends SettingSubpageProvider {
 
   static final _sections = <List<SettingEntry>>[
     [
-      SettingCustom(
-        title: () => lang.useCollapsedSettingTiles,
-        keys: [settings.useSettingCollapsedTiles],
-        tile: (args) => CollapsedSettingTileWidget(
-          bgColor: args.bgColor,
+      SettingExpansion(
+        icon: Broken.link_21,
+        title: () => lang.integrations,
+        aliases: () => ['Webhook', 'Tasker', 'Subsonic', 'Jellyfin', 'Android Auto', 'Wear OS', 'Status bar lyrics'],
+        initiallyExpandedWhen: () => true,
+        trailingBuilder: (arrow) => _IntegrationsTrailing(
+          arrow: arrow,
         ),
+        children: [
+          SettingToggleGroup(
+            settings.discordPresence,
+            icon: Broken.game,
+            title: () => lang.discordRichPresence,
+            onChanged: (isEnabled) => _DiscordAccountTile.onPresenceToggled(isEnabled),
+            children: [
+              SettingCustom(
+                title: () => lang.signOut,
+                tile: (args) => _DiscordAccountTile(
+                  bgColor: args.bgColor,
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
+    ],
+    [
+      // SettingCustom(
+      //   title: () => lang.useCollapsedSettingTiles,
+      //   keys: [settings.useSettingCollapsedTiles],
+      //   tile: (args) => CollapsedSettingTileWidget(
+      //     bgColor: args.bgColor,
+      //   ),
+      // ),
       SettingToggle(
         settings.enableBottomNavBar,
         icon: Broken.direct,
@@ -99,7 +133,8 @@ class ExtrasSettings extends SettingSubpageProvider {
     [
       SettingCustom(
         title: () => lang.filterTracksBy,
-        keys: [settings.trackSearchFilter],
+        keys: [settings.trackSearchFilterDefault, settings.trackSearchFilterPresets],
+        onReset: SearchSortController.inst.onTrackSearchFilterChanged,
         tile: (args) => _FilterTracksByTile(
           bgColor: args.bgColor,
         ),
@@ -121,7 +156,7 @@ class ExtrasSettings extends SettingSubpageProvider {
       SettingCustom(
         title: () => lang.romanization,
         aliases: () => [lang.dictionary],
-        keys: [settings.romanizeLyrics, settings.romanizeSorting],
+        keys: [settings.romanizeLyrics, settings.romanizeSorting, settings.romanizationDisabledScripts],
         tile: (args) => _RomanizationTile(
           bgColor: args.bgColor,
         ),
@@ -223,7 +258,7 @@ class ExtrasSettings extends SettingSubpageProvider {
     [
       SettingToggle(
         settings.hideStatusBarInExpandedMiniplayer,
-        availability: NamidaFeaturesAvailablity.android,
+        availability: const NamidaFeaturesAvailablityGroup(items: [NamidaFeaturesAvailablity.android, NamidaFeaturesAvailablity.ios]),
         icon: Broken.external_drive,
         title: () => lang.immersiveMode,
         subtitle: () => lang.immersiveModeSubtitle,
@@ -252,7 +287,7 @@ class ExtrasSettings extends SettingSubpageProvider {
         subtitle: () => lang.enableClipboardMonitoringSubtitle,
       ),
       SettingCustom(
-        availability: NamidaFeaturesAvailablity.android,
+        availability: NamidaFeaturesAvailablityGroup.mobile,
         title: () => lang.vibrationType,
         aliases: () => [lang.vibration, lang.hapticFeedback],
         keys: [settings.vibrationType],
@@ -302,8 +337,8 @@ class ExtrasSettings extends SettingSubpageProvider {
       icon: Broken.command_square,
       trailing: NamidaIconButton(
         icon: Broken.flag,
-        tooltip: () => lang.refreshLibrary,
-        iconColor: context.defaultIconColor(),
+        tooltip: () => lang.configure,
+        iconColor: NColors.defaultIcon(),
         onPressed: _showExtrasFlagsDialog,
       ),
       child: SettingSectionsColumn(
@@ -370,7 +405,7 @@ class _LoadingIndicatorState extends State<LoadingIndicator> with SingleTickerPr
           width: widget.width,
           height: widget.height,
           decoration: BoxDecoration(
-            color: widget.circleColor ?? context.textTheme.displayMedium?.color,
+            color: widget.circleColor ?? NText.medium.of(context).color,
             borderRadius: BorderRadius.circular(30.0),
           ),
         ),
@@ -383,8 +418,8 @@ class _ExtrasFlagsOptions extends StatelessWidget {
   const _ExtrasFlagsOptions();
 
   static Iterable<Widget> _getTitlebarIconsTypeChildren() {
-    final buttonWidth = 18.0;
-    final buttonHeight = 18.0;
+    const buttonWidth = 18.0;
+    const buttonHeight = 18.0;
     return DesktopTitlebarIconsType.values.map(
       (e) {
         void onTap() {
@@ -435,12 +470,23 @@ class _ExtrasFlagsOptions extends StatelessWidget {
             margin: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 2.0),
             padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 6.0),
             borderRadius: 6.0,
-            bgColor: value == e ? context.theme.cardColor : null,
+            bgColor: value == e ? NColors.card : null,
             onTap: onTap,
             child: row,
           ),
         );
       },
+    );
+  }
+
+  static Iterable<NamidaPopupItem> _getExternalFileOpenActionChildren() {
+    return OnExternalFileOpenAction.values.map(
+      (e) => NamidaPopupItem(
+        icon: e.toIcon(),
+        title: e.toText(),
+        selected: e == settings.onExternalFileOpen.value,
+        onTap: () => settings.onExternalFileOpen.save(e),
+      ),
     );
   }
 
@@ -572,6 +618,20 @@ class _ExtrasFlagsOptions extends StatelessWidget {
                 ),
               ),
               ObxO(
+                rx: settings.easyScrollbarGrab,
+                builder: (context, easyScrollbarGrab) => CustomSwitchListTile(
+                  leading: const StackedIcon(
+                    baseIcon: Broken.row_vertical,
+                    secondaryIcon: Broken.flash,
+                    secondaryIconSize: 12.0,
+                  ),
+                  value: easyScrollbarGrab ?? false,
+                  onChanged: (isTrue) => settings.easyScrollbarGrab.save(!isTrue),
+                  title: 'easy_scrollbar_grab'.toUpperCase(),
+                  subtitle: 'drag the scrollbar thumb instantly and from a wider area',
+                ),
+              ),
+              ObxO(
                 rx: settings.tapToScroll,
                 builder: (context, tapToScroll) => CustomSwitchListTile(
                   leading: const StackedIcon(
@@ -596,23 +656,24 @@ class _ExtrasFlagsOptions extends StatelessWidget {
                     title: 'show_desktop_title_bar'.toUpperCase(),
                   ),
                 ),
-                if (!Platform.isWindows)
+                if (Platform.isLinux)
                   NamidaPopupWrapper(
                     children: _getTitlebarIconsTypeChildren,
-                    child: CustomListTile(
+                    childBuilder: (openMenu) => CustomListTile(
                       icon: Broken.close_circle,
                       title: 'desktop_title_bar_icons_type'.toUpperCase(),
                       trailing: NamidaPopupWrapper(
                         children: _getTitlebarIconsTypeChildren,
                         child: ObxO(
                           rx: settings.desktopTitlebarType,
-                          builder: (context, type) => Text(
+                          builder: (context, type) => NamidaText(
                             type.name,
-                            style: context.textTheme.displayMedium,
+                            style: NText.medium,
                             textAlign: TextAlign.end,
                           ),
                         ),
                       ),
+                      onTap: openMenu,
                     ),
                   ),
               ],
@@ -656,20 +717,21 @@ class _ExtrasFlagsOptions extends StatelessWidget {
               ),
               NamidaPopupWrapper(
                 childrenDefault: _getSearchTypeChildren,
-                child: CustomListTile(
+                childBuilder: (openMenu) => CustomListTile(
                   icon: Broken.search_favorite,
                   title: 'preferred_search_tab'.toUpperCase(),
                   trailing: NamidaPopupWrapper(
                     childrenDefault: _getSearchTypeChildren,
                     child: ObxO(
                       rx: settings.preferredSearchType,
-                      builder: (context, type) => Text(
+                      builder: (context, type) => NamidaText(
                         type.name,
-                        style: context.textTheme.displayMedium,
+                        style: NText.medium,
                         textAlign: TextAlign.end,
                       ),
                     ),
                   ),
+                  onTap: openMenu,
                 ),
               ),
               ObxO(
@@ -700,6 +762,25 @@ class _ExtrasFlagsOptions extends StatelessWidget {
                   onChanged: (isTrue) => settings.askBeforeReplacingQueue.save(!isTrue),
                   title: 'ask_before_replacing_queue'.toUpperCase(),
                   subtitle: 'when playing something else while manually queued items are still pending',
+                ),
+              ),
+              NamidaPopupWrapper(
+                childrenDefault: _getExternalFileOpenActionChildren,
+                childBuilder: (openMenu) => CustomListTile(
+                  icon: Broken.document_forward,
+                  title: 'on_external_media_file_open'.toUpperCase(),
+                  trailing: NamidaPopupWrapper(
+                    childrenDefault: _getExternalFileOpenActionChildren,
+                    child: ObxO(
+                      rx: settings.onExternalFileOpen,
+                      builder: (context, action) => NamidaText(
+                        action.toText(),
+                        style: NText.medium,
+                        textAlign: TextAlign.end,
+                      ),
+                    ),
+                  ),
+                  onTap: openMenu,
                 ),
               ),
               ObxO(
@@ -791,7 +872,6 @@ class _SubpageInfoStyleRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = context.textTheme;
     return ObxO(
       rx: settings.subpageInfoStyles,
       builder: (context, styles) {
@@ -806,14 +886,14 @@ class _SubpageInfoStyleRow extends StatelessWidget {
                 child: Row(
                   children: [
                     Expanded(
-                      child: Text(
+                      child: NamidaText(
                         type.toText(),
-                        style: textTheme.displayMedium,
+                        style: NText.medium,
                       ),
                     ),
-                    Text(
+                    NamidaText(
                       current.toText(),
-                      style: textTheme.displaySmall,
+                      style: NText.small,
                     ),
                   ],
                 ),
@@ -861,7 +941,7 @@ class _ArtworkCollageStyleTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return NamidaPopupWrapper(
       childrenDefault: _getChildren,
-      child: CustomListTile(
+      childBuilder: (openMenu) => CustomListTile(
         icon: Broken.picture_frame,
         title: 'artwork_collage_style'.toUpperCase(),
         subtitle: 'Covers built from several tracks.',
@@ -869,13 +949,14 @@ class _ArtworkCollageStyleTile extends StatelessWidget {
           childrenDefault: _getChildren,
           child: ObxO(
             rx: settings.artworkCollageStyle,
-            builder: (context, style) => Text(
+            builder: (context, style) => NamidaText(
               style.toText(),
-              style: context.textTheme.displayMedium,
+              style: NText.medium,
               textAlign: TextAlign.end,
             ),
           ),
         ),
+        onTap: openMenu,
       ),
     );
   }
@@ -951,33 +1032,30 @@ class _DefaultLibraryTabTile extends StatelessWidget {
     }
   }
 
-  void _showMenu(BuildContext context) {
-    const menu = NamidaPopupWrapper(
-      childrenDefault: _getMenuItems,
-    );
-    menu.showPopupMenu(context);
-  }
-
   @override
   Widget build(BuildContext context) {
-    return Obx(
-      (context) {
-        final valueText = settings.extra.autoLibraryTab.valueR ? lang.auto : settings.extra.staticLibraryTab.valueR.toText();
-        return CustomListTile(
-          bgColor: bgColor,
-          icon: Broken.receipt_1,
-          title: lang.defaultLibraryTab,
-          trailing: NamidaPopupWrapper(
-            childrenDefault: _getMenuItems,
-            child: Text(
-              valueText,
-              style: CustomListTile.getTrailingTextStyle(context.theme),
-              maxLines: 1,
-            ),
+    return NamidaPopupWrapper(
+      childrenDefault: _getMenuItems,
+      childBuilder: (openMenu) => CustomListTile(
+        bgColor: bgColor,
+        icon: Broken.receipt_1,
+        title: lang.defaultLibraryTab,
+        trailing: NamidaPopupWrapper(
+          childrenDefault: _getMenuItems,
+          child: Obx(
+            (context) {
+              final valueText = settings.extra.autoLibraryTab.valueR ? lang.auto : settings.extra.staticLibraryTab.valueR.toText();
+              return NamidaText(
+                valueText,
+                style: NText.medium,
+                color: const NColors(.onSurface, opacity: 0.78),
+                maxLines: 1,
+              );
+            },
           ),
-          onTap: () => _showMenu(context),
-        );
-      },
+        ),
+        onTap: openMenu,
+      ),
     );
   }
 }
@@ -993,7 +1071,10 @@ class _LibraryTabsTile extends StatelessWidget {
     if (!tabs.contains(selectedGroup)) settings.extra.setSelectedLibraryTab(tabs.first);
   }
 
-  void _onItemRemoved(int index, List<LibraryTab> activeItems) {
+  void _onChanged(List<LibraryTab> activeItems) {
+    final didRemove = activeItems.length < settings.libraryTabs.value.length;
+    settings.libraryTabs.replace(activeItems);
+    if (!didRemove) return;
     final firstTab = settings.libraryTabs.value.first;
     settings.extra.setSelectedLibraryTab(firstTab);
   }
@@ -1010,14 +1091,13 @@ class _LibraryTabsTile extends StatelessWidget {
         child: SizedBox(
           width: namida.width,
           height: namida.height * 0.5,
-          child: NamidaReorderableActiveListView(
-            enumValues: groupHeads,
+          child: NamidaReorderableActiveItemsList(
+            items: groupHeads,
             activeItems: libraryTabs,
             toText: (item) => item.toText(),
             toIcon: (item) => item.toIcon(),
             minimumItems: 2,
-            onItemRemoved: _onItemRemoved,
-            onSave: settings.libraryTabs.replace,
+            onChanged: _onChanged,
           ),
         ),
       ),
@@ -1048,72 +1128,6 @@ class _FilterTracksByTile extends StatelessWidget {
 
   const _FilterTracksByTile({required this.bgColor});
 
-  void _onFilterTap(TrackSearchFilter type) {
-    final canRemove = settings.trackSearchFilter.value.length > 1;
-
-    if (settings.trackSearchFilter.value.contains(type)) {
-      if (canRemove) {
-        settings.trackSearchFilter.update((list) => list.remove(type));
-      } else {
-        showMinimumItemsSnack(1);
-      }
-    } else {
-      settings.trackSearchFilter.update((list) => list.addNoDuplicates(type));
-    }
-  }
-
-  void _showDialog(BuildContext context) {
-    final original = List<TrackSearchFilter>.from(settings.trackSearchFilter.value);
-
-    void refreshNecessary() {
-      final didChange = settings.trackSearchFilter.value.didChangeFrom(original);
-      if (didChange) {
-        SearchSortController.inst.disposeMediaResources(MediaType.track);
-      }
-    }
-
-    NamidaNavigator.inst.navigateDialog(
-      onDismissing: refreshNecessary,
-      dialog: CustomBlurryDialog(
-        title: lang.filterTracksBy,
-        actions: [
-          IconButton(
-            icon: const Icon(Broken.refresh),
-            tooltip: lang.restoreDefaults,
-            onPressed: settings.trackSearchFilter.reset,
-          ),
-          DoneButton(
-            additional: refreshNecessary,
-          ),
-        ],
-        child: SizedBox(
-          width: context.width,
-          height: context.height * 0.6,
-          child: SmoothSingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                ...TrackSearchFilter.values.map(
-                  (e) => Padding(
-                    padding: const EdgeInsets.all(3.0),
-                    child: Obx(
-                      (context) => ListTileWithCheckMark(
-                        title: e.toText(),
-                        subtitle: e.canAffectPerformance ? lang.performanceNote : '',
-                        onTap: () => _onFilterTap(e),
-                        active: settings.trackSearchFilter.valueR.contains(e),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return ObxO(
@@ -1123,7 +1137,7 @@ class _FilterTracksByTile extends StatelessWidget {
         icon: Broken.filter_search,
         title: lang.filterTracksBy,
         trailingText: "${trackSearchFilter.length}",
-        onTap: () => _showDialog(context),
+        onTap: NamidaOnTaps.inst.onTrackSearchFilterTap,
       ),
     );
   }
@@ -1273,7 +1287,6 @@ class _CommonPrefixesTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
     return Obx(
       (context) {
         final prefixesText = settings.commonPrefixes.valueR.map((e) => e.addDQuotation()).join(', ');
@@ -1284,7 +1297,7 @@ class _CommonPrefixesTile extends StatelessWidget {
           title: lang.ignoreCommonPrefixesWhileSorting,
           subtitle: prefixesText,
           trailingText: "$typesCount",
-          onTap: () => _showDialog(theme),
+          onTap: () => _showDialog(context.theme),
         );
       },
     );
@@ -1318,9 +1331,9 @@ class _PrefixChip extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
+            NamidaText(
               text,
-              style: context.textTheme.displayMedium,
+              style: NText.medium,
             ),
             const SizedBox(width: 6.0),
             Icon(
@@ -1340,7 +1353,19 @@ class _RomanizationTile extends StatelessWidget {
   const _RomanizationTile({required this.bgColor});
 
   void _showDialog() {
+    final originalDisabledScripts = settings.romanizationDisabledScripts.value;
+    final disabledScriptsRx = Rx<List<RomanizationScript>>(originalDisabledScripts);
+
+    // -- once the dialog is gone, any way it was closed
+    void saveIfChanged() {
+      final newDisabledScripts = disabledScriptsRx.value;
+      disabledScriptsRx.close();
+      final didChange = newDisabledScripts.didChangeFrom(originalDisabledScripts);
+      if (didChange) settings.romanizationDisabledScripts.replace(newDisabledScripts);
+    }
+
     NamidaNavigator.inst.navigateDialog(
+      onDisposing: saveIfChanged,
       dialog: CustomBlurryDialog(
         title: lang.romanization,
         actions: const [
@@ -1367,6 +1392,9 @@ class _RomanizationTile extends StatelessWidget {
                 value: romanizeSorting,
                 onChanged: (isTrue) => Romanizer.inst.setSortingEnabled(!isTrue),
               ),
+            ),
+            _RomanizationScriptsWrap(
+              disabledScriptsRx: disabledScriptsRx,
             ),
             const NamidaContainerDivider(
               margin: EdgeInsets.symmetric(vertical: 4.0),
@@ -1421,11 +1449,47 @@ class _RomanizationDictionaryTile extends StatelessWidget {
           return CustomListTile(
             icon: Broken.book,
             title: lang.dictionary,
-            subtitle: '日本語 (漢字) • 中文',
+            subtitle: '日本語 (Japanese, 漢字) • 中文 (Chinese)',
             trailingText: trailingText,
             onTap: () => _onTap(isDictionaryInstalled, downloadProgress),
           );
         },
+      ),
+    );
+  }
+}
+
+class _RomanizationScriptsWrap extends StatelessWidget {
+  final Rx<List<RomanizationScript>> disabledScriptsRx;
+
+  const _RomanizationScriptsWrap({required this.disabledScriptsRx});
+
+  void _toggle(RomanizationScript script) {
+    final disabledScripts = disabledScriptsRx.value;
+    final isDisabled = disabledScripts.contains(script);
+    disabledScriptsRx.value = isDisabled ? disabledScripts.where((e) => e != script).toFixedList() : [...disabledScripts, script];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 6.0),
+      child: ObxO(
+        rx: disabledScriptsRx,
+        builder: (context, disabledScripts) => Wrap(
+          spacing: 4.0,
+          runSpacing: 4.0,
+          children: RomanizationScript.values
+              .map(
+                (e) => NamidaToggleCard(
+                  title: e.toText(),
+                  active: !disabledScripts.contains(e),
+                  onTap: () => _toggle(e),
+                  padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+                ),
+              )
+              .toFixedList(),
+        ),
       ),
     );
   }
@@ -1511,7 +1575,6 @@ class _LyricsSaveLocationOption extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
     return Padding(
       padding: const EdgeInsets.all(3.0),
       child: Row(
@@ -1532,11 +1595,12 @@ class _LyricsSaveLocationOption extends StatelessWidget {
             rx: settings.lyricsDeleteWithTrackIn,
             builder: (context, deleteIn) {
               final isEnabled = deleteIn.contains(location);
+              final colors = NColorsData.of(context);
               return NamidaIconButton(
                 tooltip: () => '${lang.lyricsDeleteWithTrack}\n${lang.lyricsDeleteWithTrackSubtitle}',
                 icon: Broken.trash,
                 iconSize: 20.0,
-                iconColor: isEnabled ? Colors.red : theme.disabledColor,
+                iconColor: NColors.fixed(isEnabled ? Colors.red : colors.disabled),
                 onPressed: _onDeleteWithTrackTap,
               );
             },
@@ -1729,25 +1793,28 @@ class _VibrationTypeTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = context.textTheme;
-    return CustomListTile(
-      bgColor: bgColor,
-      leading: const StackedIcon(
-        baseIcon: Broken.alarm,
-        secondaryIcon: Broken.wind_2,
-        secondaryIconSize: 13.0,
-      ),
-      title: lang.vibrationType,
-      trailing: NamidaPopupWrapper(
-        childrenDefault: _getChildren,
-        child: ObxO(
-          rx: settings.vibrationType,
-          builder: (context, vibrationType) => Text(
-            vibrationType.toText(),
-            style: textTheme.displaySmall,
-            textAlign: TextAlign.end,
+    return NamidaPopupWrapper(
+      childrenDefault: _getChildren,
+      childBuilder: (openMenu) => CustomListTile(
+        bgColor: bgColor,
+        leading: const StackedIcon(
+          baseIcon: Broken.alarm,
+          secondaryIcon: Broken.wind_2,
+          secondaryIconSize: 13.0,
+        ),
+        title: lang.vibrationType,
+        trailing: NamidaPopupWrapper(
+          childrenDefault: _getChildren,
+          child: ObxO(
+            rx: settings.vibrationType,
+            builder: (context, vibrationType) => NamidaText(
+              vibrationType.toText(),
+              style: NText.small,
+              textAlign: TextAlign.end,
+            ),
           ),
         ),
+        onTap: openMenu,
       ),
     );
   }
@@ -1816,9 +1883,9 @@ class _ExtractAllPalettesTile extends StatelessWidget {
           trailing: isGenerating
               ? Column(
                   children: [
-                    Text(
+                    NamidaText(
                       "$genProgress/$genTotal",
-                      style: context.textTheme.displaySmall,
+                      style: NText.small,
                     ),
                     const LoadingIndicator(),
                   ],
@@ -1838,4 +1905,373 @@ Future<bool> _addLyricsFolder() async {
   if (path == null) return false;
   settings.lyricsFolders.update((list) => list.addNoDuplicates(path));
   return true;
+}
+
+class _DiscordAccountTile extends StatefulWidget {
+  final Color? bgColor;
+
+  const _DiscordAccountTile({required this.bgColor});
+
+  static Future<void> onPresenceToggled(bool isEnabled) async {
+    if (!isEnabled) return;
+    try {
+      final isLoggedIn = await NowPlayingBroadcaster.inst.ensureDiscordLogin();
+      if (isLoggedIn) return;
+      settings.discordPresence.save(false);
+      snackyy(message: lang.signInCanceled);
+    } catch (e, st) {
+      settings.discordPresence.save(false);
+      logger.error('discord sign in failed', e: e, st: st);
+      snackyy(title: lang.signInFailed, message: e.toString(), isError: true);
+    }
+  }
+
+  @override
+  State<_DiscordAccountTile> createState() => _DiscordAccountTileState();
+}
+
+class _DiscordAccountTileState extends State<_DiscordAccountTile> {
+  @override
+  void initState() {
+    super.initState();
+    NowPlayingBroadcaster.inst.refreshDiscordStatus();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final broadcaster = NowPlayingBroadcaster.inst;
+    final signOutButton = broadcaster.discordRequiresLogin
+        ? NamidaIconButton(
+            icon: Broken.logout,
+            tooltip: () => lang.signOut,
+            onPressed: broadcaster.logOutOfDiscord,
+          )
+        : null;
+    return Obx(
+      (context) {
+        final account = broadcaster.discordAccount.valueR;
+        final status = broadcaster.discordStatus.valueR;
+        final avatarWidget = account == null
+            ? null
+            : YoutubeThumbnail(
+                key: ValueKey(account.avatarUrl),
+                type: ThumbnailType.channel,
+                width: 28.0,
+                customUrl: account.avatarUrl,
+                isImportantInCache: true,
+                isCircle: true,
+              );
+        return CustomListTile(
+          bgColor: widget.bgColor,
+          icon: avatarWidget == null ? Broken.profile_circle : null,
+          leading: avatarWidget,
+          title: account?.name ?? 'Discord',
+          subtitle: status.toText(),
+          trailing: signOutButton,
+        );
+      },
+    );
+  }
+}
+
+/// reminds that the playing track is visible on the discord profile.
+class DiscordSharingDotWrapper extends StatelessWidget {
+  final Widget child;
+
+  const DiscordSharingDotWrapper({super.key, required this.child});
+
+  static const _kDiscordColor = Color(0xFF5865F2);
+
+  @override
+  Widget build(BuildContext context) {
+    return ObxO(
+      rx: NowPlayingBroadcaster.inst.isDiscordSharing,
+      builder: (context, isSharing) => Stack(
+        clipBehavior: Clip.none,
+        children: [
+          child,
+          if (isSharing)
+            Positioned(
+              bottom: 0.0,
+              left: 0.0,
+              child: NDecoratedBox(
+                decoration: (colors) => BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: _kDiscordColor,
+                  border: Border.all(
+                    color: colors.scaffold,
+                    width: 1.0,
+                  ),
+                ),
+                child: const SizedBox(
+                  width: 7.0,
+                  height: 7.0,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _IntegrationsTrailing extends StatelessWidget {
+  final Widget arrow;
+
+  const _IntegrationsTrailing({required this.arrow});
+
+  void _showFlagsDialog() {
+    NamidaNavigator.inst.navigateDialog(
+      dialog: CustomBlurryDialog(
+        icon: Broken.flag,
+        title: lang.integrations,
+        normalTitleStyle: true,
+        horizontalInset: 32.0,
+        actions: const [
+          DoneButton(),
+        ],
+        child: const _IntegrationsFlagsOptions(),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        NamidaIconButton(
+          icon: Broken.flag,
+          tooltip: () => lang.configure,
+          iconSize: 20.0,
+          iconColor: NColors.defaultIcon(),
+          onPressed: _showFlagsDialog,
+        ),
+        const SizedBox(
+          width: 4.0,
+        ),
+        arrow,
+        const SizedBox(
+          width: 12.0,
+        ),
+      ],
+    );
+  }
+}
+
+class _IntegrationsFlagsOptions extends StatelessWidget {
+  const _IntegrationsFlagsOptions();
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: context.width,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (NamidaFeaturesVisibility.showAndroidIntegrations) ...[
+            ObxO(
+              rx: settings.mediaBrowserQueue,
+              builder: (context, enabled) => CustomSwitchListTile(
+                icon: Broken.car,
+                title: 'android_auto_and_wear'.toUpperCase(),
+                value: enabled,
+                onChanged: (isTrue) => settings.mediaBrowserQueue.save(!isTrue),
+              ),
+            ),
+            ObxO(
+              rx: settings.nowPlayingBroadcast,
+              builder: (context, enabled) => CustomSwitchListTile(
+                icon: Broken.radar_2,
+                title: 'now_playing_broadcast'.toUpperCase(),
+                subtitle: 'Intents for Tasker & automation apps',
+                value: enabled,
+                onChanged: (isTrue) => settings.nowPlayingBroadcast.save(!isTrue),
+              ),
+            ),
+          ],
+          if (LyricsIntegration.valuesForPlatform.isNotEmpty) const _LyricsIntegrationsListTile(),
+          const _WebhookListTile(),
+          ObxO(
+            rx: settings.reportPlaybackToServers,
+            builder: (context, enabled) => CustomSwitchListTile(
+              icon: Broken.cloud_change,
+              title: 'server_playback_reports'.toUpperCase(),
+              subtitle: 'Subsonic & Jellyfin: now playing, play counts',
+              value: enabled,
+              onChanged: (isTrue) => settings.reportPlaybackToServers.save(!isTrue),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LyricsIntegrationsListTile extends StatelessWidget {
+  const _LyricsIntegrationsListTile();
+
+  void _toggle(LyricsIntegration integration) {
+    settings.lyricsIntegrations.update((value) {
+      if (!value.remove(integration)) value.add(integration);
+    });
+  }
+
+  List<NamidaPopupItem> _items() {
+    final enabled = settings.lyricsIntegrations.value;
+    return LyricsIntegration.valuesForPlatform
+        .map(
+          (e) => NamidaPopupItem(
+            selected: enabled.contains(e),
+            icon: e.toIcon(),
+            title: e.toText(),
+            subtitle: e.sendsPerLine ? lang.performanceNote : '',
+            onTap: () => _toggle(e),
+          ),
+        )
+        .toFixedList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return NamidaPopupWrapper(
+      childrenDefault: _items,
+      refreshListenable: settings.lyricsIntegrations,
+      child: ObxO(
+        rx: settings.lyricsIntegrations,
+        builder: (context, enabled) {
+          final enabledCount = enabled.where((e) => e.isAvailable()).length;
+          return CustomListTile(
+            icon: Broken.message_text,
+            title: 'status_bar_lyrics'.toUpperCase(),
+            trailing: NamidaText(
+              '$enabledCount/${LyricsIntegration.valuesForPlatform.length}',
+              style: NText.medium,
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _WebhookListTile extends StatelessWidget {
+  const _WebhookListTile();
+
+  void _openDialog() {
+    final urlController = TextEditingController(text: settings.webhookUrl.value);
+    final formKey = GlobalKey<FormState>();
+    final savedEvents = settings.webhookEvents.value;
+    final draftEvents = {for (final e in WebhookEvent.values) e: savedEvents.contains(e).obs};
+
+    void onSave() {
+      final isValid = formKey.currentState?.validate() ?? false;
+      if (!isValid) return;
+      final url = urlController.text.trim();
+      final events = <WebhookEvent>{
+        for (final e in WebhookEvent.values)
+          if (draftEvents[e]!.value) e,
+      };
+      settings.transaction(() {
+        settings.webhookUrl.save(url);
+        settings.webhookEvents.replace(events);
+      });
+      NamidaNavigator.inst.closeDialog();
+    }
+
+    final eventsListenable = Listenable.merge(draftEvents.values.toList());
+
+    List<NamidaPopupItem> eventItems() {
+      return WebhookEvent.values.map(
+        (e) {
+          final rx = draftEvents[e]!;
+          return NamidaPopupItem(
+            selected: rx.value,
+            icon: e.toIcon(),
+            title: e.toText(),
+            onTap: () => rx.value = !rx.value,
+          );
+        },
+      ).toFixedList();
+    }
+
+    String? validateUrl(String? value) {
+      value ??= '';
+      if (value.trim().isEmpty) return null;
+      final uri = NowPlayingBroadcaster.parseWebhookUrl(value);
+      return uri == null ? 'Invalid URL' : null;
+    }
+
+    NamidaNavigator.inst.navigateDialog(
+      onDisposing: () {
+        urlController.dispose();
+        for (final rx in draftEvents.values) {
+          rx.close();
+        }
+      },
+      dialog: Form(
+        key: formKey,
+        child: CustomBlurryDialog(
+          title: 'webhook'.toUpperCase(),
+          normalTitleStyle: true,
+          icon: Broken.link_2,
+          actions: [
+            const CancelButton(),
+            NamidaButton(
+              text: lang.save,
+              onTap: onSave,
+            ),
+          ],
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 12.0),
+              CustomTagTextField(
+                controller: urlController,
+                hintText: 'https://',
+                labelText: 'URL',
+                keyboardType: TextInputType.url,
+                validator: validateUrl,
+              ),
+              const SizedBox(height: 12.0),
+              NamidaPopupWrapper(
+                childrenDefault: eventItems,
+                refreshListenable: eventsListenable,
+                childBuilder: (openMenu) => CustomListTile(
+                  icon: Broken.notification_status,
+                  title: 'Events',
+                  trailing: Obx(
+                    (context) {
+                      int activeCount = 0;
+                      for (final rx in draftEvents.values) {
+                        if (rx.valueR) activeCount++;
+                      }
+                      return NamidaText(
+                        '$activeCount/${WebhookEvent.values.length}',
+                        style: NText.medium,
+                      );
+                    },
+                  ),
+                  onTap: openMenu,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ObxO(
+      rx: settings.webhookUrl,
+      builder: (context, url) => CustomListTile(
+        icon: Broken.link_2,
+        title: 'webhook'.toUpperCase(),
+        subtitle: url.isEmpty ? null : url,
+        onTap: _openDialog,
+      ),
+    );
+  }
 }

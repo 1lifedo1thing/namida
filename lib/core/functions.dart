@@ -15,11 +15,11 @@ import 'package:youtipie/core/extensions.dart' show ThumbnailPickerExt;
 
 import 'package:namida/class/eggs_data.dart';
 import 'package:namida/class/folder.dart';
+import 'package:namida/class/named_presets.dart';
 import 'package:namida/class/queue.dart';
 import 'package:namida/class/route.dart';
 import 'package:namida/class/sort_chain.dart';
 import 'package:namida/class/track.dart';
-import 'package:namida/class/track_sort_presets.dart';
 import 'package:namida/controller/current_color.dart';
 import 'package:namida/controller/eggs_controller.dart';
 import 'package:namida/controller/folders_controller.dart';
@@ -40,6 +40,7 @@ import 'package:namida/core/enums.dart';
 import 'package:namida/core/extensions.dart';
 import 'package:namida/core/icon_fonts/broken_icons.dart';
 import 'package:namida/core/namida_converter_ext.dart';
+import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/translations/language.dart';
 import 'package:namida/core/utils.dart';
 import 'package:namida/ui/dialogs/edit_tags_dialog.dart';
@@ -53,6 +54,7 @@ import 'package:namida/ui/pages/subpages/queue_tracks_subpage.dart';
 import 'package:namida/ui/widgets/custom_widgets.dart';
 import 'package:namida/ui/widgets/eggs/eggs.dart';
 import 'package:namida/ui/widgets/history_listens_navigation.dart';
+import 'package:namida/ui/widgets/reorderable_active_items_list.dart';
 import 'package:namida/ui/widgets/settings/extra_settings.dart';
 import 'package:namida/ui/widgets/sort_by_button.dart';
 import 'package:namida/youtube/class/youtube_id.dart';
@@ -158,10 +160,12 @@ class NamidaOnTaps {
   Future<void> onNormalPlaylistTap(
     String playlistName, {
     bool disableAnimation = false,
+    List<Track>? focusTracks,
   }) async {
     return NormalPlaylistTracksPage(
       playlistName: playlistName,
       disableAnimation: disableAnimation,
+      focusTracks: focusTracks,
     ).navigate();
   }
 
@@ -182,7 +186,7 @@ class NamidaOnTaps {
     if (settings.libraryTabs.value.contains(historyTab)) {
       ScrollSearchController.inst.animatePageController(historyTab, jumpToTopIfSamePage: false, restoreScrollPosition: initialListen == null);
     } else {
-      await HistoryTracksPage().navigate();
+      await const HistoryTracksPage().navigate();
     }
   }
 
@@ -322,6 +326,7 @@ class NamidaOnTaps {
       MediaType.folderVideo: [SortType.filename],
     };
     SortChain<SortType> activeSorting() => settings.mediaItemsTrackSorting.value[media] ?? const SortChain<SortType>([]);
+    final initialSorting = activeSorting();
     return _onSubPageSortIconTap<SortType>(
       header: header,
       minimumItems: 1,
@@ -329,12 +334,14 @@ class NamidaOnTaps {
       sortToText: (sort) => sort.toText(),
       sortToIcon: (sort) => sort.toIcon(),
       defaultSorts: defaultSorts[media] ?? [SortType.year],
-      currentSorting: activeSorting(),
+      currentSorting: initialSorting,
       allowCustom: false,
       withSortKeyOptions: true,
       prefixFiltersOf: SortOptionsCards.prefixFiltersOfTracks,
       onSortChange: (activeSorters) {
-        final sorting = activeSorting().copyWith(entries: activeSorters);
+        final currentSorting = activeSorting();
+        final sorting = currentSorting.copyWith(entries: activeSorters);
+        if (sorting == currentSorting) return;
         settings.updateMediaItemsTrackSorting(media, sorting);
       },
       onSortReverseChange: (reverse) {
@@ -342,12 +349,63 @@ class NamidaOnTaps {
         settings.updateMediaItemsTrackSorting(media, sorting);
       },
       onDone: () {
-        Indexer.inst.sortMediaTracksSubLists([media]);
+        final didChange = activeSorting() != initialSorting;
+        if (didChange) Indexer.inst.sortMediaTracksSubLists([media]);
       },
       leftActionBuilder: (onBeforeChange, onChanged) => _TrackSortPresetsButton(
         media: media,
         onBeforeChange: onBeforeChange,
         onChanged: onChanged,
+      ),
+    );
+  }
+
+  void onTrackSearchFilterTap() {
+    final originalFilters = settings.trackSearchFilter.value;
+
+    void refreshIfChanged() {
+      final didChange = settings.trackSearchFilter.value.didChangeFrom(originalFilters);
+      if (didChange) SearchSortController.inst.onTrackSearchFilterChanged();
+    }
+
+    NamidaNavigator.inst.navigateDialog(
+      onDismissing: refreshIfChanged,
+      dialog: CustomBlurryDialog(
+        title: lang.filterTracksBy,
+        leftAction: const _TrackSearchFilterPresetsButton(),
+        actions: [
+          IconButton(
+            icon: const Icon(Broken.refresh),
+            tooltip: lang.restoreDefaults,
+            onPressed: () => settings.updateTrackSearchFilter(settings.trackSearchFilterDefault.fallback),
+          ),
+          DoneButton(
+            additional: refreshIfChanged,
+          ),
+        ],
+        child: SizedBox(
+          width: namida.width,
+          height: namida.height * 0.6,
+          child: Column(
+            children: [
+              const _TrackSearchFilterPresetHint(),
+              Expanded(
+                child: SmoothSingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      ...TrackSearchFilter.values.map(
+                        (e) => _TrackSearchFilterTile(
+                          filter: e,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -510,17 +568,6 @@ class NamidaOnTaps {
     final sorters = currentSorting.entries.toList().obs;
     final isReverse = currentSorting.reverse.obs;
 
-    final allSorts = allSortsList.obs;
-
-    void resortVisualItems() => allSorts.sortByReverse((e) {
-      final sortersList = sorters.value;
-      final index = sortersList.indexWhere((sorter) => sorter.type == e);
-      final isActive = index != -1;
-      return isActive ? sortersList.length - index : index;
-    });
-
-    resortVisualItems();
-
     void saveSorts() {
       final activeSorts = sorters.value.toList();
       onSortChange(activeSorts);
@@ -534,7 +581,11 @@ class NamidaOnTaps {
     void loadSorting(SortChain<S> sorting) {
       sorters.value = sorting.entries.toList();
       isReverse.value = sorting.reverse;
-      resortVisualItems();
+    }
+
+    void onActiveSortsChanged(List<S> activeSorts) {
+      final oldSorters = sorters.value;
+      sorters.value = activeSorts.map((sort) => oldSorters.firstWhereEff((e) => e.type == sort) ?? SortEntry(sort)).toList();
     }
 
     final leftAction = leftActionBuilder?.call(saveSorts, loadSorting);
@@ -544,7 +595,6 @@ class NamidaOnTaps {
       onDisposing: () {
         sorters.close();
         isReverse.close();
-        allSorts.close();
       },
       onDismissing: resortMedia,
       dialog: CustomBlurryDialog(
@@ -564,7 +614,7 @@ class NamidaOnTaps {
         ],
         child: SizedBox(
           width: namida.width,
-          height: namida.height * 0.5,
+          height: namida.height * 0.55,
           child: Column(
             children: [
               ?header,
@@ -582,59 +632,30 @@ class NamidaOnTaps {
                     withSortKeyOptions: withSortKeyOptions,
                     prefixFilters: prefixFilters,
                     showTitles: true,
+                    dense: header != null,
                   );
                 },
               ),
               const SizedBox(height: 8.0),
               Expanded(
-                child: Obx(
-                  (context) => NamidaListView(
-                    listBottomPadding: 12.0,
-                    itemCount: allSorts.length,
-                    itemExtent: null,
-                    onReorder: (oldIndex, newIndex) {
-                      if (newIndex > oldIndex) newIndex -= 1;
-                      allSorts.value.move(oldIndex, newIndex);
-                      allSorts.refresh();
-
-                      final sortersList = sorters.value;
-                      final activeSorts = allSorts.value.map((sort) => sortersList.firstWhereEff((e) => e.type == sort)).nonNulls.toList();
-                      sorters.value = activeSorts.toList();
-                      onSortChange(activeSorts);
-                    },
-                    itemBuilder: (context, i) {
-                      final sorting = allSorts[i];
-                      return Padding(
-                        key: ValueKey(i),
-                        padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 3.0),
-                        child: Obx(
-                          (context) {
-                            final entry = sorters.valueR.firstWhereEff((e) => e.type == sorting);
-                            final isActive = entry != null;
-                            final reverseButton = entry == null
-                                ? null
-                                : _SortEntryReverseButton(
-                                    isReversed: entry.reverse,
-                                    onTap: () => sorters.replaceSingleWhere((e) => e.type == sorting, (e) => e.toggled()),
-                                  );
-                            return ListTileWithCheckMark(
-                              icon: sortToIcon(sorting),
-                              title: "${i + 1}. ${sortToText(sorting)}",
-                              active: isActive,
-                              trailing: reverseButton,
-                              onTap: () {
-                                if (isActive && sorters.length <= minimumItems) {
-                                  showMinimumItemsSnack(minimumItems);
-                                  return;
-                                }
-                                if (isActive) {
-                                  sorters.removeWhere((e) => e.type == sorting);
-                                } else {
-                                  sorters.insertSafe(i, SortEntry(sorting));
-                                }
-                              },
-                            );
-                          },
+                child: ObxO(
+                  rx: sorters,
+                  builder: (context, sortersList) => NamidaReorderableActiveItemsList<S>(
+                    items: allSortsList,
+                    activeItems: sortersList.map((e) => e.type).toFixedList(),
+                    minimumItems: minimumItems,
+                    toText: sortToText,
+                    toIcon: sortToIcon,
+                    onChanged: onActiveSortsChanged,
+                    trailingBuilder: (sort, isActive) {
+                      final entry = sortersList.firstWhereEff((e) => e.type == sort);
+                      final isReversed = entry?.reverse ?? false;
+                      return AnimatedShow(
+                        show: isActive,
+                        isHorizontal: true,
+                        child: _SortEntryReverseButton(
+                          isReversed: isReversed,
+                          onTap: () => sorters.replaceSingleWhere((e) => e.type == sort, (e) => e.toggled()),
                         ),
                       );
                     },
@@ -901,9 +922,9 @@ class NamidaOnTaps {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (displayTitle)
-                Text(
+                NamidaText(
                   lang.duplicatedItemsAdding,
-                  style: namida.textTheme.displayMedium,
+                  style: NText.medium,
                 ),
               if (displayTitle) const SizedBox(height: 12.0),
               Column(
@@ -1033,9 +1054,9 @@ Future<void> showCalendarDialog<T extends ItemWithDate, E>({
     scale: 0.90,
     dialog: CustomBlurryDialog(
       titleWidgetInPadding: Obx(
-        (context) => Text(
+        (context) => NamidaText(
           '$title ${daysNumber.valueR == 0 ? '' : "(${daysNumber.valueR.displayDayKeyword})"}',
-          style: namida.textTheme.displayLarge,
+          style: NText.large,
         ),
       ),
       normalTitleStyle: true,
@@ -1103,9 +1124,9 @@ Future<void> showCalendarDialog<T extends ItemWithDate, E>({
                           ),
                           const SizedBox(width: 6.0),
                           Flexible(
-                            child: Text(
+                            child: NamidaText(
                               text,
-                              style: context.textTheme.displayMedium,
+                              style: NText.medium,
                             ),
                           ),
                         ],
@@ -1222,6 +1243,7 @@ class BottomSheetTextFieldConfig {
   final String labelText;
   final int? maxLength;
   final String? Function(String? value)? validator;
+  final Widget? trailing;
 
   const BottomSheetTextFieldConfig({
     this.initalControllerText,
@@ -1229,6 +1251,7 @@ class BottomSheetTextFieldConfig {
     required this.labelText,
     this.maxLength,
     required this.validator,
+    this.trailing,
   });
 }
 
@@ -1241,6 +1264,7 @@ class BottomSheetTextFieldConfigWC extends BottomSheetTextFieldConfig {
     required super.labelText,
     super.maxLength,
     required super.validator,
+    super.trailing,
   }) : super(initalControllerText: null);
 }
 
@@ -1262,6 +1286,7 @@ Future<String?> showNamidaBottomSheetWithTextField({
   bool confirmDiscardingEdits = false,
 }) async {
   final localController = textfieldConfig is BottomSheetTextFieldConfigWC ? textfieldConfig.controller : TextEditingController(text: textfieldConfig.initalControllerText);
+  final textfieldTrailing = textfieldConfig.trailing;
   final initialText = localController.text;
   final GlobalKey<FormState> formKey = GlobalKey<FormState>();
 
@@ -1275,7 +1300,6 @@ Future<String?> showNamidaBottomSheetWithTextField({
     isScrollControlled: isScrollControlled,
     hasUnsavedChanges: confirmDiscardingEdits ? () => finalText == null && localController.text != initialText : null,
     builder: (context, bottomPadding, maxWidth, maxHeight) {
-      final textTheme = context.textTheme;
       final child = Padding(
         padding: const EdgeInsets.symmetric(horizontal: 28.0).add(const EdgeInsets.only(bottom: 18.0)),
         child: Form(
@@ -1285,14 +1309,14 @@ Future<String?> showNamidaBottomSheetWithTextField({
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
+                  NamidaText(
                     title,
-                    style: textTheme.displayLarge,
+                    style: NText.large,
                   ),
                   if (subtitle != null)
-                    Text(
+                    NamidaText(
                       subtitle,
-                      style: textTheme.displaySmall,
+                      style: NText.small,
                     ),
                   if (subtitle != null) const SizedBox(height: 6.0),
                   const SizedBox(height: 18.0),
@@ -1325,19 +1349,35 @@ Future<String?> showNamidaBottomSheetWithTextField({
                           maxLength: textfieldConfig.maxLength,
                         ),
                       ),
+                      if (textfieldTrailing != null) ...[
+                        const SizedBox(width: 6.0),
+                        textfieldTrailing,
+                      ],
                     ],
                   ),
                   ...?extraTextfieldsConfig?.map(
                     (e) {
+                      final textfield = CustomTagTextField(
+                        controller: e.controller,
+                        hintText: e.hintText,
+                        labelText: e.labelText,
+                        validator: e.validator,
+                        maxLength: e.maxLength,
+                      );
+                      final trailing = e.trailing;
                       return Padding(
                         padding: const EdgeInsets.only(top: 12.0),
-                        child: CustomTagTextField(
-                          controller: e.controller,
-                          hintText: e.hintText,
-                          labelText: e.labelText,
-                          validator: e.validator,
-                          maxLength: e.maxLength,
-                        ),
+                        child: trailing == null
+                            ? textfield
+                            : Row(
+                                children: [
+                                  Expanded(
+                                    child: textfield,
+                                  ),
+                                  const SizedBox(width: 6.0),
+                                  trailing,
+                                ],
+                              ),
                       );
                     },
                   ),
@@ -1437,7 +1477,6 @@ class TracksAddOnTap {
     final currentTrackS = Player.inst.currentItem.value;
     if (currentTrackS is! Selectable) return;
     final currentTrack = currentTrackS.track;
-    final textTheme = context.textTheme;
     showAddItemsToQueueDialog(
       onDisposing: null,
       context: context,
@@ -1519,7 +1558,6 @@ class TracksAddOnTap {
 
               final selectedmoodsPlaylists = <String>[].obs;
               final selectedmoodsTracks = <String>[].obs;
-              final textTheme = context.textTheme;
 
               List<Widget> getListy({
                 required String title,
@@ -1533,15 +1571,15 @@ class TracksAddOnTap {
                       padding: const EdgeInsets.all(12.0),
                       child: Row(
                         children: [
-                          Text(
+                          NamidaText(
                             title,
-                            style: textTheme.displayMedium,
+                            style: NText.medium,
                           ),
                           const SizedBox(width: 8.0),
-                          DecoratedBox(
-                            decoration: BoxDecoration(
+                          NDecoratedBox(
+                            decoration: (colors) => BoxDecoration(
                               borderRadius: BorderRadius.circular(6.0.multipliedRadius),
-                              color: context.theme.colorScheme.secondaryContainer.withOpacityExt(0.25),
+                              color: colors.secondaryContainer.withOpacityExt(0.25),
                             ),
                             child: Padding(
                               padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 1.0),
@@ -1569,41 +1607,46 @@ class TracksAddOnTap {
                               (context) {
                                 final isSelected = selectedList.valueR.contains(m);
                                 final extraOpacity = isSelected ? 0.25 : 0.0;
-                                return Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 2.0),
-                                  child: NamidaInkWellButton(
-                                    borderRadius: 99.0,
-                                    paddingMultiplier: 0.8,
-                                    icon: null,
-                                    text: m,
-                                    bgColor: context.theme.colorScheme.secondaryContainer.withOpacityExt(0.2 + extraOpacity),
-                                    onTap: () => selectedList.addOrRemove(m),
-                                    leading: DecoratedBox(
-                                      decoration: BoxDecoration(
-                                        borderRadius: BorderRadius.circular(99.0),
-                                        color: context.theme.colorScheme.secondaryContainer.withOpacityExt(0.3 + extraOpacity),
-                                      ),
-                                      child: Padding(
-                                        padding: const EdgeInsets.symmetric(horizontal: 5.0, vertical: 1.0),
-                                        child: ConstrainedBox(
-                                          constraints: const BoxConstraints(minWidth: 8.0),
-                                          child: Text(
-                                            '$tracksCount',
-                                            textAlign: TextAlign.center,
-                                          ),
-                                        ),
+                                final countWidget = NDecoratedBox(
+                                  decoration: (colors) => BoxDecoration(
+                                    borderRadius: BorderRadius.circular(99.0),
+                                    color: colors.secondaryContainer.withOpacityExt(0.3 + extraOpacity),
+                                  ),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 5.0, vertical: 1.0),
+                                    child: ConstrainedBox(
+                                      constraints: const BoxConstraints(minWidth: 8.0),
+                                      child: Text(
+                                        '$tracksCount',
+                                        textAlign: TextAlign.center,
                                       ),
                                     ),
-                                    trailing:
-                                        Padding(
-                                          padding: EdgeInsetsGeometry.only(left: 2.0),
-                                          child: NamidaCheckMark(
-                                            size: 12.0,
-                                            active: true,
-                                          ),
-                                        ).animateEntrance(
-                                          showWhen: isSelected,
-                                        ),
+                                  ),
+                                );
+                                final checkMarkWidget =
+                                    const Padding(
+                                      padding: EdgeInsetsGeometry.only(left: 2.0),
+                                      child: NamidaCheckMark(
+                                        size: 12.0,
+                                        active: true,
+                                      ),
+                                    ).animateEntrance(
+                                      showWhen: isSelected,
+                                    );
+                                return Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 2.0),
+                                  child: NBuilder(
+                                    selfAnimated: true,
+                                    builder: (context, colors) => NamidaInkWellButton(
+                                      borderRadius: 99.0,
+                                      paddingMultiplier: 0.8,
+                                      icon: null,
+                                      text: m,
+                                      bgColor: colors.secondaryContainer.withOpacityExt(0.2 + extraOpacity),
+                                      onTap: () => selectedList.addOrRemove(m),
+                                      leading: countWidget,
+                                      trailing: checkMarkWidget,
+                                    ),
                                   ),
                                 );
                               },
@@ -1733,9 +1776,9 @@ class TracksAddOnTap {
                               ),
                               const SizedBox(height: 2.0),
                               Obx(
-                                (context) => Text(
+                                (context) => NamidaText(
                                   '${minRating.valueR}%',
-                                  style: textTheme.displaySmall,
+                                  style: NText.small,
                                 ),
                               ),
                             ],
@@ -1751,9 +1794,9 @@ class TracksAddOnTap {
                               ),
                               const SizedBox(height: 2.0),
                               Obx(
-                                (context) => Text(
+                                (context) => NamidaText(
                                   '${maxRating.valueR}%',
-                                  style: textTheme.displaySmall,
+                                  style: NText.small,
                                 ),
                               ),
                             ],
@@ -2203,7 +2246,7 @@ class TracksAddOnTap {
                     children: [
                       NamidaIconButton(
                         icon: icon,
-                        iconColor: context.defaultIconColor(),
+                        iconColor: NColors.defaultIcon(),
                         padding: EdgeInsets.zero,
                         onPressed: () => onTap(insertionType),
                       ),
@@ -2339,43 +2382,108 @@ class _TrackSortPresetsButton extends StatelessWidget {
     onBeforeChange();
     final sorting = settings.mediaItemsTrackSorting.value[media] ?? const SortChain<SortType>([]);
     final initialName = sorting.types().map((e) => e.toText()).joinText(separator: ', ');
-    _TrackSortPresetNameDialog.show(
+    _PresetNameDialog.show(
       title: lang.saveAsPreset,
       initialName: initialName,
       onName: (name) => settings.addTrackSortPreset(media, name),
     );
   }
 
-  void _edit(int index, TrackSortPreset preset) {
+  void _rename(int index, String name) => settings.renameTrackSortPreset(media, index, name);
+
+  void _remove(int index) {
+    onBeforeChange();
+    settings.removeTrackSortPreset(media, index);
+    _reloadSorts();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ObxO(
+      rx: settings.mediaItemsTrackSortingPresets,
+      builder: (context, presetsMap) => _NamedPresetsButton(
+        presets: presetsMap[media] ?? const TrackSortPresets.empty(),
+        defaultIcon: Broken.sort,
+        onSelect: _select,
+        onAdd: _add,
+        onRename: _rename,
+        onRemove: _remove,
+      ),
+    );
+  }
+}
+
+class _TrackSearchFilterPresetsButton extends StatelessWidget {
+  const _TrackSearchFilterPresetsButton();
+
+  void _add() {
+    final filters = settings.trackSearchFilter.value;
+    final initialName = filters.map((e) => e.toText()).joinText(separator: ', ');
+    _PresetNameDialog.show(
+      title: lang.saveAsPreset,
+      initialName: initialName,
+      onName: settings.addTrackSearchFilterPreset,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ObxO(
+      rx: settings.trackSearchFilterPresets,
+      builder: (context, presets) => _NamedPresetsButton(
+        presets: presets,
+        defaultIcon: Broken.filter_search,
+        onSelect: settings.selectTrackSearchFilterPreset,
+        onAdd: _add,
+        onRename: settings.renameTrackSearchFilterPreset,
+        onRemove: settings.removeTrackSearchFilterPreset,
+      ),
+    );
+  }
+}
+
+class _NamedPresetsButton<T> extends StatelessWidget {
+  final NamedPresets<T> presets;
+  final IconData defaultIcon;
+  final void Function(int? index) onSelect;
+  final VoidCallback onAdd;
+  final void Function(int index, String name) onRename;
+  final void Function(int index) onRemove;
+
+  const _NamedPresetsButton({
+    required this.presets,
+    required this.defaultIcon,
+    required this.onSelect,
+    required this.onAdd,
+    required this.onRename,
+    required this.onRemove,
+  });
+
+  void _edit(int index, NamedPreset<T> preset) {
     NamidaNavigator.inst.popMenu();
-    _TrackSortPresetNameDialog.show(
+    _PresetNameDialog.show(
       title: lang.rename,
       initialName: preset.name,
-      onName: (name) => settings.renameTrackSortPreset(media, index, name),
-      onDelete: () {
-        onBeforeChange();
-        settings.removeTrackSortPreset(media, index);
-        _reloadSorts();
-      },
+      onName: (name) => onRename(index, name),
+      onDelete: () => onRemove(index),
     );
   }
 
   List<NamidaPopupItem> _menuItems() {
-    final presets = settings.mediaItemsTrackSortingPresets.value[media] ?? const TrackSortPresets.empty();
     final activeIndex = presets.activeIndex;
     return [
       NamidaPopupItem(
-        icon: Broken.sort,
+        icon: defaultIcon,
         title: lang.defaultLabel,
         selected: activeIndex == null,
-        onTap: () => _select(null),
+        onTap: () => onSelect(null),
       ),
       ...presets.presets.mapIndexed(
         (preset, i) => NamidaPopupItem(
           icon: Broken.layer,
           title: preset.name,
           selected: activeIndex == i,
-          onTap: () => _select(i),
+          onTap: () => onSelect(i),
           trailing: NamidaIconButton(
             horizontalPadding: 0.0,
             icon: Broken.edit_2,
@@ -2389,7 +2497,7 @@ class _TrackSortPresetsButton extends StatelessWidget {
         NamidaPopupItem(
           icon: Broken.add,
           title: lang.add,
-          onTap: _add,
+          onTap: onAdd,
         ),
     ];
   }
@@ -2401,39 +2509,103 @@ class _TrackSortPresetsButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
-    final bgColor = theme.colorScheme.secondary.withOpacityExt(0.15);
-    return ObxO(
-      rx: settings.mediaItemsTrackSortingPresets,
-      builder: (context, presetsMap) {
-        final activePreset = presetsMap[media]?.activePreset;
-        final title = activePreset?.name ?? lang.defaultLabel;
-        return NamidaInkWell(
-          borderRadius: 6.0,
-          padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
-          bgColor: bgColor,
-          onTap: () => _showMenu(context),
+    final title = presets.activePreset?.name ?? lang.defaultLabel;
+    return NamidaInkWell(
+      borderRadius: 6.0,
+      padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+      bgColor: const NColors(.secondary, opacity: 0.15),
+      onTap: () => _showMenu(context),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(
+            Broken.layer,
+            size: 16.0,
+          ),
+          const SizedBox(width: 4.0),
+          Flexible(
+            child: NamidaText(
+              title,
+              style: const NText(.small, weight: FontWeight.w700),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TrackSearchFilterPresetHint extends StatelessWidget {
+  const _TrackSearchFilterPresetHint();
+
+  static bool _isPresetActive() => settings.trackSearchFilterPresets.valueR.activeIndex != null;
+
+  @override
+  Widget build(BuildContext context) {
+    return ObxSelect(
+      selector: _isPresetActive,
+      builder: (context, isPresetActive) => AnimatedShow(
+        show: isPresetActive,
+        duration: const Duration(milliseconds: 250),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
           child: Row(
-            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: .center,
             children: [
               const Icon(
-                Broken.layer,
+                Broken.info_circle,
                 size: 16.0,
               ),
-              const SizedBox(width: 4.0),
+              const SizedBox(
+                width: 6.0,
+              ),
               Flexible(
-                child: Text(
-                  title,
-                  style: textTheme.displaySmall?.copyWith(fontWeight: FontWeight.w700),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                child: NamidaText(
+                  lang.presetOnlyAppliesToSearchPage,
+                  style: NText.small,
                 ),
               ),
             ],
           ),
-        );
-      },
+        ),
+      ),
+    );
+  }
+}
+
+class _TrackSearchFilterTile extends StatelessWidget {
+  final TrackSearchFilter filter;
+
+  const _TrackSearchFilterTile({
+    required this.filter,
+  });
+
+  void _onTap() {
+    final filters = settings.trackSearchFilter.value;
+    final isActive = filters.contains(filter);
+    if (isActive && filters.length <= 1) {
+      showMinimumItemsSnack(1);
+      return;
+    }
+    final newFilters = isActive ? filters.where((e) => e != filter).toFixedList() : [...filters, filter];
+    settings.updateTrackSearchFilter(newFilters);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(3.0),
+      child: ObxO(
+        rx: settings.trackSearchFilter,
+        builder: (context, filters) => ListTileWithCheckMark(
+          title: filter.toText(),
+          subtitle: filter.canAffectPerformance ? lang.performanceNote : '',
+          onTap: _onTap,
+          active: filters.contains(filter),
+        ),
+      ),
     );
   }
 }
@@ -2449,20 +2621,23 @@ class _SortEntryReverseButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final iconColor = isReversed ? theme.colorScheme.secondary : theme.iconTheme.color?.withOpacityExt(0.5);
-    return NamidaIconButton(
-      horizontalPadding: 8.0,
-      icon: isReversed ? Broken.arrow_up_3 : Broken.arrow_down_2,
-      iconSize: 18.0,
-      iconColor: iconColor,
-      tooltip: () => lang.reverseOrder,
-      onPressed: onTap,
+    return NBuilder(
+      builder: (context, colors) {
+        final iconColor = isReversed ? colors.secondary : colors.icon.withOpacityExt(0.5);
+        return NamidaIconButton(
+          horizontalPadding: 8.0,
+          icon: isReversed ? Broken.arrow_up_3 : Broken.arrow_down_2,
+          iconSize: 18.0,
+          iconColor: NColors.fixed(iconColor),
+          tooltip: () => lang.reverseOrder,
+          onPressed: onTap,
+        );
+      },
     );
   }
 }
 
-abstract final class _TrackSortPresetNameDialog {
+abstract final class _PresetNameDialog {
   static void show({
     required String title,
     required String initialName,
@@ -2523,15 +2698,13 @@ class _SimilarTracksSourcesChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
     return NamidaPopupWrapper(
       children: () => const [
         _SimilarTracksSourcesGrid(),
       ],
       child: NamidaInkWell(
         padding: const EdgeInsets.symmetric(vertical: 6.0, horizontal: 12.0),
-        bgColor: theme.cardColor.withOpacityExt(0.5),
+        bgColor: const NColors(.card, opacity: 0.5),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -2546,9 +2719,9 @@ class _SimilarTracksSourcesChip extends StatelessWidget {
                 final activeCount = insertions[QueueInsertionType.similar]?.similarSources.length ?? 0;
                 final totalCount = SimilarTracksSource.values.length;
                 final text = activeCount == totalCount ? lang.all : '$activeCount/$totalCount';
-                return Text(
+                return NamidaText(
                   text,
-                  style: textTheme.displayMedium,
+                  style: NText.medium,
                 );
               },
             ),

@@ -21,11 +21,13 @@ import 'package:namida/core/extensions.dart';
 import 'package:namida/core/functions.dart';
 import 'package:namida/core/icon_fonts/broken_icons.dart';
 import 'package:namida/core/namida_converter_ext.dart';
+import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/translations/language.dart';
 import 'package:namida/core/utils.dart';
 import 'package:namida/ui/widgets/circular_percentages.dart';
 import 'package:namida/ui/widgets/custom_widgets.dart';
 import 'package:namida/ui/widgets/disabled_by_pill.dart';
+import 'package:namida/ui/widgets/reorderable_active_items_list.dart';
 import 'package:namida/ui/widgets/settings_card.dart';
 import 'package:namida/youtube/class/youtube_id.dart';
 import 'package:namida/youtube/controller/youtube_info_controller.dart';
@@ -128,12 +130,16 @@ class PlaybackSettings extends SettingSubpageProvider {
         onChanged: (_) => WakelockController.inst.onSettingChanged(),
       ),
       SettingCustom(
-        availability: NamidaFeaturesAvailablity.android,
+        availability: const NamidaFeaturesAvailablityGroup(items: [NamidaFeaturesAvailablity.android, NamidaFeaturesAvailablity.ios, NamidaFeaturesAvailablity.macos]),
         title: () => lang.notificationButtons,
-        keys: [settings.notificationButtons, settings.notificationButtonsPlaylist, settings.notificationButtonsYTPlaylist],
-        tile: (args) => _NotificationButtonsTile(
-          bgColor: args.bgColor,
-        ),
+        keys: [
+          settings.notificationButtons, settings.notificationButtonsPlaylist, settings.notificationButtonsYTPlaylist, //
+          settings.nowPlayingSeekBackward, settings.nowPlayingSeekForward, //
+        ],
+        tile: (args) {
+          if (NamidaFeaturesVisibility.nowPlayingSeekButtons) return _NowPlayingButtonsTile(bgColor: args.bgColor);
+          return _NotificationButtonsTile(bgColor: args.bgColor);
+        },
       ),
       SettingToggle(
         settings.player.lockscreenArtwork,
@@ -147,7 +153,9 @@ class PlaybackSettings extends SettingSubpageProvider {
       ),
       SettingChoice(
         settings.player.killAfterDismissingApp,
-        availability: const NamidaFeaturesAvailablityGroup(items: [NamidaFeaturesAvailablity.android, NamidaFeaturesAvailablity.windows, NamidaFeaturesAvailablity.linux]),
+        availability: const NamidaFeaturesAvailablityGroup(
+          items: [NamidaFeaturesAvailablity.android, NamidaFeaturesAvailablity.windows, NamidaFeaturesAvailablity.linux, NamidaFeaturesAvailablity.macos],
+        ),
         values: KillAppMode.values,
         valueToText: (e) => e.toText(),
         icon: Broken.forbidden_2,
@@ -309,7 +317,7 @@ class PlaybackSettings extends SettingSubpageProvider {
         ),
       ),
       SettingExpansion(
-        availability: NamidaFeaturesAvailablity.android,
+        availability: NamidaFeaturesAvailablityGroup.mobile,
         icon: Broken.notification_bing,
         title: () => lang.onInterruption,
         children: [
@@ -334,7 +342,7 @@ class PlaybackSettings extends SettingSubpageProvider {
         ],
       ),
       SettingExpansion(
-        availability: NamidaFeaturesAvailablity.android,
+        availability: NamidaFeaturesAvailablityGroup.mobile,
         icon: Broken.electricity,
         title: () => lang.onDeviceConnect,
         children: [
@@ -579,7 +587,7 @@ class _VideoQualityTile extends StatelessWidget {
     settings.youtubeVideoQualities.update((list) => list.sortByReverse((e) => kStockVideoQualities.indexOf(e)));
   }
 
-  void _showDialog(TextTheme textTheme) {
+  void _showDialog(TextStyle textStyle) {
     NamidaNavigator.inst.navigateDialog(
       dialog: CustomBlurryDialog(
         title: lang.videoQuality,
@@ -591,7 +599,7 @@ class _VideoQualityTile extends StatelessWidget {
           DoneButton(),
         ],
         child: DefaultTextStyle(
-          style: textTheme.displaySmall!,
+          style: textStyle,
           child: Column(
             children: [
               Text(lang.videoQualitySubtitle),
@@ -632,7 +640,7 @@ class _VideoQualityTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = context.textTheme;
+    final textStyle = NText.small.of(context);
     return Obx(
       (context) => CustomListTile(
         bgColor: bgColor,
@@ -640,7 +648,7 @@ class _VideoQualityTile extends StatelessWidget {
         title: lang.videoQuality,
         icon: Broken.story,
         trailingText: settings.youtubeVideoQualities.valueR.first,
-        onTap: () => _showDialog(textTheme),
+        onTap: () => _showDialog(textStyle),
       ),
     );
   }
@@ -672,24 +680,23 @@ class _LocalVideoMatchingTile extends StatelessWidget {
         ],
         child: Column(
           children: [
-            Obx(
-              (context) => CustomListTile(
+            NamidaPopupWrapper(
+              childrenDefault: _getMatchingTypeItems,
+              childBuilder: (openMenu) => CustomListTile(
                 icon: Broken.video_tick,
                 title: lang.matchingType,
                 trailing: NamidaPopupWrapper(
                   childrenDefault: _getMatchingTypeItems,
-                  child: Text(
-                    settings.localVideoMatchingType.valueR.toText(),
-                    style: CustomListTile.getTrailingTextStyle(context.theme),
-                    maxLines: 1,
+                  child: Obx(
+                    (context) => NamidaText(
+                      settings.localVideoMatchingType.valueR.toText(),
+                      style: NText.medium,
+                      color: const NColors(.onSurface, opacity: 0.78),
+                      maxLines: 1,
+                    ),
                   ),
                 ),
-                onTap: () {
-                  const menu = NamidaPopupWrapper(
-                    childrenDefault: _getMatchingTypeItems,
-                  );
-                  menu.showPopupMenu(context);
-                },
+                onTap: openMenu,
               ),
             ),
             Obx(
@@ -722,9 +729,10 @@ class _LocalVideoMatchingTile extends StatelessWidget {
             children: [
               const LocalVideosRescanButton(),
               const SizedBox(width: 8.0),
-              Text(
+              NamidaText(
                 settings.localVideoMatchingType.valueR.toText(),
-                style: CustomListTile.getTrailingTextStyle(context.theme),
+                style: NText.medium,
+                color: const NColors(.onSurface, opacity: 0.78),
                 maxLines: 1,
               ),
             ],
@@ -822,40 +830,46 @@ class _ReplayGainTile extends StatelessWidget {
 
   const _ReplayGainTile({required this.bgColor});
 
-  void _onTypeTap(ReplayGainType e) {
+  static void _onTypeTap(ReplayGainType e) {
     NamidaNavigator.inst.popMenu();
     settings.player.replayGainType.save(e);
     PlaybackSettings._applyReplayGainType();
   }
 
+  static Iterable<NamidaPopupItem> _getTypeItems() => ReplayGainType.valuesForPlatform.map(
+    (e) => NamidaPopupItem(
+      icon: Broken.airpods,
+      secondaryIcon: Broken.voice_cricle,
+      selected: e == settings.player.replayGainType.value,
+      title: e.toText(),
+      onTap: () => _onTypeTap(e),
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
-    return CustomListTile(
-      bgColor: bgColor,
-      leading: const StackedIcon(
-        baseIcon: Broken.airpods,
-        secondaryIcon: Broken.voice_cricle,
-      ),
-      title: lang.normalizeAudio,
-      subtitle: lang.normalizeAudioSubtitle,
-      trailing: NamidaPopupWrapper(
-        childrenDefault: () => ReplayGainType.valuesForPlatform.map(
-          (e) => NamidaPopupItem(
-            icon: Broken.airpods,
-            secondaryIcon: Broken.voice_cricle,
-            selected: e == settings.player.replayGainType.value,
-            title: e.toText(),
-            onTap: () => _onTypeTap(e),
+    return NamidaPopupWrapper(
+      childrenDefault: _getTypeItems,
+      childBuilder: (openMenu) => CustomListTile(
+        bgColor: bgColor,
+        leading: const StackedIcon(
+          baseIcon: Broken.airpods,
+          secondaryIcon: Broken.voice_cricle,
+        ),
+        title: lang.normalizeAudio,
+        subtitle: lang.normalizeAudioSubtitle,
+        trailing: NamidaPopupWrapper(
+          childrenDefault: _getTypeItems,
+          child: ObxO(
+            rx: settings.player.replayGainType,
+            builder: (context, replayGainType) => NamidaText(
+              "${replayGainType.toText()}${replayGainType == ReplayGainType.platform_default ? '\n(${ReplayGainType.getPlatformDefault().toText()})' : ''}",
+              style: NText.medium,
+              textAlign: TextAlign.center,
+            ),
           ),
         ),
-        child: ObxO(
-          rx: settings.player.replayGainType,
-          builder: (context, replayGainType) => Text(
-            "${replayGainType.toText()}${replayGainType == ReplayGainType.platform_default ? '\n(${ReplayGainType.getPlatformDefault().toText()})' : ''}",
-            style: context.textTheme.displayMedium,
-            textAlign: TextAlign.center,
-          ),
-        ),
+        onTap: openMenu,
       ),
     );
   }
@@ -1041,31 +1055,37 @@ class _InterruptionActionTile extends StatelessWidget {
 
   const _InterruptionActionTile({required this.type, required this.bgColor});
 
+  Iterable<NamidaPopupItem> _getActionItems() => InterruptionAction.values.map(
+    (action) => NamidaPopupItem(
+      icon: action.toIcon(),
+      title: action.toText(),
+      selected: action == settings.player.onInterrupted.value[type],
+      onTap: () => settings.player.onInterrupted.update((actions) => actions[type] = action),
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
-    return CustomListTile(
-      bgColor: bgColor,
-      icon: type.toIcon(),
-      title: type.toText(),
-      subtitle: type.toSubtitle(),
-      trailing: NamidaPopupWrapper(
-        childrenDefault: () => InterruptionAction.values.map(
-          (action) => NamidaPopupItem(
-            icon: action.toIcon(),
-            title: action.toText(),
-            selected: action == settings.player.onInterrupted.value[type],
-            onTap: () => settings.player.onInterrupted.update((actions) => actions[type] = action),
+    return NamidaPopupWrapper(
+      childrenDefault: _getActionItems,
+      childBuilder: (openMenu) => CustomListTile(
+        bgColor: bgColor,
+        icon: type.toIcon(),
+        title: type.toText(),
+        subtitle: type.toSubtitle(),
+        trailing: NamidaPopupWrapper(
+          childrenDefault: _getActionItems,
+          child: Obx(
+            (context) {
+              final actionInSetting = settings.player.onInterrupted.valueR[type] ?? InterruptionAction.pause;
+              return NamidaText(
+                actionInSetting.toText(),
+                style: NText.medium,
+              );
+            },
           ),
         ),
-        child: Obx(
-          (context) {
-            final actionInSetting = settings.player.onInterrupted.valueR[type] ?? InterruptionAction.pause;
-            return Text(
-              actionInSetting.toText(),
-              style: context.textTheme.displayMedium,
-            );
-          },
-        ),
+        onTap: openMenu,
       ),
     );
   }
@@ -1139,7 +1159,7 @@ class _CountListenAfterTile extends StatelessWidget {
 
   const _CountListenAfterTile({required this.bgColor});
 
-  void _showDialog(TextTheme textTheme) {
+  void _showDialog() {
     NamidaNavigator.inst.navigateDialog(
       dialog: CustomBlurryDialog(
         title: lang.choose,
@@ -1148,9 +1168,9 @@ class _CountListenAfterTile extends StatelessWidget {
         ],
         child: Column(
           children: [
-            Text(
+            NamidaText(
               lang.minValueToCountTrackListen,
-              style: textTheme.displayLarge,
+              style: NText.large,
             ),
             const SizedBox(
               height: 32.0,
@@ -1168,9 +1188,9 @@ class _CountListenAfterTile extends StatelessWidget {
                     topText: lang.seconds.capitalizeFirst(),
                     textPadding: 8.0,
                   ),
-                  Text(
+                  NamidaText(
                     lang.or,
-                    style: textTheme.displayMedium,
+                    style: NText.medium,
                   ),
                   NamidaWheelSlider(
                     min: 20,
@@ -1192,13 +1212,12 @@ class _CountListenAfterTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = context.textTheme;
     return Obx(
       (context) => CustomListTile(
         bgColor: bgColor,
         icon: Broken.timer,
         title: lang.minValueToCountTrackListen,
-        onTap: () => _showDialog(textTheme),
+        onTap: _showDialog,
         trailingText: "${settings.isTrackPlayedSecondsCount.valueR}s | ${settings.isTrackPlayedPercentageCount.valueR}%",
       ),
     );
@@ -1248,22 +1267,13 @@ class _NotificationButtonsEditorState extends State<_NotificationButtonsEditor> 
   /// android 13+ always shows previous, play/pause & next first, only the rest can be changed.
   static final _isSystemLayout = NamidaFeaturesAvailablity.android13and_plus.resolve();
   static const _kMaxButtons = 5;
-  static const _kLockedOpacity = 0.5;
+  static final _editableButtons = NotificationButton.values.where(_isEditable).toFixedList();
 
-  late final RxList<_NotificationButtonItem> _itemsRx;
-
-  @override
-  void initState() {
-    super.initState();
-    final activeButtons = settings.notificationButtons.value.ensurePlayPause();
-    final activeItems = activeButtons.where(_isEditable).map((button) => (button: button, active: true));
-    final inactiveItems = NotificationButton.values.where((button) => _isEditable(button) && !activeButtons.contains(button)).map((button) => (button: button, active: false));
-    _itemsRx = <_NotificationButtonItem>[...activeItems, ...inactiveItems].obs;
-  }
+  final _activeButtonsRx = settings.notificationButtons.value.ensurePlayPause().where(_isEditable).toList().obs;
 
   @override
   void dispose() {
-    _itemsRx.close();
+    _activeButtonsRx.close();
     super.dispose();
   }
 
@@ -1271,22 +1281,25 @@ class _NotificationButtonsEditorState extends State<_NotificationButtonsEditor> 
 
   static bool _isLocked(NotificationButton button) => _isSystemLayout ? button.isTransport : button == NotificationButton.playPause;
 
-  static List<NotificationButton> _getActiveButtons(List<_NotificationButtonItem> items) {
+  static List<NotificationButton> _getActiveButtons(List<NotificationButton> editableActiveButtons) {
     return [
       if (_isSystemLayout) ...NotificationButton.transportButtons,
-      ...items.where((item) => item.active).map((item) => item.button),
+      ...editableActiveButtons,
     ];
   }
 
-  void _save() {
-    final buttons = _getActiveButtons(_itemsRx.value);
+  static bool _hasPlaylist() => settings.notificationButtonsPlaylist.value != null || settings.notificationButtonsYTPlaylist.value != null;
+
+  void _onChanged(List<NotificationButton> editableActiveButtons) {
+    _activeButtonsRx.value = editableActiveButtons;
+    final buttons = _getActiveButtons(editableActiveButtons);
     settings.notificationButtons.replace(buttons);
   }
 
   /// shows why when the limit is reached.
   bool _canActivateOneMore() {
     final maxActive = _isSystemLayout ? _kMaxButtons - NotificationButton.transportButtons.length : _kMaxButtons;
-    final activeCount = _itemsRx.value.where((e) => e.active).length;
+    final activeCount = _activeButtonsRx.value.length;
     if (activeCount >= maxActive) {
       snackyy(title: lang.note, message: '${lang.maximum}: $maxActive');
       return false;
@@ -1299,121 +1312,68 @@ class _NotificationButtonsEditorState extends State<_NotificationButtonsEditor> 
     return true;
   }
 
-  void _setActive(int index, bool active) {
-    if (active && !_canActivateOneMore()) return;
-    final button = _itemsRx.value[index].button;
-    _itemsRx[index] = (button: button, active: active);
-    _save();
+  bool _canActivate(NotificationButton button) {
+    if (!_canActivateOneMore()) return false;
+    if (button != NotificationButton.addToPlaylist || _hasPlaylist()) return true;
+    _pickPlaylists(false);
+    return false;
   }
 
-  void _onTap(int index) {
-    final (:button, :active) = _itemsRx.value[index];
-    if (button == NotificationButton.playPause) return;
-    if (button == NotificationButton.addToPlaylist) {
-      _pickPlaylists(index, active);
-      return;
-    }
-    _setActive(index, !active);
+  bool _interceptTap(NotificationButton button, bool isActive) {
+    if (button != NotificationButton.addToPlaylist) return false;
+    if (isActive || _canActivateOneMore()) _pickPlaylists(isActive);
+    return true;
   }
 
-  void _pickPlaylists(int index, bool isActive) {
-    if (!isActive && !_canActivateOneMore()) return;
+  void _pickPlaylists(bool isActive) {
     NamidaNavigator.inst.navigateDialog(
       dialog: _NotificationPlaylistsDialog(
         onConfirm: (hasPlaylist) {
-          if (hasPlaylist != isActive) _setActive(index, hasPlaylist);
+          if (hasPlaylist != isActive) _setPlaylistButtonActive(hasPlaylist);
         },
       ),
     );
   }
 
-  void _onReorder(int oldIndex, int newIndex) {
-    if (newIndex > oldIndex) newIndex -= 1;
-    final item = _itemsRx.value.removeAt(oldIndex);
-    _itemsRx.value.insert(newIndex, item);
-    _itemsRx.refresh();
-    _save();
+  void _setPlaylistButtonActive(bool active) {
+    if (active && !_canActivateOneMore()) return;
+    const button = NotificationButton.addToPlaylist;
+    final currentButtons = _activeButtonsRx.value;
+    final buttons = active ? [...currentButtons, button] : currentButtons.where((e) => e != button).toList();
+    _onChanged(buttons);
   }
 
   @override
   Widget build(BuildContext context) {
     return ObxO(
-      rx: _itemsRx,
-      builder: (context, items) => Column(
+      rx: _activeButtonsRx,
+      builder: (context, activeButtons) => Column(
         children: [
           _NotificationButtonsPreview(
-            buttons: _getActiveButtons(items),
+            buttons: _getActiveButtons(activeButtons),
             isLocked: _isLocked,
           ),
           const SizedBox(height: 8.0),
           Expanded(
-            child: NamidaListView(
-              showScrollbarOnStart: true,
-              itemExtent: null,
-              listBottomPadding: 0,
-              itemCount: items.length,
-              onReorder: _onReorder,
-              itemBuilder: (context, i) {
-                final (:button, :active) = items[i];
-                final title = "${i + 1}. ${button.toText()}";
-                void onTap() => _onTap(i);
-                final tile = button == NotificationButton.addToPlaylist
-                    ? _NotificationPlaylistsTile(
-                        title: title,
-                        active: active,
-                        onTap: onTap,
-                      )
-                    : ListTileWithCheckMark(
-                        title: title,
-                        icon: button.toIcon(),
-                        active: active,
-                        onTap: onTap,
-                      );
-                final isLocked = _isLocked(button);
-                final shownTile = isLocked
-                    ? Opacity(
-                        opacity: _kLockedOpacity,
-                        child: tile,
-                      )
-                    : tile;
-                return Padding(
-                  key: ValueKey(button),
-                  padding: const EdgeInsets.all(3.0),
-                  child: shownTile,
+            child: Obx(
+              (context) {
+                final playlistNames = [settings.notificationButtonsPlaylist.valueR, settings.notificationButtonsYTPlaylist.valueR].nonNulls.join(', ');
+                return NamidaReorderableActiveItemsList(
+                  items: _editableButtons,
+                  activeItems: activeButtons,
+                  toText: (button) => button.toText(),
+                  toIcon: (button) => button.toIcon(),
+                  toSubtitle: (button) => button == NotificationButton.addToPlaylist ? playlistNames : '',
+                  isLocked: _isLocked,
+                  canActivate: _canActivate,
+                  interceptTap: _interceptTap,
+                  onChanged: _onChanged,
                 );
               },
             ),
           ),
         ],
       ),
-    );
-  }
-}
-
-class _NotificationPlaylistsTile extends StatelessWidget {
-  final String title;
-  final bool active;
-  final void Function() onTap;
-
-  const _NotificationPlaylistsTile({
-    required this.title,
-    required this.active,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Obx(
-      (context) {
-        final playlistNames = [settings.notificationButtonsPlaylist.valueR, settings.notificationButtonsYTPlaylist.valueR].nonNulls.join(', ');
-        return ListTileWithCheckMark(
-          title: title,
-          subtitle: playlistNames,
-          icon: NotificationButton.addToPlaylist.toIcon(),
-          active: active,
-          onTap: onTap,
-        );
-      },
     );
   }
 }
@@ -1429,26 +1389,100 @@ class _NotificationButtonsPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final iconColor = theme.iconTheme.color;
-    final lockedIconColor = iconColor?.withOpacityExt(_NotificationButtonsEditorState._kLockedOpacity);
+    const lockedIconColor = NColors(.icon, opacity: NamidaReorderableActiveItemsList.kLockedOpacity);
     final icons = buttons
         .map(
-          (button) => Icon(
+          (button) => NIcon(
             button.toIcon(),
             size: 20.0,
-            color: isLocked(button) ? lockedIconColor : iconColor,
+            color: isLocked(button) ? lockedIconColor : NColors.icon,
           ),
         )
         .toFixedList();
     return NamidaInkWell(
-      bgColor: theme.cardColor,
+      bgColor: NColors.card,
       borderRadius: 12.0,
       padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 10.0),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: icons,
       ),
+    );
+  }
+}
+
+class _NowPlayingButtonsTile extends StatelessWidget {
+  final Color? bgColor;
+
+  const _NowPlayingButtonsTile({required this.bgColor});
+
+  @override
+  Widget build(BuildContext context) {
+    return Obx(
+      (context) {
+        final buttons = NotificationButton.getNowPlayingButtons(
+          isSeekBackward: settings.nowPlayingSeekBackward.valueR,
+          isSeekForward: settings.nowPlayingSeekForward.valueR,
+        );
+        return CustomListTile(
+          bgColor: bgColor,
+          icon: Broken.notification_bing,
+          title: lang.notificationButtons,
+          subtitle: buttons.map((e) => e.toText()).join(', '),
+          trailing: const Icon(
+            Broken.arrow_right_3,
+            size: 18.0,
+          ),
+          onTap: () => NamidaNavigator.inst.navigateDialog(
+            dialog: CustomBlurryDialog(
+              title: lang.notificationButtons,
+              actions: const [
+                DoneButton(),
+              ],
+              child: const _NowPlayingButtonsEditor(),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _NowPlayingButtonsEditor extends StatelessWidget {
+  const _NowPlayingButtonsEditor();
+
+  static bool _isLocked(NotificationButton button) => button == NotificationButton.playPause;
+
+  @override
+  Widget build(BuildContext context) {
+    return Obx(
+      (context) {
+        final isSeekBackward = settings.nowPlayingSeekBackward.valueR;
+        final isSeekForward = settings.nowPlayingSeekForward.valueR;
+        final buttons = NotificationButton.getNowPlayingButtons(isSeekBackward: isSeekBackward, isSeekForward: isSeekForward);
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _NotificationButtonsPreview(
+              buttons: buttons,
+              isLocked: _isLocked,
+            ),
+            const SizedBox(height: 8.0),
+            CustomSwitchListTile(
+              icon: NotificationButton.seekBackward.toIcon(),
+              title: lang.seekBackward,
+              value: isSeekBackward,
+              onChanged: (isTrue) => settings.nowPlayingSeekBackward.save(!isTrue),
+            ),
+            CustomSwitchListTile(
+              icon: NotificationButton.seekForward.toIcon(),
+              title: lang.seekForward,
+              value: isSeekForward,
+              onChanged: (isTrue) => settings.nowPlayingSeekForward.save(!isTrue),
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -1488,7 +1522,6 @@ class _NotificationPlaylistsDialogState extends State<_NotificationPlaylistsDial
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = context.textTheme;
     final localCount = _localNames.length;
     return CustomBlurryDialog(
       title: lang.addToPlaylist,
@@ -1512,9 +1545,9 @@ class _NotificationPlaylistsDialogState extends State<_NotificationPlaylistsDial
               final source = index == 0 ? lang.local : lang.youtube;
               return Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 8.0),
-                child: Text(
+                child: NamidaText(
                   "${lang.playlists} ($source)",
-                  style: textTheme.displayMedium,
+                  style: NText.medium,
                 ),
               );
             }
@@ -1557,36 +1590,34 @@ class _CrossfadeModeTile extends StatelessWidget {
     ),
   );
 
-  void _showModes(BuildContext context) {
-    const menu = NamidaPopupWrapper(
-      childrenDefault: _getModeItems,
-    );
-    menu.showPopupMenu(context);
-  }
-
   @override
   Widget build(BuildContext context) {
     return Obx(
       (context) {
         final mode = settings.player.crossfadeMode.valueR;
-        return CustomListTile(
-          bgColor: bgColor,
-          enabled: RhythmController.inst.hasAutoTransitionsR,
-          icon: Broken.brush_3,
-          title: lang.style,
-          trailing: NamidaPopupWrapper(
-            childrenDefault: _getModeItems,
-            child: Text(
-              mode.toText(),
-              style: CustomListTile.getTrailingTextStyle(context.theme),
-              maxLines: 1,
+        final isEnabled = RhythmController.inst.hasAutoTransitionsR;
+        return NamidaPopupWrapper(
+          childrenDefault: _getModeItems,
+          openOnTap: isEnabled,
+          openOnLongPress: isEnabled,
+          childBuilder: (openMenu) => CustomListTile(
+            bgColor: bgColor,
+            enabled: isEnabled,
+            icon: Broken.brush_3,
+            title: lang.style,
+            trailing: NamidaPopupWrapper(
+              childrenDefault: _getModeItems,
+              child: NamidaText(
+                mode.toText(),
+                style: NText.medium,
+                color: const NColors(.onSurface, opacity: 0.78),
+                maxLines: 1,
+              ),
             ),
+            onTap: openMenu,
           ),
-          onTap: () => _showModes(context),
         );
       },
     );
   }
 }
-
-typedef _NotificationButtonItem = ({NotificationButton button, bool active});

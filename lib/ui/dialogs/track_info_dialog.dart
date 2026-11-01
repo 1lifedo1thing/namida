@@ -14,6 +14,7 @@ import 'package:namida/controller/history_controller.dart';
 import 'package:namida/controller/indexer_controller.dart';
 import 'package:namida/controller/navigator_controller.dart';
 import 'package:namida/controller/player_controller.dart';
+import 'package:namida/controller/rhythm_controller.dart';
 import 'package:namida/controller/settings_controller.dart';
 import 'package:namida/controller/time_ago_controller.dart';
 import 'package:namida/core/constants.dart';
@@ -21,6 +22,7 @@ import 'package:namida/core/enums.dart';
 import 'package:namida/core/extensions.dart';
 import 'package:namida/core/icon_fonts/broken_icons.dart';
 import 'package:namida/core/namida_converter_ext.dart';
+import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/themes.dart';
 import 'package:namida/core/translations/language.dart';
 import 'package:namida/core/utils.dart';
@@ -97,7 +99,7 @@ Future<void> showTrackInfoDialog(
         rx: color,
         builder: (context, dialogColor) {
           final theme = AppThemes.inst.getAppTheme(dialogColor, null, true);
-          return AnimatedThemeOrTheme(
+          return NTheme(
             data: theme,
             child: CustomBlurryDialog(
               theme: theme,
@@ -187,6 +189,15 @@ Future<void> showTrackInfoDialog(
   final hasUnknownMood = TrackExtUtils.hasUnknownMoods(effectiveMoods);
   final dateAddedText = trackExt?.dateAdded.dateAndClockFormattedOriginal ?? '';
   final dateModifiedText = trackExt?.dateModified.dateAndClockFormattedOriginal ?? '';
+  final rhythmAnalysis = RhythmController.inst.analysisOf(track);
+  final tagBpm = trackExt?.bpm ?? 0;
+  final analyzedBpm = rhythmAnalysis?.bpm ?? 0;
+  final isBpmAnalyzed = tagBpm == 0 && analyzedBpm > 0;
+  final bpm = isBpmAnalyzed ? analyzedBpm : tagBpm;
+  final tagMusicalKey = trackExt?.musicalKey ?? '';
+  final analyzedMusicalKey = rhythmAnalysis?.key ?? '';
+  final isMusicalKeyAnalyzed = tagMusicalKey.isEmpty && analyzedMusicalKey.isNotEmpty;
+  final musicalKey = isMusicalKeyAnalyzed ? analyzedMusicalKey : tagMusicalKey;
 
   NamidaNavigator.inst.navigateDialog(
     onDisposing: () {
@@ -197,7 +208,7 @@ Future<void> showTrackInfoDialog(
       rx: color,
       builder: (context, dialogColor) {
         final theme = AppThemes.inst.getAppTheme(dialogColor, null, true);
-        return AnimatedThemeOrTheme(
+        return NTheme(
           data: theme,
           child: CustomBlurryDialog(
             theme: theme,
@@ -208,23 +219,29 @@ Future<void> showTrackInfoDialog(
             trailingWidgets: [
               ObxO(
                 rx: settings.showUnknownFieldsInTrackInfoDialog,
-                builder: (context, showUnknownFieldsInTrackInfoDialog) => NamidaIconButton(
-                  tooltip: () => lang.showHideUnknownFields,
-                  icon: showUnknownFieldsInTrackInfoDialog ? Broken.eye : Broken.eye_slash,
-                  iconColor: theme.colorScheme.primary,
-                  onPressed: () => settings.showUnknownFieldsInTrackInfoDialog.save(!settings.showUnknownFieldsInTrackInfoDialog.value),
+                builder: (context, showUnknownFieldsInTrackInfoDialog) => NBuilder(
+                  builder: (context, colors) => NamidaIconButton(
+                    tooltip: () => lang.showHideUnknownFields,
+                    icon: showUnknownFieldsInTrackInfoDialog ? Broken.eye : Broken.eye_slash,
+                    iconColor: NColors.fixed(colors.primary),
+                    onPressed: () => settings.showUnknownFieldsInTrackInfoDialog.save(!settings.showUnknownFieldsInTrackInfoDialog.value),
+                  ),
                 ),
               ),
-              NamidaLocalLikeButton(
-                track: track,
-                size: 24,
-                color: theme.colorScheme.primary,
+              NBuilder(
+                builder: (context, colors) => NamidaLocalLikeButton(
+                  track: track,
+                  size: 24,
+                  color: colors.primary,
+                ),
               ),
-              NamidaIconButton(
-                tooltip: () => lang.preview,
-                icon: Broken.play,
-                iconColor: theme.colorScheme.primary,
-                onPressed: showPreviewTrackDialog,
+              NBuilder(
+                builder: (context, colors) => NamidaIconButton(
+                  tooltip: () => lang.preview,
+                  icon: Broken.play,
+                  iconColor: NColors.fixed(colors.primary),
+                  onPressed: showPreviewTrackDialog,
+                ),
               ),
             ],
             icon: Broken.info_circle,
@@ -254,7 +271,7 @@ Future<void> showTrackInfoDialog(
                           children: [
                             const SizedBox(height: 12.0),
                             NamidaInkWell(
-                              padding: EdgeInsets.symmetric(horizontal: 4.0, vertical: 8.0),
+                              padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 8.0),
                               onTap: () => showTrackListensDialog(track, datesOfListen: totalListens, colorScheme: color.value),
                               borderRadius: 12.0,
                               child: Row(
@@ -288,13 +305,14 @@ Future<void> showTrackInfoDialog(
                                               child: Wrap(
                                                 crossAxisAlignment: WrapCrossAlignment.center,
                                                 children: [
-                                                  Text(
+                                                  NamidaText(
                                                     '${lang.totalListens}: ',
-                                                    style: theme.textTheme.displaySmall,
+                                                    style: NText.small,
                                                   ),
-                                                  Text(
+                                                  NamidaText(
                                                     '${totalListens.length}',
-                                                    style: theme.textTheme.displaySmall?.copyWith(color: theme.colorScheme.primary, fontWeight: FontWeight.w600),
+                                                    style: const NText(.small, weight: FontWeight.w600),
+                                                    color: NColors.primary,
                                                   ),
                                                 ],
                                               ),
@@ -310,9 +328,9 @@ Future<void> showTrackInfoDialog(
                                             ),
                                             const SizedBox(width: 4.0),
                                             Expanded(
-                                              child: Text(
+                                              child: NamidaText(
                                                 firstListenTrack?.dateAndClockFormattedOriginal ?? lang.makeYourFirstListen,
-                                                style: theme.textTheme.displaySmall,
+                                                style: NText.small,
                                               ),
                                             ),
                                           ],
@@ -446,11 +464,20 @@ Future<void> showTrackInfoDialog(
 
                               ...trackPathDetailTilesSection,
 
-                              if (shouldShowTheField((trackExt.bpm ?? 0) == 0))
+                              if (shouldShowTheField(bpm == 0))
                                 TrackInfoListTile(
                                   title: 'BPM',
-                                  value: '${trackExt.bpm ?? 0}',
+                                  value: '$bpm',
                                   icon: Broken.alarm,
+                                  valueIcon: isBpmAnalyzed ? Broken.magicpen : null,
+                                ),
+
+                              if (shouldShowTheField(musicalKey.isEmpty))
+                                TrackInfoListTile(
+                                  title: lang.musicalKey,
+                                  value: musicalKey,
+                                  icon: Broken.musicnote,
+                                  valueIcon: isMusicalKeyAnalyzed ? Broken.magicpen : null,
                                 ),
 
                               if (shouldShowTheField(trackExt.releaseType == ''))
@@ -552,6 +579,7 @@ class TrackInfoListTile extends StatelessWidget {
   final String value;
   final List<String>? cards;
   final IconData icon;
+  final IconData? valueIcon;
   final bool hasLinks;
   final Widget? child;
 
@@ -561,6 +589,7 @@ class TrackInfoListTile extends StatelessWidget {
     required this.value,
     this.cards,
     required this.icon,
+    this.valueIcon,
     this.hasLinks = false,
     this.child,
   });
@@ -574,12 +603,23 @@ class TrackInfoListTile extends StatelessWidget {
     );
   }
 
+  static final _valueColor = NColors.custom((c) => Color.alphaBlend(c.primary.withOpacityExt(0.55), c.textMedium));
+
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
     const iconSize = 17.0;
     const textToIconPaddingCorrector = EdgeInsets.only(top: 1.0);
+    final valueIcon = this.valueIcon;
+    final valueIconWidget = valueIcon == null
+        ? null
+        : Padding(
+            padding: textToIconPaddingCorrector,
+            child: NIcon(
+              valueIcon,
+              size: 14.0,
+              color: _valueColor,
+            ),
+          );
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2.0),
       child: NamidaInkWell(
@@ -593,17 +633,18 @@ class TrackInfoListTile extends StatelessWidget {
             spacing: 4.0,
             runSpacing: 6.0,
             children: [
-              Icon(
+              NIcon(
                 icon,
                 size: iconSize,
-                color: theme.colorScheme.onSurface.withAlpha(220),
+                color: const NColors(.onSurface, opacity: 0.86),
               ),
               const SizedBox(width: 6.0),
               Padding(
                 padding: textToIconPaddingCorrector,
-                child: Text(
+                child: NamidaText(
                   '$title:',
-                  style: theme.textTheme.displaySmall?.copyWith(color: theme.colorScheme.onSurface.withAlpha(220)),
+                  style: NText.small,
+                  color: const NColors(.onSurface, opacity: 0.86),
                 ),
               ),
               const SizedBox(width: 4.0),
@@ -613,27 +654,24 @@ class TrackInfoListTile extends StatelessWidget {
                     child ??
                     (hasLinks
                         ? NamidaSelectableAutoLinkText(text: value == '' ? '?' : value)
-                        : Text(
+                        : NamidaText(
                             value == '' ? '?' : value,
-                            style: theme.textTheme.displayMedium?.copyWith(
-                              color: Color.alphaBlend(theme.colorScheme.primary.withAlpha(140), textTheme.displayMedium!.color!),
-                              fontSize: 13.5,
-                            ),
+                            style: const NText(.medium, size: .s13p5),
+                            color: _valueColor,
                           )),
               ),
+              ?valueIconWidget,
               ...?cards
                   ?.where((e) => e.isNotEmpty)
                   .map(
                     (e) => NamidaInkWell(
                       borderRadius: 5.0,
-                      bgColor: theme.cardColor,
+                      bgColor: NColors.card,
                       padding: const EdgeInsetsGeometry.symmetric(horizontal: 6.0, vertical: 3.0),
-                      child: Text(
+                      child: NamidaText(
                         e,
-                        style: theme.textTheme.displayMedium?.copyWith(
-                          color: Color.alphaBlend(theme.colorScheme.primary.withAlpha(140), textTheme.displayMedium!.color!),
-                          fontSize: 13.5,
-                        ),
+                        style: const NText(.medium, size: .s13p5),
+                        color: _valueColor,
                       ),
                     ),
                   )

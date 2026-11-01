@@ -9,9 +9,9 @@ import 'package:namida/core/icon_fonts/broken_icons.dart';
 import 'package:namida/core/namida_converter_ext.dart';
 import 'package:namida/core/translations/language.dart';
 import 'package:namida/core/utils.dart';
+import 'package:namida/ui/dialogs/color_picker_dialog.dart';
 import 'package:namida/ui/dialogs/edit_tags_dialog.dart';
 import 'package:namida/ui/widgets/custom_widgets.dart';
-import 'package:namida/ui/widgets/settings/theme_settings.dart';
 import 'package:namida/ui/widgets/settings_card.dart';
 import 'package:namida/youtube/class/sponsorblock.dart';
 import 'package:namida/youtube/class/youtube_id.dart';
@@ -61,7 +61,7 @@ class SponsorBlockSettingsPage extends StatelessWidget {
             ),
           ),
           CustomListTile(
-            leading: StackedIcon(
+            leading: const StackedIcon(
               baseIcon: Broken.forward,
               secondaryIcon: Broken.close_circle,
               secondaryIconSize: 12.0,
@@ -98,7 +98,7 @@ class SponsorBlockSettingsPage extends StatelessWidget {
               },
             ),
           ),
-          NamidaContainerDivider(
+          const NamidaContainerDivider(
             margin: EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
           ),
           ...SponsorBlockCategory.values.map((category) {
@@ -118,7 +118,7 @@ class SponsorBlockSettingsPage extends StatelessWidget {
               },
             );
           }),
-          NamidaContainerDivider(
+          const NamidaContainerDivider(
             margin: EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
           ),
           Obx(
@@ -172,7 +172,7 @@ class SponsorBlockSettingsPage extends StatelessWidget {
             icon: Broken.info_circle,
             title: lang.about,
             subtitle: "${lang.dataIsProvidedByName(name: _currentConfigValue.defaultServerAddress.replaceFirst('https://', '').addDQuotation())}. ${lang.learnMore}",
-            trailing: Icon(
+            trailing: const Icon(
               Broken.export_1,
               size: 18.0,
             ),
@@ -211,7 +211,7 @@ class _SponsorBlockCategoryTile extends StatelessWidget {
               );
             },
           ),
-          SizedBox(width: 4.0),
+          const SizedBox(width: 4.0),
         ],
         actions: const [
           DoneButton(),
@@ -246,7 +246,7 @@ class _SponsorBlockCategoryTile extends StatelessWidget {
               );
             }),
             if (category.canBeRemovedFromDownloads) ...[
-              NamidaContainerDivider(
+              const NamidaContainerDivider(
                 margin: EdgeInsets.symmetric(vertical: 8.0),
               ),
               Obx(
@@ -268,12 +268,20 @@ class _SponsorBlockCategoryTile extends StatelessWidget {
     );
   }
 
+  List<Color> _getSuggestedColors() {
+    final configs = settings.youtube.sponsorBlockSettings.value.configs;
+    final otherColors = SponsorBlockCategory.values.where((c) => c != category).map((c) => configs[c]?.color ?? c.defaultConfig.color);
+    return [category.defaultConfig.color, ...otherColors];
+  }
+
   void _showColorPicker(BuildContext context) {
+    final suggestedColors = _getSuggestedColors();
     NamidaNavigator.inst.navigateDialog(
       dialog: NamidaColorPickerDialog(
         cancelButton: true,
         doneText: lang.save,
         initialColor: config.color,
+        suggestedColors: suggestedColors,
         onDonePressed: (color) {
           onChanged(config.copyWith(color: color));
           NamidaNavigator.inst.closeDialog();
@@ -312,7 +320,7 @@ class _ColorCircle extends StatelessWidget {
       child: Stack(
         alignment: Alignment.center,
         children: [
-          SizedBox(
+          const SizedBox(
             width: 29.0,
             height: 29.0,
             child: DecoratedBox(

@@ -1,7 +1,6 @@
 import 'dart:async';
-import 'dart:ui';
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
@@ -9,7 +8,7 @@ import 'package:namida/controller/current_color.dart';
 import 'package:namida/controller/navigator_controller.dart';
 import 'package:namida/core/constants.dart';
 import 'package:namida/core/extensions.dart';
-import 'package:namida/core/ui_scale.dart';
+import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/utils.dart';
 import 'package:namida/ui/widgets/custom_widgets.dart';
 
@@ -17,6 +16,9 @@ part '../../../packages/custom_popup.dart';
 
 class NamidaPopupWrapper extends StatelessWidget {
   final Widget child;
+
+  /// takes the place of [child], for a child that handles its own taps (keeps its hover and press feedback).
+  final Widget Function(VoidCallback openMenu)? childBuilder;
   final PopupMenuController? controller;
   final FutureOr<Iterable<Widget>> Function()? children;
   final FutureOr<Iterable<NamidaPopupItem>> Function()? childrenDefault;
@@ -32,6 +34,7 @@ class NamidaPopupWrapper extends StatelessWidget {
     super.key,
     this.controller,
     this.child = const MoreIcon(),
+    this.childBuilder,
     this.children,
     this.childrenAfterChildrenDefault = true,
     this.childrenDefault,
@@ -51,7 +54,7 @@ class NamidaPopupWrapper extends StatelessWidget {
   Iterable<Widget> _mapChildren(Iterable<Widget> children) {
     return children.map(
       (e) => ConstrainedBox(
-        constraints: BoxConstraints(minHeight: 12.0),
+        constraints: const BoxConstraints(minHeight: 12.0),
         child: Align(
           alignment: Alignment.centerLeft,
           child: SizedBox(
@@ -65,14 +68,13 @@ class NamidaPopupWrapper extends StatelessWidget {
 
   Iterable<Widget> _mapChildrenDefault(BuildContext context, Iterable<NamidaPopupItem> childrenDefault) {
     final theme = context.theme;
-    final textTheme = theme.textTheme;
     return childrenDefault.map(
       (e) {
-        final titleStyle = textTheme.displayMedium?.copyWith(color: e.enabled ? null : textTheme.displayMedium?.color?.withOpacityExt(0.4));
+        final titleStyle = NText.medium.of(context).copyWith(color: e.enabled ? null : NText.medium.of(context).color?.withOpacityExt(0.4));
         final plainIcon = Icon(
           e.icon,
           size: 20.0,
-          shadows: [
+          shadows: const [
             Shadow(
               blurRadius: 2.0,
               color: Color(0x10202020),
@@ -89,8 +91,8 @@ class NamidaPopupWrapper extends StatelessWidget {
                       baseIcon: e.icon,
                       iconSize: 20.0,
                       secondaryIcon: e.secondaryIcon,
-                      baseIconColor: theme.iconTheme.color?.withOpacityExt(0.8),
-                      secondaryIconColor: theme.iconTheme.color?.withOpacityExt(0.8),
+                      baseIconColor: const NColors(.icon, opacity: 0.8),
+                      secondaryIconColor: const NColors(.icon, opacity: 0.8),
                       secondaryIconSize: 11.0,
                     )
                   : e.iconQuarterTurns == 0
@@ -110,9 +112,9 @@ class NamidaPopupWrapper extends StatelessWidget {
                           style: titleStyle,
                         ),
                     if (e.subtitle != '')
-                      Text(
+                      NamidaText(
                         e.subtitle,
-                        style: textTheme.displaySmall,
+                        style: NText.small,
                         maxLines: e.oneLinedSub ? 1 : null,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -130,7 +132,7 @@ class NamidaPopupWrapper extends StatelessWidget {
           popupItem = NamidaInkWell(
             borderRadius: 8.0,
             enableSecondaryTap: true,
-            bgColor: e.selected ? context.theme.colorScheme.secondary.withOpacityExt(0.1) : null,
+            bgColor: NColors.fixed(e.selected ? context.theme.colorScheme.secondary.withOpacityExt(0.1) : null),
             onTap: () {
               popMenu();
               e.onTap();
@@ -150,7 +152,7 @@ class NamidaPopupWrapper extends StatelessWidget {
           );
         }
         final popupItemPadded = ConstrainedBox(
-          constraints: BoxConstraints(minHeight: 38.0),
+          constraints: const BoxConstraints(minHeight: 38.0),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 2.0, vertical: 2.0),
             child: popupItem,
@@ -215,7 +217,7 @@ class NamidaPopupWrapper extends StatelessWidget {
       openOnTap: openOnTap,
       onTap: onTap,
       openOnLongPress: openOnLongPress,
-      contentPadding: EdgeInsets.symmetric(horizontal: 2.0, vertical: 8.0),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 2.0, vertical: 8.0),
       contentRadius: 12.0.multipliedRadius,
       position: PopupPosition.bottom,
       contentDecoration:
@@ -239,6 +241,7 @@ class NamidaPopupWrapper extends StatelessWidget {
       onAfterPopup: () => popMenu(handleClosing: false),
       content: () => _getMenuContent(context),
       refreshListenable: refreshListenable,
+      childBuilder: childBuilder,
       child: child,
     );
   }

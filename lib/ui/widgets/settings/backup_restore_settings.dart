@@ -16,6 +16,7 @@ import 'package:namida/core/enums.dart';
 import 'package:namida/core/extensions.dart';
 import 'package:namida/core/icon_fonts/broken_icons.dart';
 import 'package:namida/core/namida_converter_ext.dart';
+import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/translations/language.dart';
 import 'package:namida/core/utils.dart';
 import 'package:namida/main.dart';
@@ -72,7 +73,13 @@ class BackupAndRestore extends SettingSubpageProvider {
     [
       SettingCustom(
         title: () => lang.sync,
-        aliases: () => [lang.syncAppDataBetweenYourDevices],
+        aliases: () => [
+          lang.syncAppDataBetweenYourDevices,
+          lang.deviceName,
+          '${lang.auto} ${lang.reconnect}',
+          lang.autoSyncInterval,
+          lang.dataToSendAndReceive,
+        ],
         tile: (args) => _SyncTile(
           bgColor: args.bgColor,
         ),
@@ -95,7 +102,7 @@ class BackupAndRestore extends SettingSubpageProvider {
   static const _importSources = [TrackSource.youtube, TrackSource.lastfm, TrackSource.spotify, TrackSource.listenbrainz];
 
   static List<DataImportType> _importTypesOf(TrackSource source) => switch (source) {
-    TrackSource.youtube || TrackSource.youtubeMusic => const [DataImportType.history, DataImportType.favourites, DataImportType.playlists],
+    TrackSource.youtube || TrackSource.youtubeMusic => const [DataImportType.history, DataImportType.favourites, DataImportType.playlists, DataImportType.subscriptions],
     TrackSource.spotify || TrackSource.listenbrainz => const [DataImportType.history, DataImportType.favourites],
     TrackSource.lastfm => const [DataImportType.history],
     TrackSource.local => const [],
@@ -201,7 +208,7 @@ class BackupAndRestore extends SettingSubpageProvider {
   //       final commonPaths = [
   //         '/usr/local/bin/namida_sync',
   //         '/usr/bin/namida_sync',
-  //         '${NamidaPlatformBuilder.linuxUserHome ?? '~'}/.local/bin/namida_sync',
+  //         '${NamidaPlatformBuilder.unixUserHome ?? '~'}/.local/bin/namida_sync',
   //       ];
 
   //       for (final path in commonPaths) {
@@ -872,7 +879,10 @@ class _SyncTile extends StatelessWidget {
       bgColor: bgColor,
       title: lang.sync,
       subtitle: lang.syncAppDataBetweenYourDevices,
-      icon: Broken.cloud_change,
+      leading: SyncStatusIconWrapper(
+        iconSize: 24.0,
+        color: NColors.defaultIcon(),
+      ),
       onTap: const NamidaSyncManagerPage().navigate,
     );
   }
@@ -943,7 +953,6 @@ class _ImportSourceCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
     final sourceText = source.toText();
     return Stack(
       fit: StackFit.passthrough,
@@ -951,7 +960,7 @@ class _ImportSourceCard extends StatelessWidget {
         NamidaInkWell(
           borderRadius: 10.0,
           padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 10.0),
-          bgColor: theme.cardTheme.color,
+          bgColor: NColors.cardTheme,
           onTap: () => BackupAndRestore._importFrom(source),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -969,9 +978,9 @@ class _ImportSourceCard extends StatelessWidget {
               ),
               FittedBox(
                 fit: BoxFit.scaleDown,
-                child: Text(
+                child: NamidaText(
                   sourceText,
-                  style: theme.textTheme.displaySmall?.copyWith(fontSize: 12.0),
+                  style: const NText(.small, size: .s12),
                   maxLines: 1,
                 ),
               ),
@@ -1027,7 +1036,6 @@ class _BackupItemsTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = context.textTheme;
     return Obx(
       (context) {
         final sizes = sizesMap.valueR;
@@ -1067,9 +1075,9 @@ class _BackupItemsTile extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
+                        NamidaText(
                           title,
-                          style: textTheme.displayMedium,
+                          style: NText.medium,
                         ),
                         FittedBox(
                           fit: BoxFit.fitWidth,
@@ -1079,18 +1087,18 @@ class _BackupItemsTile extends StatelessWidget {
                               AnimatedOpacity(
                                 duration: const Duration(milliseconds: 200),
                                 opacity: isLocalIconChecked ? 1.0 : 0.5,
-                                child: Text(
+                                child: NamidaText(
                                   "(${localSize.fileSizeFormatted})${localUnknown ? '?' : ''}",
-                                  style: textTheme.displaySmall,
+                                  style: NText.small,
                                 ),
                               ),
                               if (ytSize > 0 || ytUnknown)
                                 AnimatedOpacity(
                                   duration: const Duration(milliseconds: 200),
                                   opacity: isYoutubeIconChecked ? 1.0 : 0.5,
-                                  child: Text(
+                                  child: NamidaText(
                                     " + (${ytSize.fileSizeFormatted})${ytUnknown ? '?' : ''}",
-                                    style: textTheme.displaySmall,
+                                    style: NText.small,
                                   ),
                                 ),
                             ],
@@ -1266,9 +1274,9 @@ class _ImportDialogTitle extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(left: 8.0, right: 8.0, bottom: 10.0),
-      child: Text(
+      child: NamidaText(
         "- $text",
-        style: context.textTheme.displayLarge,
+        style: NText.large,
       ),
     );
   }

@@ -5,12 +5,16 @@ import 'package:flutter/material.dart';
 import 'package:super_sliver_list/super_sliver_list.dart';
 import 'package:youtipie/class/channels/channel_info.dart';
 import 'package:youtipie/class/execute_details.dart';
+import 'package:youtipie/class/music/music_search_chip.dart';
+import 'package:youtipie/class/result_wrapper/list_wrapper_base.dart';
+import 'package:youtipie/class/result_wrapper/music_search_result.dart';
 import 'package:youtipie/class/result_wrapper/search_result.dart';
 import 'package:youtipie/class/search_filters.dart';
 import 'package:youtipie/class/search_suggestion_info.dart';
 import 'package:youtipie/class/stream_info_item/stream_info_item.dart';
 import 'package:youtipie/class/stream_info_item/stream_info_item_short.dart';
 import 'package:youtipie/class/youtipie_feed/playlist_info_item.dart';
+import 'package:youtipie/core/enum.dart';
 import 'package:youtipie/youtipie.dart';
 
 import 'package:namida/controller/connectivity.dart';
@@ -23,6 +27,7 @@ import 'package:namida/core/enums.dart';
 import 'package:namida/core/extensions.dart';
 import 'package:namida/core/functions.dart';
 import 'package:namida/core/icon_fonts/broken_icons.dart';
+import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/translations/language.dart';
 import 'package:namida/core/utils.dart';
 import 'package:namida/packages/three_arched_circle.dart';
@@ -32,6 +37,7 @@ import 'package:namida/ui/widgets/settings/extra_settings.dart';
 import 'package:namida/youtube/controller/youtube_info_controller.dart';
 import 'package:namida/youtube/controller/youtube_local_search_controller.dart';
 import 'package:namida/youtube/pages/yt_local_search_results.dart';
+import 'package:namida/youtube/pages/yt_music_page.dart';
 import 'package:namida/youtube/widgets/yt_channel_card.dart';
 import 'package:namida/youtube/widgets/yt_history_video_card.dart';
 import 'package:namida/youtube/widgets/yt_playlist_card.dart';
@@ -53,12 +59,20 @@ class YoutubeSearchResultsPageState extends State<YoutubeSearchResultsPage> {
   List<SearchSuggestionInfo>? _suggestions;
 
   static YoutiPieSearchResult? _searchResult;
+  static YoutiPieMusicSearchResult? _musicSearchResult;
   final _isFetchingMoreResults = false.obs;
   static bool? _loadingFirstResults;
   static bool? _cachedSearchResults;
 
   static YoutiPieSearchFilters _filters = YoutiPieSearchFilters.defaults;
   static YoutiPieSearchFilters? _latestSearchedFilters;
+
+  /// searches youtube music instead, [_filters] don't apply then.
+  static bool _isMusicMode = false;
+  static String? _musicParams;
+  static List<YoutiPieMusicSearchChip> _musicChips = const [];
+  static bool? _latestSearchedIsMusicMode;
+  static String? _latestSearchedMusicParams;
   static bool _dateRangeFromText = false;
   static YoutiPieSearchOperators? _searchOperators;
 
@@ -89,7 +103,7 @@ class YoutubeSearchResultsPageState extends State<YoutubeSearchResultsPage> {
   }
 
   Timer? _debouncerTimer;
-  bool get shouldFetchOrDisplaySuggestions => _loadingFirstResults == null || (_loadingFirstResults == false && _searchResult == null);
+  bool get shouldFetchOrDisplaySuggestions => _loadingFirstResults == null || (_loadingFirstResults == false && _searchResult == null && _musicSearchResult == null);
   void _onTextFieldChanged() async {
     _debouncerTimer?.cancel();
     if (ScrollSearchController.inst.searchTextEditingController.text.isNotEmpty && shouldFetchOrDisplaySuggestions && ConnectivityController.inst.hasConnection) {
@@ -142,6 +156,18 @@ class YoutubeSearchResultsPageState extends State<YoutubeSearchResultsPage> {
     fetchSearch();
   }
 
+  void _onMusicModeTap() {
+    _isMusicMode = !_isMusicMode;
+    refreshState();
+    fetchSearch();
+  }
+
+  void _onMusicChipTap(YoutiPieMusicSearchChip chip) {
+    _musicParams = chip.isSelected ? null : chip.params;
+    refreshState();
+    fetchSearch();
+  }
+
   void _onMatchChanged(YoutiPieSearchMatchMode? matchMode, List<String> excluded) {
     final textController = ScrollSearchController.inst.searchTextEditingController;
     final newText = YoutiPieSearchOperators.buildQuery(textController.text, matchMode: matchMode, excluded: excluded);
@@ -157,39 +183,58 @@ class YoutubeSearchResultsPageState extends State<YoutubeSearchResultsPage> {
     _syncDateRangeFromText(newSearch);
     _searchOperators = YoutiPieSearchOperators.parse(newSearch);
     final filters = _filters;
-    if (_latestSearched == newSearch && _latestSearchedFilters == filters && _searchResult != null) {
+    final isMusicMode = _isMusicMode;
+    final musicParams = _musicParams;
+    final hasResults = _searchResult != null || _musicSearchResult != null;
+    final isSameSearch =
+        _latestSearched == newSearch && _latestSearchedFilters == filters && _latestSearchedIsMusicMode == isMusicMode && _latestSearchedMusicParams == musicParams;
+    if (isSameSearch && hasResults) {
       YTLocalSearchController.inst.search(newSearch, after: filters.after, before: filters.before); // has its own latest search checks
       return;
     }
     _latestSearched = newSearch;
     _latestSearchedFilters = filters;
+    _latestSearchedIsMusicMode = isMusicMode;
+    _latestSearchedMusicParams = musicParams;
 
     YTLocalSearchController.inst.search(newSearch, after: filters.after, before: filters.before);
-    if (_searchResult != null) refreshState(() => _searchResult = null);
+    if (hasResults) {
+      refreshState(() {
+        _searchResult = null;
+        _musicSearchResult = null;
+      });
+    }
     if (newSearch == '') return;
     if (NamidaNavigator.inst.isytLocalSearchInFullPage) return;
 
     refreshState(() => _loadingFirstResults = true);
 
+    final hasConnection = ConnectivityController.inst.hasConnection;
+    final details = hasConnection ? ExecuteDetails.kForceRequest : null;
     YoutiPieSearchResult? result;
-    if (ConnectivityController.inst.hasConnection) {
-      result = await YoutubeInfoController.search.search(newSearch, filters: filters, details: ExecuteDetails.kForceRequest);
-      _cachedSearchResults = false;
+    YoutiPieMusicSearchResult? musicResult;
+    if (isMusicMode) {
+      musicResult = await YoutubeInfoController.music.search(newSearch, params: musicParams, details: details);
     } else {
-      result = await YoutubeInfoController.search.search(newSearch, filters: filters);
-      _cachedSearchResults = result != null;
+      result = await YoutubeInfoController.search.search(newSearch, filters: filters, details: details);
     }
+    _cachedSearchResults = !hasConnection && (result != null || musicResult != null);
 
-    if (_latestSearched != newSearch || _latestSearchedFilters != filters) return; // -- a newer search was started
+    final isStillLatest =
+        _latestSearched == newSearch && _latestSearchedFilters == filters && _latestSearchedIsMusicMode == isMusicMode && _latestSearchedMusicParams == musicParams;
+    if (!isStillLatest) return; // -- a newer search was started
 
     _searchResult = result;
+    _musicSearchResult = musicResult;
+    final musicChips = musicResult?.chips;
+    if (musicChips != null && musicChips.isNotEmpty) _musicChips = musicChips;
     _loadingFirstResults = false;
     refreshState();
   }
 
   Future<bool> _fetchSearchNextPage() async {
     bool fetched = false;
-    final searchRes = _searchResult;
+    final YoutiPieListWrapper? searchRes = _musicSearchResult ?? _searchResult;
     if (searchRes == null) return fetched; // return if still fetching first results.
     if (!searchRes.canFetchNext) return fetched;
     if (!ConnectivityController.inst.hasConnection) return fetched;
@@ -216,8 +261,6 @@ class YoutubeSearchResultsPageState extends State<YoutubeSearchResultsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
     const thumbnailHeight = Dimensions.youtubeThumbnailHeight;
     const thumbnailWidth = Dimensions.youtubeThumbnailWidth;
     const thumbnailItemExtent = thumbnailHeight + 8.0 * 2;
@@ -226,9 +269,10 @@ class YoutubeSearchResultsPageState extends State<YoutubeSearchResultsPage> {
     const thumbnailWidthLocal = thumbnailWidth * localMultiplier;
     const thumbnailHeightLocal = thumbnailHeight * localMultiplier;
     const thumbnailItemExtentLocal = thumbnailWidthLocal - 2 * 2.0; // - card margin
-    final horizontalListHeight = 112.0 * localMultiplier;
+    const horizontalListHeight = 112.0 * localMultiplier;
 
     final searchResult = _searchResult;
+    final musicSearchResult = _musicSearchResult;
     const maxLocalSeachHorizontalCount = 40;
 
     final suggestions = _suggestions;
@@ -259,9 +303,9 @@ class YoutubeSearchResultsPageState extends State<YoutubeSearchResultsPage> {
                             children: [
                               const Icon(Broken.radar_2),
                               const SizedBox(width: 8.0),
-                              Text(
+                              NamidaText(
                                 lang.offlineSearch,
-                                style: textTheme.displayLarge,
+                                style: NText.large,
                               ),
                               const Spacer(),
                               const SizedBox(width: 6.0),
@@ -301,7 +345,7 @@ class YoutubeSearchResultsPageState extends State<YoutubeSearchResultsPage> {
                                       margin: YTHistoryVideoCardBase.cardMargin(true),
                                       width: thumbnailWidthLocal - YTHistoryVideoCardBase.minimalCardExtraThumbCropWidth,
                                       height: thumbnailHeightLocal - YTHistoryVideoCardBase.minimalCardExtraThumbCropHeight,
-                                      bgColor: theme.cardColor,
+                                      bgColor: NColors.card,
                                     );
                                   },
                                 ),
@@ -310,12 +354,12 @@ class YoutubeSearchResultsPageState extends State<YoutubeSearchResultsPage> {
                           );
                         }
                         if (searchResultsLocal.isEmpty) {
-                          return SliverToBoxAdapter();
+                          return const SliverToBoxAdapter();
                         }
                         final localSearchDisplayExtraCardWithRemainingCount = searchResultsLocal.length > maxLocalSeachHorizontalCount;
                         return SliverToBoxAdapter(
                           child: VideoTilePropertiesProvider(
-                            configs: VideoTilePropertiesConfigs(
+                            configs: const VideoTilePropertiesConfigs(
                               queueSource: QueueSourceYoutubeID.ytSearch,
                             ),
                             builder: (properties) => SizedBox(
@@ -335,9 +379,9 @@ class YoutubeSearchResultsPageState extends State<YoutubeSearchResultsPage> {
                                             margin: const EdgeInsets.all(12.0),
                                             padding: const EdgeInsets.all(12.0),
                                             child: Center(
-                                              child: Text(
+                                              child: NamidaText(
                                                 "+${remainingVideosCount.formatDecimalShort()}",
-                                                style: textTheme.displayMedium,
+                                                style: NText.medium,
                                               ),
                                             ),
                                           );
@@ -379,8 +423,12 @@ class YoutubeSearchResultsPageState extends State<YoutubeSearchResultsPage> {
                     SliverToBoxAdapter(
                       child: _YTSearchFiltersRow(
                         filters: _filters,
+                        isMusicMode: _isMusicMode,
+                        musicChips: _musicChips,
                         operators: _searchOperators,
                         onChanged: _onFiltersChanged,
+                        onMusicModeTap: _onMusicModeTap,
+                        onMusicChipTap: _onMusicChipTap,
                         onMatchChanged: widget.searchTextCallback == null ? _onMatchChanged : null,
                       ),
                     ),
@@ -406,15 +454,17 @@ class YoutubeSearchResultsPageState extends State<YoutubeSearchResultsPage> {
                                   child: Text.rich(
                                     TextSpan(
                                       text: "${lang.didYouMean}: ",
-                                      style: textTheme.displaySmall?.copyWith(fontSize: 13.0),
+                                      style: NText.small.of(context).copyWith(fontSize: 13.0),
                                       children: searchResult.correctedQuery
                                           .map(
                                             (c) => TextSpan(
                                               text: c.text,
-                                              style: textTheme.displaySmall?.copyWith(
-                                                fontSize: 14.0,
-                                                fontWeight: c.corrected ? FontWeight.w700 : FontWeight.w500,
-                                              ),
+                                              style: NText.small
+                                                  .of(context)
+                                                  .copyWith(
+                                                    fontSize: 14.0,
+                                                    fontWeight: c.corrected ? FontWeight.w700 : FontWeight.w500,
+                                                  ),
                                             ),
                                           )
                                           .toFixedList(),
@@ -444,7 +494,7 @@ class YoutubeSearchResultsPageState extends State<YoutubeSearchResultsPage> {
                                 child: NamidaInkWell(
                                   borderRadius: 10.0,
                                   padding: const EdgeInsets.symmetric(vertical: 12.0),
-                                  bgColor: theme.cardColor,
+                                  bgColor: NColors.card,
                                   onTap: () {
                                     ScrollSearchController.inst.searchTextEditingController.text = fullText;
                                     fetchSearch(customText: fullText);
@@ -466,21 +516,21 @@ class YoutubeSearchResultsPageState extends State<YoutubeSearchResultsPage> {
                                             Text.rich(
                                               TextSpan(
                                                 text: typed ?? fullText,
-                                                style: textTheme.displaySmall?.copyWith(fontSize: 14.0, fontWeight: FontWeight.w700),
+                                                style: NText.small.of(context).copyWith(fontSize: 14.0, fontWeight: FontWeight.w700),
                                                 children: completion == null
                                                     ? null
                                                     : [
                                                         TextSpan(
                                                           text: completion,
-                                                          style: textTheme.displaySmall?.copyWith(fontSize: 14.0, fontWeight: FontWeight.w400),
+                                                          style: NText.small.of(context).copyWith(fontSize: 14.0, fontWeight: FontWeight.w400),
                                                         ),
                                                       ],
                                               ),
                                             ),
                                             if (subtitle != null && subtitle.isNotEmpty)
-                                              Text(
+                                              NamidaText(
                                                 subtitle,
-                                                style: textTheme.displaySmall?.copyWith(fontSize: 11.0, fontWeight: FontWeight.w200),
+                                                style: const NText(.small, size: .s11, weight: FontWeight.w200),
                                               ),
                                           ],
                                         ),
@@ -532,10 +582,12 @@ class YoutubeSearchResultsPageState extends State<YoutubeSearchResultsPage> {
                               ),
                             ),
                           )
+                        : musicSearchResult != null
+                        ? YTMusicSearchResultsSliver(result: musicSearchResult)
                         : searchResult == null
                         ? const SliverToBoxAdapter()
                         : VideoTilePropertiesProvider(
-                            configs: VideoTilePropertiesConfigs(
+                            configs: const VideoTilePropertiesConfigs(
                               queueSource: QueueSourceYoutubeID.ytSearchHosted,
                             ),
                             builder: (properties) => ObxO(
@@ -569,9 +621,9 @@ class YoutubeSearchResultsPageState extends State<YoutubeSearchResultsPage> {
                                             if (chunk.title.isNotEmpty)
                                               Padding(
                                                 padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 6.0),
-                                                child: Text(
+                                                child: NamidaText(
                                                   chunk.title,
-                                                  style: textTheme.displayMedium,
+                                                  style: NText.medium,
                                                 ),
                                               ),
                                             SizedBox(
@@ -675,11 +727,37 @@ class YoutubeSearchResultsPageState extends State<YoutubeSearchResultsPage> {
 // by claude
 class _YTSearchFiltersRow extends StatelessWidget {
   final YoutiPieSearchFilters filters;
+  final bool isMusicMode;
+  final List<YoutiPieMusicSearchChip> musicChips;
   final YoutiPieSearchOperators? operators;
   final void Function(YoutiPieSearchFilters newFilters, {bool dateRangeChanged, bool clearMatch}) onChanged;
+  final void Function() onMusicModeTap;
+  final void Function(YoutiPieMusicSearchChip chip) onMusicChipTap;
   final void Function(YoutiPieSearchMatchMode? matchMode, List<String> excluded)? onMatchChanged;
 
-  const _YTSearchFiltersRow({required this.filters, required this.operators, required this.onChanged, required this.onMatchChanged});
+  const _YTSearchFiltersRow({
+    required this.filters,
+    required this.isMusicMode,
+    required this.musicChips,
+    required this.operators,
+    required this.onChanged,
+    required this.onMusicModeTap,
+    required this.onMusicChipTap,
+    required this.onMatchChanged,
+  });
+
+  // -- podcasts are out of scope, their items aren't parsed
+  static const _hiddenMusicSearchTypes = {YoutiPieMusicSearchType.podcasts, YoutiPieMusicSearchType.episodes};
+
+  static IconData _musicTypeToIcon(YoutiPieMusicSearchType? type) => switch (type) {
+    YoutiPieMusicSearchType.songs => Broken.music,
+    YoutiPieMusicSearchType.videos => Broken.video,
+    YoutiPieMusicSearchType.albums => Broken.music_square,
+    YoutiPieMusicSearchType.artists => Broken.user,
+    YoutiPieMusicSearchType.playlists => Broken.music_playlist,
+    YoutiPieMusicSearchType.profiles => Broken.profile_circle,
+    YoutiPieMusicSearchType.episodes || YoutiPieMusicSearchType.podcasts || null => Broken.music_filter,
+  };
 
   static String _typeToText(YoutiPieSearchType type) => switch (type) {
     YoutiPieSearchType.all => lang.all,
@@ -765,6 +843,8 @@ class _YTSearchFiltersRow extends StatelessWidget {
     final matchMode = operators?.matchMode;
     final excluded = operators?.excluded ?? const <String>[];
     final isMatchActive = onMatchChanged != null && (matchMode != null || excluded.isNotEmpty);
+    final isMusicMode = this.isMusicMode;
+    final isYoutubeMode = !isMusicMode;
     return SizedBox(
       height: 40.0,
       child: ListView(
@@ -772,74 +852,94 @@ class _YTSearchFiltersRow extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 8.0),
         children: [
           _YTSearchFilterChip(
-            icon: _typeToIcon(filters.type),
-            title: filters.type == YoutiPieSearchType.all ? lang.type : _typeToText(filters.type),
-            isActive: filters.type != YoutiPieSearchType.all,
-            onClear: () => onChanged(filters.copyWith(type: YoutiPieSearchType.all)),
-            items: () => YoutiPieSearchType.values.map(
-              (e) => NamidaPopupItem(
-                icon: _typeToIcon(e),
-                title: _typeToText(e),
-                selected: e == filters.type,
-                onTap: () => onChanged(filters.copyWith(type: e)),
-              ),
-            ),
+            icon: Broken.music_circle,
+            title: lang.youtubeMusic,
+            isActive: isMusicMode,
+            onTap: onMusicModeTap,
           ),
-          _YTSearchFilterChip(
-            icon: _sortToIcon(filters.sort),
-            title: filters.sort == YoutiPieSearchSort.relevance ? lang.sortBy : _sortToText(filters.sort),
-            isActive: filters.sort != YoutiPieSearchSort.relevance,
-            onClear: () => onChanged(filters.copyWith(sort: YoutiPieSearchSort.relevance)),
-            items: () => YoutiPieSearchSort.values.map(
-              (e) => NamidaPopupItem(
-                icon: _sortToIcon(e),
-                title: _sortToText(e),
-                selected: e == filters.sort,
-                onTap: () => onChanged(filters.copyWith(sort: e)),
-              ),
-            ),
-          ),
-          _YTSearchFilterChip(
-            icon: Broken.calendar,
-            title: hasDateRange
-                ? _dateRangeToText(filters)
-                : filters.uploadDate == YoutiPieSearchUploadDate.none
-                ? lang.date
-                : _uploadDateToText(filters.uploadDate),
-            isActive: isDateActive,
-            onClear: () => onChanged(
-              filters.copyWith(uploadDate: YoutiPieSearchUploadDate.none, clearAfter: true, clearBefore: true),
-              dateRangeChanged: hasDateRange,
-            ),
-            items: () => [
-              ...YoutiPieSearchUploadDate.values.map(
-                (e) => NamidaPopupItem(
-                  icon: e == YoutiPieSearchUploadDate.none ? Broken.calendar : Broken.clock,
-                  title: _uploadDateToText(e),
-                  selected: !hasDateRange && e == filters.uploadDate,
-                  onTap: () => onChanged(
-                    filters.copyWith(uploadDate: e, clearAfter: true, clearBefore: true),
-                    dateRangeChanged: hasDateRange,
+          if (isMusicMode)
+            ...musicChips
+                .where((e) => !_hiddenMusicSearchTypes.contains(e.type))
+                .map(
+                  (chip) => _YTSearchFilterChip(
+                    icon: _musicTypeToIcon(chip.type),
+                    title: chip.title,
+                    isActive: chip.isSelected,
+                    onTap: () => onMusicChipTap(chip),
                   ),
                 ),
+          if (isYoutubeMode)
+            _YTSearchFilterChip(
+              icon: _typeToIcon(filters.type),
+              title: filters.type == YoutiPieSearchType.all ? lang.type : _typeToText(filters.type),
+              isActive: filters.type != YoutiPieSearchType.all,
+              onClear: () => onChanged(filters.copyWith(type: YoutiPieSearchType.all)),
+              items: () => YoutiPieSearchType.values.map(
+                (e) => NamidaPopupItem(
+                  icon: _typeToIcon(e),
+                  title: _typeToText(e),
+                  selected: e == filters.type,
+                  onTap: () => onChanged(filters.copyWith(type: e)),
+                ),
               ),
-              NamidaPopupItem(
-                icon: Broken.calendar_search,
-                title: '${lang.isAfter}...',
-                subtitle: filters.after?.toString() ?? '',
-                selected: filters.after != null,
-                onTap: () => _pickDate(isAfter: true),
+            ),
+          if (isYoutubeMode)
+            _YTSearchFilterChip(
+              icon: _sortToIcon(filters.sort),
+              title: filters.sort == YoutiPieSearchSort.relevance ? lang.sortBy : _sortToText(filters.sort),
+              isActive: filters.sort != YoutiPieSearchSort.relevance,
+              onClear: () => onChanged(filters.copyWith(sort: YoutiPieSearchSort.relevance)),
+              items: () => YoutiPieSearchSort.values.map(
+                (e) => NamidaPopupItem(
+                  icon: _sortToIcon(e),
+                  title: _sortToText(e),
+                  selected: e == filters.sort,
+                  onTap: () => onChanged(filters.copyWith(sort: e)),
+                ),
               ),
-              NamidaPopupItem(
-                icon: Broken.calendar_search,
-                title: '${lang.isBefore}...',
-                subtitle: filters.before?.toString() ?? '',
-                selected: filters.before != null,
-                onTap: () => _pickDate(isAfter: false),
+            ),
+          if (isYoutubeMode)
+            _YTSearchFilterChip(
+              icon: Broken.calendar,
+              title: hasDateRange
+                  ? _dateRangeToText(filters)
+                  : filters.uploadDate == YoutiPieSearchUploadDate.none
+                  ? lang.date
+                  : _uploadDateToText(filters.uploadDate),
+              isActive: isDateActive,
+              onClear: () => onChanged(
+                filters.copyWith(uploadDate: YoutiPieSearchUploadDate.none, clearAfter: true, clearBefore: true),
+                dateRangeChanged: hasDateRange,
               ),
-            ],
-          ),
-          if (onMatchChanged != null)
+              items: () => [
+                ...YoutiPieSearchUploadDate.values.map(
+                  (e) => NamidaPopupItem(
+                    icon: e == YoutiPieSearchUploadDate.none ? Broken.calendar : Broken.clock,
+                    title: _uploadDateToText(e),
+                    selected: !hasDateRange && e == filters.uploadDate,
+                    onTap: () => onChanged(
+                      filters.copyWith(uploadDate: e, clearAfter: true, clearBefore: true),
+                      dateRangeChanged: hasDateRange,
+                    ),
+                  ),
+                ),
+                NamidaPopupItem(
+                  icon: Broken.calendar_search,
+                  title: '${lang.isAfter}...',
+                  subtitle: filters.after?.toString() ?? '',
+                  selected: filters.after != null,
+                  onTap: () => _pickDate(isAfter: true),
+                ),
+                NamidaPopupItem(
+                  icon: Broken.calendar_search,
+                  title: '${lang.isBefore}...',
+                  subtitle: filters.before?.toString() ?? '',
+                  selected: filters.before != null,
+                  onTap: () => _pickDate(isAfter: false),
+                ),
+              ],
+            ),
+          if (isYoutubeMode && onMatchChanged != null)
             _YTSearchFilterChip(
               icon: Broken.quote_up,
               title: _matchToText(matchMode, excluded),
@@ -863,7 +963,7 @@ class _YTSearchFiltersRow extends StatelessWidget {
                 ),
               ],
             ),
-          if (!filters.isDefault || isMatchActive)
+          if (isYoutubeMode && (!filters.isDefault || isMatchActive))
             _YTSearchFilterChip(
               icon: Broken.close_circle,
               title: lang.clear,
@@ -901,10 +1001,9 @@ class _YTSearchFilterChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
     final color = isActive ? Colors.white.withOpacityExt(0.8) : null;
     return NamidaInkWell(
-      bgColor: isActive ? CurrentColor.inst.color : theme.cardColor,
+      bgColor: isActive ? NColors.custom((_) => CurrentColor.inst.color) : NColors.card,
       borderRadius: 8.0,
       margin: const EdgeInsets.symmetric(horizontal: 3.0, vertical: 6.0),
       padding: const EdgeInsets.only(left: 10.0, right: 6.0),
@@ -916,9 +1015,10 @@ class _YTSearchFilterChip extends StatelessWidget {
         children: [
           Icon(icon, size: 16.0, color: color),
           const SizedBox(width: 6.0),
-          Text(
+          NamidaText(
             title,
-            style: context.textTheme.displaySmall?.copyWith(color: color, fontWeight: FontWeight.w600),
+            style: const NText(.small, weight: FontWeight.w600),
+            color: NColors.fixed(color),
           ),
           if (isActive && onClear != null)
             NamidaIconButton(
@@ -926,7 +1026,7 @@ class _YTSearchFilterChip extends StatelessWidget {
               verticalPadding: 4.0,
               icon: Broken.close_circle,
               iconSize: 16.0,
-              iconColor: color,
+              iconColor: NColors.fixed(color),
               onPressed: onClear,
             )
           else

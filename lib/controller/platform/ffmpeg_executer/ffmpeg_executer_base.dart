@@ -2,11 +2,12 @@ part of 'ffmpeg_executer.dart';
 
 abstract class FFMPEGExecuter {
   static FFMPEGExecuter platform() {
-    return NamidaPlatformBuilder.init(
-      android: _FFMPEGExecuterAndroid.new,
-      windows: _FFMPEGExecuterDesktop.new,
-      linux: _FFMPEGExecuterDesktop.new,
-    );
+    return _FFMPEGExecuterFFI();
+    // return NamidaPlatformBuilder.init(
+    //   android: _FFMPEGExecuterMobile.new,
+    //   windows: _FFMPEGExecuterDesktop.new,
+    //   linux: _FFMPEGExecuterDesktop.new,
+    // );
   }
 
   FutureOr<void> init();
@@ -16,11 +17,14 @@ abstract class FFMPEGExecuter {
   Future<bool> ffmpegExecute(List<String> args, {bool noTimeout = false});
   Future<String?> ffprobeExecute(List<String> args);
   Future<Map<String, dynamic>?> getMediaInformation(String path);
-  Future<bool> supportsWebDAV();
+
+  /// [isHttps] needs a build with tls, a plain http one can't open those.
+  Future<bool> supportsWebDAV({required bool isHttps});
   Future<bool> supportsSMB();
 
-  static bool testWebDAVProtocol(String output) {
-    return output.contains('http') || output.contains('webdav');
+  static bool testWebDAVProtocol(String output, {required bool isHttps}) {
+    final protocol = isHttps ? 'https' : 'http';
+    return output.contains(protocol) || output.contains('webdav');
   }
 
   static bool testSMBProtocol(String output) {

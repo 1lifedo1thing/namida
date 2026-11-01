@@ -8,6 +8,7 @@ import 'package:namida/core/extensions.dart';
 import 'package:namida/core/functions.dart';
 import 'package:namida/core/icon_fonts/broken_icons.dart';
 import 'package:namida/core/namida_converter_ext.dart';
+import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/translations/language.dart';
 import 'package:namida/core/utils.dart';
 import 'package:namida/ui/widgets/custom_widgets.dart';
@@ -55,12 +56,11 @@ class EffectThemeTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = context.textTheme;
     final key = _isOverlay ? settings.effectsOverlay : settings.effectsBackground;
     final subtitle = _isOverlay ? lang.overlayEffectSubtitle : lang.seasonalEffectsSubtitle;
     return NamidaPopupWrapper(
       childrenDefault: _getItems,
-      child: CustomListTile(
+      childBuilder: (openMenu) => CustomListTile(
         bgColor: bgColor,
         icon: _isOverlay ? Broken.layer : Broken.magic_star,
         title: _isOverlay ? lang.overlayEffect : lang.backgroundEffect,
@@ -69,13 +69,14 @@ class EffectThemeTile extends StatelessWidget {
           childrenDefault: _getItems,
           child: ObxO(
             rx: key,
-            builder: (context, theme) => Text(
+            builder: (context, theme) => NamidaText(
               theme.toText(),
-              style: textTheme.displayMedium,
+              style: NText.medium,
               textAlign: TextAlign.end,
             ),
           ),
         ),
+        onTap: openMenu,
       ),
     );
   }
@@ -203,7 +204,7 @@ class VisualizerTile extends StatelessWidget {
     return NamidaPopupWrapper(
       childrenDefault: _getItems,
       refreshListenable: refreshListenable,
-      child: CustomListTile(
+      childBuilder: (openMenu) => CustomListTile(
         bgColor: bgColor,
         icon: Broken.chart_2,
         title: lang.visualizer,
@@ -213,6 +214,7 @@ class VisualizerTile extends StatelessWidget {
           refreshListenable: refreshListenable,
           child: const _EnabledVisualizersText(),
         ),
+        onTap: openMenu,
       ),
     );
   }
@@ -239,7 +241,6 @@ class PlayerBackgroundTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = context.textTheme;
     return CustomListTile(
       bgColor: bgColor,
       icon: Broken.gallery,
@@ -248,9 +249,52 @@ class PlayerBackgroundTile extends StatelessWidget {
       onTap: _openOptions,
       trailing: ObxO(
         rx: settings.playerBackground,
-        builder: (context, source) => Text(
+        builder: (context, source) => NamidaText(
           source.toText(),
-          style: textTheme.displayMedium,
+          style: NText.medium,
+          textAlign: TextAlign.end,
+        ),
+      ),
+    );
+  }
+}
+
+class LyricsBackgroundTile extends StatelessWidget {
+  final Color? bgColor;
+
+  const LyricsBackgroundTile({super.key, this.bgColor});
+
+  void _openOptions() {
+    NamidaNavigator.inst.navigateDialog(
+      dialog: CustomBlurryDialog(
+        title: '${lang.lyrics} (${lang.fullscreen})',
+        normalTitleStyle: true,
+        icon: Broken.document,
+        actions: const [
+          DoneButton(),
+        ],
+        child: const _LyricsBackgroundOptions(),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomListTile(
+      bgColor: bgColor,
+      leading: const StackedIcon(
+        baseIcon: Broken.document,
+        secondaryIcon: Broken.maximize_3,
+        secondaryIconSize: 13.0,
+      ),
+      title: '${lang.lyrics} (${lang.fullscreen})',
+      subtitle: lang.performanceNote,
+      onTap: _openOptions,
+      trailing: ObxO(
+        rx: settings.lyricsBackground,
+        builder: (context, background) => NamidaText(
+          background.toText(),
+          style: NText.medium,
           textAlign: TextAlign.end,
         ),
       ),
@@ -279,7 +323,6 @@ class AppWallpaperTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = context.textTheme;
     return ObxO(
       rx: settings.backgroundImages,
       builder: (context, backgroundImages) {
@@ -291,9 +334,9 @@ class AppWallpaperTile extends StatelessWidget {
           onTap: _openOptions,
           trailing: ObxO(
             rx: settings.appWallpaper,
-            builder: (context, path) => Text(
+            builder: (context, path) => NamidaText(
               path == null ? lang.none : lang.custom,
-              style: textTheme.displayMedium,
+              style: NText.medium,
               textAlign: TextAlign.end,
             ),
           ),
@@ -372,18 +415,20 @@ class _PlayerBackgroundOptions extends StatelessWidget {
         return Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ...PlayerBackground.values.where((e) => backgroundImages || e != PlayerBackground.image).map(
-              (e) => Padding(
-                padding: const EdgeInsets.symmetric(vertical: 3.0),
-                child: ListTileWithCheckMark(
-                  active: e == source,
-                  icon: e.toIcon(),
-                  title: e.toText(),
-                  titleWidget: e == PlayerBackground.image ? _SupportersTitle(title: e.toText()) : null,
-                  onTap: () => _onSourceSelected(e),
+            ...PlayerBackground.values
+                .where((e) => backgroundImages || e != PlayerBackground.image)
+                .map(
+                  (e) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 3.0),
+                    child: ListTileWithCheckMark(
+                      active: e == source,
+                      icon: e.toIcon(),
+                      title: e.toText(),
+                      titleWidget: e == PlayerBackground.image ? _SupportersTitle(title: e.toText()) : null,
+                      onTap: () => _onSourceSelected(e),
+                    ),
+                  ),
                 ),
-              ),
-            ),
             if (source == PlayerBackground.image)
               CustomListTile(
                 icon: Broken.gallery_add,
@@ -394,18 +439,20 @@ class _PlayerBackgroundOptions extends StatelessWidget {
               ),
             if (source != PlayerBackground.none) ...[
               const SizedBox(height: 8.0),
-              _BackdropUnitsTile(
-                icon: Broken.blur,
-                title: lang.blur,
-                units: settings.playerBackgroundBlur.valueR,
-                onChanged: settings.playerBackgroundBlur.save,
-              ),
-              _BackdropUnitsTile(
-                icon: Broken.eye,
-                title: lang.dimIntensity,
-                units: settings.playerBackgroundDim.valueR,
-                onChanged: settings.playerBackgroundDim.save,
-              ),
+              if (source.ambient == null) ...[
+                _BackdropUnitsTile(
+                  icon: Broken.blur,
+                  title: lang.blur,
+                  units: settings.playerBackgroundBlur.valueR,
+                  onChanged: settings.playerBackgroundBlur.save,
+                ),
+                _BackdropUnitsTile(
+                  icon: Broken.eye,
+                  title: lang.dimIntensity,
+                  units: settings.playerBackgroundDim.valueR,
+                  onChanged: settings.playerBackgroundDim.save,
+                ),
+              ],
               CustomSwitchListTile(
                 icon: Broken.mask,
                 title: lang.vignette,
@@ -424,6 +471,95 @@ class _PlayerBackgroundOptions extends StatelessWidget {
               title: lang.colorWhenExpanded,
               value: settings.playerColorWhenExpanded.valueR,
               onChanged: (isTrue) => settings.playerColorWhenExpanded.save(!isTrue),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _LyricsBackgroundOptions extends StatelessWidget {
+  const _LyricsBackgroundOptions();
+
+  void _saveBackground(LyricsBackground background) {
+    settings.transaction(() {
+      settings.lyricsBackground.save(background);
+      if (background != LyricsBackground.artwork) _leaveHighPerformanceMode();
+    });
+  }
+
+  void _saveVisualizer(LyricsVisualizer visualizer) {
+    settings.transaction(() {
+      settings.lyricsVisualizer.save(visualizer);
+      if (visualizer != LyricsVisualizer.none) _leaveHighPerformanceMode();
+    });
+  }
+
+  void _onVisualizerSelected(LyricsVisualizer visualizer) {
+    final unlockable = visualizer.style?.toUnlockable();
+    if (unlockable == null) return _saveVisualizer(visualizer);
+    SussyBaka.monetize(unlockable: unlockable, onEnable: () => _saveVisualizer(visualizer));
+  }
+
+  List<NamidaPopupItem> _getVisualizerItems() {
+    final current = settings.lyricsVisualizer.value;
+    return LyricsVisualizer.values
+        .map(
+          (e) => NamidaPopupItem(
+            selected: e == current,
+            icon: e.toIcon(),
+            title: e.toText(),
+            onTap: () => _onVisualizerSelected(e),
+            trailing: e.style?.isForSupporters() == true ? const _SupportersMark() : null,
+          ),
+        )
+        .toFixedList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Obx(
+      (context) {
+        final background = settings.lyricsBackground.valueR;
+        final visualizer = settings.lyricsVisualizer.valueR;
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ...LyricsBackground.values.map(
+              (e) => Padding(
+                padding: const EdgeInsets.symmetric(vertical: 3.0),
+                child: ListTileWithCheckMark(
+                  active: e == background,
+                  icon: e.toIcon(),
+                  title: e.toText(),
+                  onTap: () => _saveBackground(e),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8.0),
+            if (background.ambient != null)
+              CustomSwitchListTile(
+                icon: Broken.repeat,
+                title: lang.always,
+                value: settings.lyricsBackgroundAlways.valueR,
+                onChanged: (isTrue) => settings.lyricsBackgroundAlways.save(!isTrue),
+              ),
+            NamidaPopupWrapper(
+              childrenDefault: _getVisualizerItems,
+              childBuilder: (openMenu) => CustomListTile(
+                icon: Broken.chart_2,
+                title: lang.visualizer,
+                trailing: NamidaPopupWrapper(
+                  childrenDefault: _getVisualizerItems,
+                  child: NamidaText(
+                    visualizer.toText(),
+                    style: NText.medium,
+                    textAlign: TextAlign.end,
+                  ),
+                ),
+                onTap: openMenu,
+              ),
             ),
           ],
         );
@@ -492,7 +628,6 @@ class _EnabledVisualizersText extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = context.textTheme;
     return Obx(
       (context) {
         final hasParticles = settings.enableMiniplayerParticles.valueR;
@@ -505,9 +640,9 @@ class _EnabledVisualizersText extends StatelessWidget {
             : othersCount > 0
             ? '$firstName +$othersCount'
             : firstName;
-        return Text(
+        return NamidaText(
           text,
-          style: textTheme.displayMedium,
+          style: NText.medium,
           textAlign: TextAlign.end,
         );
       },
@@ -520,12 +655,10 @@ class _SupportersMark extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final iconColor = context.theme.iconTheme.color;
-    final markColor = iconColor?.withOpacityExt(0.6);
-    return Icon(
+    return const NIcon(
       Broken.crown_1,
       size: 14.0,
-      color: markColor,
+      color: NColors(.icon, opacity: 0.6),
     );
   }
 }
@@ -537,14 +670,13 @@ class _SupportersTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = context.textTheme;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         Flexible(
-          child: Text(
+          child: NamidaText(
             title,
-            style: textTheme.displayMedium,
+            style: NText.medium,
           ),
         ),
         const SizedBox(width: 6.0),

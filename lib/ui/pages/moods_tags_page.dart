@@ -16,6 +16,7 @@ import 'package:namida/core/enums.dart';
 import 'package:namida/core/extensions.dart';
 import 'package:namida/core/icon_fonts/broken_icons.dart';
 import 'package:namida/core/namida_converter_ext.dart';
+import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/translations/language.dart';
 import 'package:namida/core/utils.dart';
 import 'package:namida/ui/dialogs/common_dialogs.dart';
@@ -179,8 +180,6 @@ class _MoodsOrTagsPageState extends State<_MoodsOrTagsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
     final type = widget.type;
     final libraryTab = _libraryTab;
     final scrollController = libraryTab.scrollController;
@@ -203,6 +202,7 @@ class _MoodsOrTagsPageState extends State<_MoodsOrTagsPage> {
           enableHero: false,
           isBarVisible: libraryTab.isBarVisible.valueR,
           leftText: leftText,
+          leftTextIcon: widget.icon,
           onSearchBoxVisibilityChange: (newShow) => ScrollSearchController.inst.onSearchBoxVisibiltyChange(libraryTab, newShow),
           onCloseButtonPressed: _onSearchClosed,
           sortByMenuWidget: SortByMenu(
@@ -243,7 +243,7 @@ class _MoodsOrTagsPageState extends State<_MoodsOrTagsPage> {
               child: NamidaInkWell(
                 borderRadius: 10.0,
                 padding: const EdgeInsets.symmetric(vertical: 12.0),
-                bgColor: theme.cardColor,
+                bgColor: NColors.card,
                 onTap: () => widget.onItemTap(name, tracks),
                 onLongPress: () => widget.onItemLongPress(name, tracks),
                 child: Row(
@@ -260,14 +260,14 @@ class _MoodsOrTagsPageState extends State<_MoodsOrTagsPage> {
                         crossAxisAlignment: .start,
                         mainAxisAlignment: .start,
                         children: [
-                          Text(
+                          NamidaText(
                             name,
-                            style: textTheme.displayMedium,
+                            style: NText.medium,
                           ),
                           if (subtitle.isNotEmpty)
-                            Text(
+                            NamidaText(
                               subtitle,
-                              style: textTheme.displaySmall,
+                              style: NText.small,
                             ),
                         ],
                       ),
@@ -298,12 +298,10 @@ class _MoodsOrTagsPageState extends State<_MoodsOrTagsPage> {
                         );
                       },
                     ),
-                    IgnorePointer(
-                      child: NamidaIconButton(
-                        horizontalPadding: 6.0,
-                        icon: Broken.arrow_right_3,
-                        iconSize: 20.0,
-                      ),
+                    const NamidaIconButton(
+                      horizontalPadding: 6.0,
+                      icon: Broken.arrow_right_3,
+                      iconSize: 20.0,
                     ),
                     const SizedBox(width: 4.0),
                   ],
@@ -317,16 +315,16 @@ class _MoodsOrTagsPageState extends State<_MoodsOrTagsPage> {
     );
 
     return BackgroundWrapper(
-      child: NamidaScrollbar(
-        controller: scrollController,
-        child: Column(
-          children: [
-            ?header,
-            Expanded(
+      child: Column(
+        children: [
+          ?header,
+          Expanded(
+            child: NamidaScrollbar(
+              controller: scrollController,
               child: listWidget,
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

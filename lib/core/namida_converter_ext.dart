@@ -39,6 +39,7 @@ import 'package:namida/controller/party/party_controller.dart';
 import 'package:namida/controller/player_controller.dart';
 import 'package:namida/controller/playlist_controller.dart';
 import 'package:namida/controller/queue_controller.dart';
+import 'package:namida/controller/romanizer/romanizer_engine.dart';
 import 'package:namida/controller/scroll_search_controller.dart';
 import 'package:namida/controller/search_sort_controller.dart';
 import 'package:namida/controller/settings_controller.dart';
@@ -54,6 +55,7 @@ import 'package:namida/core/enums.dart';
 import 'package:namida/core/extensions.dart';
 import 'package:namida/core/functions.dart';
 import 'package:namida/core/icon_fonts/broken_icons.dart';
+import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/translations/language.dart';
 import 'package:namida/core/utils.dart';
 import 'package:namida/ui/dialogs/add_to_playlist_dialog.dart';
@@ -84,6 +86,7 @@ import 'package:namida/ui/pages/tracks_page.dart';
 import 'package:namida/ui/widgets/circular_percentages.dart';
 import 'package:namida/ui/widgets/custom_widgets.dart';
 import 'package:namida/ui/widgets/network_artwork.dart';
+import 'package:namida/ui/widgets/settings/extra_settings.dart';
 import 'package:namida/ui/widgets/settings_search_bar.dart';
 import 'package:namida/ui/widgets/stats.dart';
 import 'package:namida/youtube/class/sponsorblock.dart';
@@ -168,6 +171,7 @@ extension LibraryTabUtils on LibraryTab {
       LibraryTab.search => null,
       LibraryTab.youtube => null,
       LibraryTab.ytHome => null,
+      LibraryTab.ytMusic => null,
       LibraryTab.ytNotifications => null,
       LibraryTab.ytChannels => null,
       LibraryTab.ytPlaylists => null,
@@ -223,6 +227,7 @@ extension LibraryTabUtils on LibraryTab {
       LibraryTab.home => const HomePageLocal(),
       LibraryTab.youtube => const YouTubeHomeView(),
       LibraryTab.ytHome => const YouTubeHomeSectionView(section: YTHomePages.home),
+      LibraryTab.ytMusic => const YouTubeHomeSectionView(section: YTHomePages.music),
       LibraryTab.ytNotifications => const YouTubeHomeSectionView(section: YTHomePages.notifications),
       LibraryTab.ytChannels => const YouTubeHomeSectionView(section: YTHomePages.channels),
       LibraryTab.ytPlaylists => const YouTubeHomeSectionView(section: YTHomePages.playlists),
@@ -1113,14 +1118,14 @@ extension OnYoutubeLinkOpenActionUtils on OnYoutubeLinkOpenAction {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
+            NamidaText(
               lang.choose,
-              style: theme.textTheme.displayLarge,
+              style: NText.large,
             ),
             if (title != null && title.isNotEmpty)
-              Text(
+              NamidaText(
                 title,
-                style: theme.textTheme.displaySmall,
+                style: NText.small,
               ),
           ],
         ),
@@ -1144,19 +1149,24 @@ extension OnYoutubeLinkOpenActionUtils on OnYoutubeLinkOpenAction {
                 String? subtitle = isPlayAfter ? playAfterVid.name : null;
                 if (subtitle == '') subtitle = null;
                 return Obx(
-                  (context) => CustomListTile(
-                    passedColor: theme.colorScheme.primaryContainer,
-                    enabled: isItemEnabled[e] ?? true,
-                    icon: e.toIcon(),
-                    title: e.toText() + extraTitle,
-                    subtitle: subtitle,
-                    onTap: () {
-                      onTap(e);
-                      if (isItemEnabled[e] != null) {
-                        isItemEnabled[e] = false; // only disable existing item
-                      }
-                    },
-                  ),
+                  (context) {
+                    final isEnabled = isItemEnabled[e] ?? true;
+                    return NBuilder(
+                      builder: (context, colors) => CustomListTile(
+                        passedColor: colors.primaryContainer,
+                        enabled: isEnabled,
+                        icon: e.toIcon(),
+                        title: e.toText() + extraTitle,
+                        subtitle: subtitle,
+                        onTap: () {
+                          onTap(e);
+                          if (isItemEnabled[e] != null) {
+                            isItemEnabled[e] = false; // only disable existing item
+                          }
+                        },
+                      ),
+                    );
+                  },
                 );
               },
             ),
@@ -1182,6 +1192,8 @@ extension PerformanceModeUtils on PerformanceMode {
           settings.effectsBackground.save(EffectTheme.none);
           settings.effectsOverlay.save(EffectTheme.none);
           settings.playerBackground.save(PlayerBackground.none);
+          settings.lyricsBackground.save(LyricsBackground.artwork);
+          settings.lyricsVisualizer.save(LyricsVisualizer.none);
           settings.artworkCacheHeightMultiplier.save(0.8);
           settings.autoColor.save(false);
           settings.animatedTheme.save(false);
@@ -1346,6 +1358,7 @@ extension RouteUtils on NamidaRoute {
       RouteType.YOUTUBE_MOST_PLAYED_SUBPAGE => QueueSourceYoutubeID.ytMostPlayed,
       RouteType.YOUTUBE_CHANNEL_SUBPAGE => QueueSourceYoutubeID.ytChannel(name),
       RouteType.YOUTUBE_HASHTAG_SUBPAGE => QueueSourceYoutubeID.ytHashtag(name),
+      RouteType.YOUTUBE_MUSIC_BROWSE_SUBPAGE => QueueSourceYoutubeID.ytMusic(name),
       RouteType.YOUTUBE_USER_CHANNELS_PAGE_HOSTED => QueueSourceYoutubeID.ytChannelHosted,
       RouteType.YOUTUBE_HISTORY_HOSTED_SUBPAGE => QueueSourceYoutubeID.ytHistoryHosted,
       // -----------
@@ -1555,7 +1568,7 @@ extension RouteUtils on NamidaRoute {
       show: shouldShow,
       isHorizontal: true,
       curve: Curves.fastEaseInToSlowEaseOut,
-      duration: Duration(milliseconds: 400),
+      duration: const Duration(milliseconds: 400),
       child: child,
     );
   }
@@ -1826,9 +1839,11 @@ extension RouteUtils on NamidaRoute {
           child: NamidaAppBarIcon(
             icon: Broken.setting_2,
             onPressed: const SettingsPage().navigate,
-            child: const SyncStatusIconWrapper(
-              icon: Broken.setting_2,
-              showDisconnectedDot: false,
+            child: const DiscordSharingDotWrapper(
+              child: SyncStatusIconWrapper(
+                icon: Broken.setting_2,
+                showDisconnectedDot: false,
+              ),
             ),
           ),
         ),
@@ -1888,13 +1903,6 @@ extension TracksFromMaps on String {
 
 extension QueueFromMap on int {
   Queue? getQueue() => QueueController.inst.queuesMap.value[this];
-}
-
-extension ThemeDefaultColors on BuildContext {
-  Color defaultIconColor([Color? mainColor, Color? secondaryColor]) => Color.alphaBlend(
-    (mainColor ?? CurrentColor.inst.color).withAlpha(120),
-    secondaryColor ?? theme.colorScheme.onSurface,
-  );
 }
 
 void showMinimumItemsSnack([int minimum = 1]) {
@@ -2032,6 +2040,7 @@ extension LibraryTabL10n on LibraryTab {
     LibraryTab.search => lang.search,
     LibraryTab.youtube => lang.youtube,
     LibraryTab.ytHome => YTHomePages.home._toLibraryTabText(),
+    LibraryTab.ytMusic => YTHomePages.music._toLibraryTabText(),
     LibraryTab.ytNotifications => YTHomePages.notifications._toLibraryTabText(),
     LibraryTab.ytChannels => YTHomePages.channels._toLibraryTabText(),
     LibraryTab.ytPlaylists => YTHomePages.playlists._toLibraryTabText(),
@@ -2075,6 +2084,7 @@ extension LibraryTabL10n on LibraryTab {
     LibraryTab.search => Broken.search_normal_1,
     LibraryTab.youtube => Broken.video_square,
     LibraryTab.ytHome => YTHomePages.home.toIcon(),
+    LibraryTab.ytMusic => YTHomePages.music.toIcon(),
     LibraryTab.ytNotifications => YTHomePages.notifications.toIcon(),
     LibraryTab.ytChannels => YTHomePages.channels.toIcon(),
     LibraryTab.ytPlaylists => YTHomePages.playlists.toIcon(),
@@ -2116,9 +2126,9 @@ extension MediaTypeL10n on MediaType {
     MediaType.album => Broken.music_dashboard,
     MediaType.track => Broken.music_circle,
     MediaType.artist => Broken.microphone,
-    MediaType.albumArtist => Broken.user,
-    MediaType.composer => Broken.profile_2user,
-    MediaType.genre => Broken.shapes,
+    MediaType.albumArtist => Broken.user_square,
+    MediaType.composer => Broken.user_edit,
+    MediaType.genre => Broken.buildings_2,
     MediaType.style => Broken.brush_1,
     MediaType.language => Broken.language_square,
     MediaType.playlist => Broken.music_library_2,
@@ -2481,6 +2491,7 @@ extension QueueSourceYoutubeIDL10n on QueueSourceYoutubeIDEnum {
     QueueSourceYoutubeIDEnum.ytHomeFeed => lang.home,
     QueueSourceYoutubeIDEnum.ytHomePageItem => lang.home,
     QueueSourceYoutubeIDEnum.ytHashtag => lang.hashtag,
+    QueueSourceYoutubeIDEnum.ytMusic => lang.music,
     QueueSourceYoutubeIDEnum.ytRelatedVideos => lang.relatedVideos,
     QueueSourceYoutubeIDEnum.ytHistoryFilteredHosted => lang.history,
     QueueSourceYoutubeIDEnum.ytSearchHosted => lang.search,
@@ -2519,6 +2530,8 @@ extension TagFieldL10n on TagField {
     TagField.recordLabel => lang.recordLabel,
     TagField.releaseType => lang.releaseType,
     TagField.country => lang.country,
+    TagField.bpm => 'BPM',
+    TagField.musicalKey => lang.musicalKey,
     TagField.rating => lang.rating,
     TagField.tags => lang.tags,
     TagField.titleSort => '${lang.title} (${lang.sortBy})',
@@ -2552,6 +2565,8 @@ extension TagFieldL10n on TagField {
     TagField.recordLabel => Broken.ticket,
     TagField.releaseType => Broken.cd,
     TagField.country => Broken.house,
+    TagField.bpm => Broken.alarm,
+    TagField.musicalKey => Broken.musicnote,
     TagField.rating => MediaType.rating.toIcon(),
     TagField.tags => MediaType.tag.toIcon(),
     TagField.titleSort => Broken.music,
@@ -2780,6 +2795,20 @@ extension NotificationButtonListUtils on List<NotificationButton> {
   }
 }
 
+extension ShuffleButtonModeUtils on ShuffleButtonMode {
+  String toText() => switch (this) {
+    ShuffleButtonMode.toggle => lang.shuffleOnOff,
+    ShuffleButtonMode.next => lang.shuffleNext,
+    ShuffleButtonMode.all => lang.shuffleAll,
+  };
+
+  IconData? toSecondaryIcon() => switch (this) {
+    ShuffleButtonMode.toggle => null,
+    ShuffleButtonMode.next => Broken.forward,
+    ShuffleButtonMode.all => Broken.task,
+  };
+}
+
 extension OnYoutubeLinkOpenActionL10n on OnYoutubeLinkOpenAction {
   String toText() => switch (this) {
     OnYoutubeLinkOpenAction.showDownload => lang.download,
@@ -2799,6 +2828,26 @@ extension OnYoutubeLinkOpenActionL10n on OnYoutubeLinkOpenAction {
     OnYoutubeLinkOpenAction.playLast => Broken.play_cricle,
     OnYoutubeLinkOpenAction.addToPlaylist => Broken.music_library_2,
     OnYoutubeLinkOpenAction.alwaysAsk => Broken.message_question,
+  };
+}
+
+extension OnExternalFileOpenActionL10n on OnExternalFileOpenAction {
+  String toText() => switch (this) {
+    OnExternalFileOpenAction.replaceQueue => '${lang.play} (${lang.replaceQueue})',
+    OnExternalFileOpenAction.keepQueue => '${lang.play} (${lang.keepQueue})',
+    OnExternalFileOpenAction.playNext => lang.playNext,
+    OnExternalFileOpenAction.playLast => lang.playLast,
+    OnExternalFileOpenAction.alwaysAsk => lang.alwaysAsk,
+    OnExternalFileOpenAction.showMenu => lang.more,
+  };
+
+  IconData toIcon() => switch (this) {
+    OnExternalFileOpenAction.replaceQueue => Broken.play,
+    OnExternalFileOpenAction.keepQueue => Broken.additem,
+    OnExternalFileOpenAction.playNext => Broken.next,
+    OnExternalFileOpenAction.playLast => Broken.play_cricle,
+    OnExternalFileOpenAction.alwaysAsk => Broken.message_question,
+    OnExternalFileOpenAction.showMenu => Broken.more,
   };
 }
 
@@ -2847,12 +2896,56 @@ extension PlayerBackgroundL10n on PlayerBackground {
     PlayerBackground.none => lang.none,
     PlayerBackground.artwork => lang.artwork,
     PlayerBackground.image => lang.custom,
+    PlayerBackground.meshGradient => lang.meshGradient,
+    PlayerBackground.ambientLights => lang.ambientLights,
+    PlayerBackground.bokeh => lang.bokeh,
   };
 
   IconData toIcon() => switch (this) {
     PlayerBackground.none => Broken.slash,
     PlayerBackground.artwork => Broken.music_square,
     PlayerBackground.image => Broken.gallery,
+    PlayerBackground.meshGradient => AmbientBackdrop.meshGradient.toIcon(),
+    PlayerBackground.ambientLights => AmbientBackdrop.ambientLights.toIcon(),
+    PlayerBackground.bokeh => AmbientBackdrop.bokeh.toIcon(),
+  };
+}
+
+extension LyricsBackgroundL10n on LyricsBackground {
+  String toText() => switch (this) {
+    LyricsBackground.artwork => lang.artwork,
+    LyricsBackground.ambientLights => lang.ambientLights,
+    LyricsBackground.bokeh => lang.bokeh,
+  };
+
+  IconData toIcon() => switch (this) {
+    LyricsBackground.artwork => Broken.music_square,
+    LyricsBackground.ambientLights => AmbientBackdrop.ambientLights.toIcon(),
+    LyricsBackground.bokeh => AmbientBackdrop.bokeh.toIcon(),
+  };
+}
+
+extension LyricsVisualizerL10n on LyricsVisualizer {
+  String toText() => switch (this) {
+    LyricsVisualizer.none => lang.none,
+    LyricsVisualizer.bars => lang.bars,
+    LyricsVisualizer.mirroredBars => lang.mirroredBars,
+    LyricsVisualizer.waves => lang.waves,
+  };
+
+  IconData toIcon() => switch (this) {
+    LyricsVisualizer.none => Broken.slash,
+    LyricsVisualizer.bars => MiniplayerVisualizer.bars.toIcon(),
+    LyricsVisualizer.mirroredBars => MiniplayerVisualizer.mirroredBars.toIcon(),
+    LyricsVisualizer.waves => MiniplayerVisualizer.waves.toIcon(),
+  };
+}
+
+extension _AmbientBackdropUtils on AmbientBackdrop {
+  IconData toIcon() => switch (this) {
+    AmbientBackdrop.meshGradient => Broken.blend_2,
+    AmbientBackdrop.ambientLights => Broken.sun_fog,
+    AmbientBackdrop.bokeh => Broken.bubble,
   };
 }
 
@@ -2920,17 +3013,20 @@ extension YTHomeSourceL10n on YTHomeSource {
   String toText() => switch (this) {
     YTHomeSource.local => lang.local,
     YTHomeSource.youtube => lang.youtube,
+    YTHomeSource.youtubeMusic => lang.youtubeMusic,
   };
 
   IconData toIcon() => switch (this) {
     YTHomeSource.local => Broken.driver,
     YTHomeSource.youtube => Broken.video_square,
+    YTHomeSource.youtubeMusic => Broken.music_circle,
   };
 }
 
 extension YTHomePagesL10n on YTHomePages {
   String toText() => switch (this) {
     YTHomePages.home => lang.home,
+    YTHomePages.music => lang.music,
     YTHomePages.notifications => lang.notifications,
     YTHomePages.channels => lang.channels,
     YTHomePages.playlists => lang.playlists,
@@ -2941,6 +3037,7 @@ extension YTHomePagesL10n on YTHomePages {
 
   IconData toIcon() => switch (this) {
     YTHomePages.home => Broken.home_1,
+    YTHomePages.music => Broken.music_dashboard,
     YTHomePages.notifications => Broken.notification_bing,
     YTHomePages.channels => Broken.profile_2user,
     YTHomePages.playlists => Broken.music_library_2,
@@ -3040,7 +3137,7 @@ extension AudioOutputForcedOffCauseUtils on AudioOutputForcedOffCause {
   bool isAvailable() => switch (this) {
     AudioOutputForcedOffCause.bitPerfect => true,
     AudioOutputForcedOffCause.usbDirect => Platform.isAndroid,
-    AudioOutputForcedOffCause.exclusiveMode => !Platform.isAndroid,
+    AudioOutputForcedOffCause.exclusiveMode => NamidaFeaturesVisibility.showExclusiveMode,
   };
 }
 
@@ -3276,11 +3373,22 @@ extension WebhookEventUtils on WebhookEvent {
   };
 }
 
+extension DiscordPresenceStatusL10n on DiscordPresenceStatus {
+  String? toText() => switch (this) {
+    DiscordPresenceStatus.idle => null,
+    DiscordPresenceStatus.connecting => lang.partyStatusConnecting,
+    DiscordPresenceStatus.connected => lang.partyStatusConnected,
+    DiscordPresenceStatus.unreachable => lang.couldNotConnectToName(name: 'Discord'),
+  };
+}
+
 extension LyricsIntegrationL10n on LyricsIntegration {
   String toText() => switch (this) {
     LyricsIntegration.lyricInfo => 'ColorOS & HyperLyric',
     LyricsIntegration.superLyric => 'SuperLyric',
     LyricsIntegration.flymeTicker => 'Flyme & Lyricon',
+    LyricsIntegration.menuBar => 'macOS menu bar',
+    LyricsIntegration.liveActivity => 'Live Activity',
   };
 }
 
@@ -3289,5 +3397,19 @@ extension LyricsIntegrationUtils on LyricsIntegration {
     LyricsIntegration.lyricInfo => Broken.mobile,
     LyricsIntegration.superLyric => Broken.status,
     LyricsIntegration.flymeTicker => Broken.notification_status,
+    LyricsIntegration.menuBar => Broken.monitor,
+    LyricsIntegration.liveActivity => Broken.lock,
+  };
+}
+
+extension RomanizationScriptL10n on RomanizationScript {
+  String toText() => switch (this) {
+    RomanizationScript.japanese => '日本語 (Japanese)',
+    RomanizationScript.chinese => '中文 (Chinese)',
+    RomanizationScript.korean => '한국어 (Korean)',
+    RomanizationScript.greek => 'Ελληνικά (Greek)',
+    RomanizationScript.cyrillic => 'Кириллица (Cyrillic)',
+    RomanizationScript.armenian => 'Հայերեն (Armenian)',
+    RomanizationScript.georgian => 'ქართული (Georgian)',
   };
 }

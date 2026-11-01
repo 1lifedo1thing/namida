@@ -16,6 +16,7 @@ import 'package:namida/core/enums.dart';
 import 'package:namida/core/extensions.dart';
 import 'package:namida/core/icon_fonts/broken_icons.dart';
 import 'package:namida/core/namida_converter_ext.dart';
+import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/translations/language.dart';
 import 'package:namida/core/utils.dart';
 import 'package:namida/ui/widgets/custom_widgets.dart';
@@ -44,6 +45,11 @@ abstract class EggHunt {
     collect(NamidaEgg.secretWord);
   }
 
+  static void onAddToPlaylistDialogOpened(int openedDialogsCount) {
+    if (!EggsController.inst.isDeathLoopDepth(openedDialogsCount)) return;
+    collect(NamidaEgg.deathLoop);
+  }
+
   static void announceFound(List<NamidaEgg> eggs) {
     if (eggs.isEmpty) return;
     final names = eggs.map((egg) => egg.toText()).join(', ');
@@ -51,6 +57,7 @@ abstract class EggHunt {
   }
 
   static void _announce(NamidaEgg egg, {String? message}) {
+    if (kScreenshotsMode) return;
     final collectedCount = settings.eggs.value.collectedCount();
     final title = message ?? egg.toText();
     VibratorController.medium();
@@ -415,9 +422,9 @@ class _BlushingTitle extends StatelessWidget {
         painter: _BlushPainter(
           blush: blush,
         ),
-        child: Text(
+        child: const NamidaText(
           'uwu',
-          style: context.textTheme.displayLarge,
+          style: NText.large,
         ),
       ),
     );
@@ -490,6 +497,7 @@ extension _NamidaEggText on NamidaEgg {
     NamidaEgg.lucky => 'Lucky',
     NamidaEgg.goodnight => 'Goodnight',
     NamidaEgg.twins => 'Twins',
+    NamidaEgg.deathLoop => 'Death loop',
     NamidaEgg.colorful => 'Colorful',
   };
 
@@ -515,6 +523,7 @@ extension _NamidaEggText on NamidaEgg {
     NamidaEgg.lucky => 'sometimes she just feels generous',
     NamidaEgg.goodnight => 'let the sleep timer tuck you in',
     NamidaEgg.twins => 'sync with another device',
+    NamidaEgg.deathLoop => 'playlist in a playlist in a playlist in a pl-',
     NamidaEgg.colorful => 'find every other egg',
   };
 }
@@ -530,7 +539,7 @@ extension _NamidaEggLook on NamidaEgg {
 extension _EggUnlockableText on EggUnlockable {
   String toText() => switch (this) {
     EggUnlockable.crossfade => lang.crossfade,
-    EggUnlockable.partyMode => 'Party mode',
+    EggUnlockable.partyMode => lang.enablePartyMode,
     EggUnlockable.starfield => EffectTheme.starfield.toText(),
     EggUnlockable.galaxy => EffectTheme.galaxy.toText(),
     EggUnlockable.aurora => EffectTheme.aurora.toText(),

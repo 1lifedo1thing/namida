@@ -9,6 +9,7 @@ import 'package:namida/core/enums.dart';
 import 'package:namida/core/extensions.dart';
 import 'package:namida/core/icon_fonts/broken_icons.dart';
 import 'package:namida/core/namida_converter_ext.dart';
+import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/utils.dart';
 import 'package:namida/ui/pages/home_page.dart';
 import 'package:namida/ui/widgets/custom_widgets.dart';
@@ -19,6 +20,7 @@ import 'package:namida/youtube/pages/youtube_notifications_page.dart';
 import 'package:namida/youtube/pages/youtube_user_playlists_page.dart';
 import 'package:namida/youtube/pages/yt_channels_page.dart';
 import 'package:namida/youtube/pages/yt_downloads_page.dart';
+import 'package:namida/youtube/pages/yt_music_page.dart';
 import 'package:namida/youtube/youtube_playlists_view.dart';
 
 class YouTubeHomeView extends StatefulWidget with NamidaRouteWidget {
@@ -146,15 +148,12 @@ class _SectionsHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final headerColor = theme.cardTheme.color ?? theme.cardColor;
-    final selectedBgColor = theme.colorScheme.secondary.withOpacityExt(0.18);
-    final sections = YTHomePages.values;
+    const sections = YTHomePages.values;
     return Padding(
       padding: const EdgeInsets.fromLTRB(12.0, 6.0, 12.0, 4.0),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: headerColor,
+      child: NDecoratedBox(
+        decoration: (colors) => BoxDecoration(
+          color: colors.cardTheme,
           borderRadius: BorderRadius.circular(12.0.multipliedRadius),
         ),
         child: Padding(
@@ -180,8 +179,6 @@ class _SectionsHeader extends StatelessWidget {
                           expansion: expansion,
                           width: width,
                           labelMaxWidth: labelMaxWidth,
-                          selectedBgColor: selectedBgColor,
-                          badgeColor: headerColor,
                           onSelect: onSelect,
                         );
                       },
@@ -203,8 +200,6 @@ class _SectionTab extends StatelessWidget {
   final double expansion;
   final double width;
   final double labelMaxWidth;
-  final Color selectedBgColor;
-  final Color badgeColor;
   final void Function(YTHomePages section) onSelect;
 
   const _SectionTab({
@@ -213,8 +208,6 @@ class _SectionTab extends StatelessWidget {
     required this.expansion,
     required this.width,
     required this.labelMaxWidth,
-    required this.selectedBgColor,
-    required this.badgeColor,
     required this.onSelect,
   });
 
@@ -241,8 +234,6 @@ class _SectionTab extends StatelessWidget {
             expansion: expansion,
             width: width,
             labelMaxWidth: labelMaxWidth,
-            selectedBgColor: selectedBgColor,
-            badgeColor: badgeColor,
           ),
         ),
       );
@@ -270,8 +261,6 @@ class _SectionTab extends StatelessWidget {
               expansion: expansion,
               width: width,
               labelMaxWidth: labelMaxWidth,
-              selectedBgColor: selectedBgColor,
-              badgeColor: badgeColor,
             ),
           ),
         );
@@ -286,8 +275,6 @@ class _SectionTabItem extends StatelessWidget {
   final double expansion;
   final double width;
   final double labelMaxWidth;
-  final Color selectedBgColor;
-  final Color badgeColor;
 
   const _SectionTabItem({
     required this.section,
@@ -295,8 +282,6 @@ class _SectionTabItem extends StatelessWidget {
     required this.expansion,
     required this.width,
     required this.labelMaxWidth,
-    required this.selectedBgColor,
-    required this.badgeColor,
   });
 
   static const _iconSize = 20.0;
@@ -304,11 +289,14 @@ class _SectionTabItem extends StatelessWidget {
   static const _horizontalPadding = 8.0;
   static const reservedWidth = _horizontalPadding * 2 + _iconSize + _labelGap;
 
+  Color _getBgColor(NColorsData colors) {
+    final selectedBgColor = colors.secondary.withOpacityExt(0.18);
+    return selectedBgColor.withOpacityExt(selectedBgColor.a * expansion);
+  }
+
   @override
   Widget build(BuildContext context) {
     final showsSource = section.showsSource;
-    final bgColor = selectedBgColor.withOpacityExt(selectedBgColor.a * expansion);
-    final badgeBgColor = Color.alphaBlend(bgColor, badgeColor);
     final icon = Icon(
       section.toIcon(),
       size: _iconSize,
@@ -321,11 +309,15 @@ class _SectionTabItem extends StatelessWidget {
               Positioned(
                 right: -7.0,
                 bottom: -4.0,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: badgeBgColor,
-                    shape: BoxShape.circle,
-                  ),
+                child: NDecoratedBox(
+                  decoration: (colors) {
+                    final bgColor = _getBgColor(colors);
+                    final badgeBgColor = Color.alphaBlend(bgColor, colors.cardTheme);
+                    return BoxDecoration(
+                      color: badgeBgColor,
+                      shape: BoxShape.circle,
+                    );
+                  },
                   child: Padding(
                     padding: const EdgeInsets.all(2.0),
                     child: Icon(
@@ -338,12 +330,12 @@ class _SectionTabItem extends StatelessWidget {
             ],
           )
         : icon;
-    return Container(
+    return NContainer(
       width: width,
       height: 40.0,
       padding: const EdgeInsets.symmetric(horizontal: _horizontalPadding),
-      decoration: BoxDecoration(
-        color: bgColor,
+      decoration: (colors) => BoxDecoration(
+        color: _getBgColor(colors),
         borderRadius: BorderRadius.circular(8.0.multipliedRadius),
       ),
       child: Row(
@@ -391,9 +383,8 @@ class _SectionTabLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = context.textTheme;
-    final titleStyle = textTheme.displayMedium?.copyWith(height: 1.15);
-    final sourceStyle = textTheme.displaySmall?.copyWith(fontSize: 10.0, height: 1.0);
+    final titleStyle = NText.medium.of(context).copyWith(height: 1.15);
+    final sourceStyle = NText.small.of(context).copyWith(fontSize: 10.0, height: 1.0);
     final hasSourceChoice = section.hasSourceChoice;
     return ConstrainedBox(
       constraints: BoxConstraints(maxWidth: maxWidth),
@@ -407,7 +398,7 @@ class _SectionTabLabel extends StatelessWidget {
             Text(
               section.toText(),
               maxLines: 1,
-              style: titleStyle?.copyWith(color: _getFaded(titleStyle.color)),
+              style: titleStyle.copyWith(color: _getFaded(titleStyle.color)),
             ),
             if (section.showsSource)
               Padding(
@@ -418,14 +409,16 @@ class _SectionTabLabel extends StatelessWidget {
                     Text(
                       source.toText(),
                       maxLines: 1,
-                      style: sourceStyle?.copyWith(color: _getFaded(sourceStyle.color)),
+                      style: sourceStyle.copyWith(color: _getFaded(sourceStyle.color)),
                     ),
                     if (hasSourceChoice) const SizedBox(width: 1.0),
                     if (hasSourceChoice)
-                      Icon(
-                        Broken.arrow_down_2,
-                        size: 9.0,
-                        color: _getFaded(context.defaultIconColor()),
+                      NBuilder(
+                        builder: (context, colors) => Icon(
+                          Broken.arrow_down_2,
+                          size: 9.0,
+                          color: _getFaded(NColors.defaultIcon().resolve(colors)),
+                        ),
                       ),
                   ],
                 ),
@@ -503,6 +496,7 @@ class _SourcePage extends StatelessWidget {
     final Widget page = switch ((section, source)) {
       (YTHomePages.home, YTHomeSource.local) => const YTHomePageLocal(),
       (YTHomePages.home, YTHomeSource.youtube) => const YoutubeHomeFeedPage(),
+      (YTHomePages.music, _) || (_, YTHomeSource.youtubeMusic) => const YoutubeMusicHomePage(),
       (YTHomePages.notifications, _) => const YoutubeNotificationsPage(),
       (YTHomePages.channels, YTHomeSource.local) => const YoutubeChannelsPage(),
       (YTHomePages.channels, YTHomeSource.youtube) => const YoutubeChannelsHostedPage(),

@@ -12,28 +12,31 @@ import 'package:namida/core/extensions.dart';
 import 'package:namida/core/functions.dart';
 import 'package:namida/core/icon_fonts/broken_icons.dart';
 import 'package:namida/core/namida_converter_ext.dart';
+import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/translations/language.dart';
 import 'package:namida/core/utils.dart';
 import 'package:namida/ui/widgets/custom_widgets.dart';
 import 'package:namida/ui/widgets/expandable_box.dart';
 
 class SortByMenuTracks with SortByMenuBase {
-  const SortByMenuTracks();
+  final MediaType media;
+
+  const SortByMenuTracks({this.media = MediaType.track});
 
   @override
   List<Widget> children(BuildContext context) {
     return [
       _SortAdvancedHeader(
-        onTap: () => NamidaOnTaps.inst.onSubPageTracksSortIconTap(MediaType.track),
+        onTap: () => NamidaOnTaps.inst.onSubPageTracksSortIconTap(media),
       ),
       Obx(
         (context) {
-          final sorting = settings.mediaItemsTrackSorting.valueR[MediaType.track] ?? const SortChain<SortType>([]);
+          final sorting = settings.mediaItemsTrackSorting.valueR[media] ?? const SortChain<SortType>([]);
           final isReversed = sorting.reverse;
           final prefixFilters = SortOptionsCards.prefixFiltersOfTracks(sorting.types());
           return SortOptionsCards(
             isReversed: isReversed,
-            onReverseTap: () => SearchSortController.inst.sortMedia(MediaType.track, reverse: !isReversed),
+            onReverseTap: () => SearchSortController.inst.sortMedia(media, reverse: !isReversed),
             withSortKeyOptions: true,
             prefixFilters: prefixFilters,
           );
@@ -47,8 +50,8 @@ class SortByMenuTracks with SortByMenuBase {
             visualDensity: const VisualDensity(horizontal: -4.0, vertical: -4.0),
             title: e.toText(),
             trailingIcon: e.toIcon(),
-            active: mediaItemsTrackSorting[MediaType.track]?.firstType == e,
-            onTap: () => SearchSortController.inst.sortMedia(MediaType.track, sortBy: e, forceSingleSorting: true),
+            active: mediaItemsTrackSorting[media]?.firstType == e,
+            onTap: () => SearchSortController.inst.sortMedia(media, sortBy: e, forceSingleSorting: true),
           ),
         ),
       ),
@@ -381,6 +384,7 @@ class SortOptionsCards extends StatelessWidget {
   final bool withSortKeyOptions;
   final Set<TrackSearchFilter>? prefixFilters;
   final bool showTitles;
+  final bool dense;
 
   const SortOptionsCards({
     super.key,
@@ -389,6 +393,7 @@ class SortOptionsCards extends StatelessWidget {
     required this.withSortKeyOptions,
     required this.prefixFilters,
     this.showTitles = false,
+    this.dense = false,
   });
 
   static Set<TrackSearchFilter> prefixFiltersOfTracks(Iterable<SortType> sorts) => {for (final sort in sorts) ?sort.toIgnorePrefixFilter()};
@@ -407,6 +412,7 @@ class SortOptionsCards extends StatelessWidget {
             icon: Broken.arrange_circle,
             title: lang.reverseOrder,
             showTitle: showTitles,
+            dense: dense,
             active: isReversed,
             onTap: onReverseTap,
           ),
@@ -419,6 +425,7 @@ class SortOptionsCards extends StatelessWidget {
             child: _SortIgnorePrefixCard(
               filters: prefixFilters,
               showTitle: showTitles,
+              dense: dense,
             ),
           ),
         ],
@@ -429,6 +436,7 @@ class SortOptionsCards extends StatelessWidget {
           Expanded(
             child: _SortRomanizationCard(
               showTitle: showTitles,
+              dense: dense,
             ),
           ),
         ],
@@ -458,16 +466,14 @@ class _SortAdvancedHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         NamidaInkWell(
           borderRadius: 10.0,
-          margin: EdgeInsets.symmetric(horizontal: 6.0),
-          padding: EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
-          bgColor: theme.colorScheme.secondaryContainer.withOpacityExt(0.4),
+          margin: const EdgeInsets.symmetric(horizontal: 6.0),
+          padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+          bgColor: const NColors(.secondaryContainer, opacity: 0.4),
           onTap: () {
             NamidaNavigator.inst.popMenu();
             onTap();
@@ -476,21 +482,21 @@ class _SortAdvancedHeader extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Expanded(
-                child: Text(
+                child: NamidaText(
                   lang.advanced,
-                  style: textTheme.displayMedium?.copyWith(fontSize: 14.0),
+                  style: const NText(.medium, size: .s14),
                   softWrap: false,
                   overflow: TextOverflow.fade,
                 ),
               ),
-              Icon(
+              const Icon(
                 Broken.sort,
                 size: 20.0,
               ),
             ],
           ),
         ),
-        NamidaContainerDivider(
+        const NamidaContainerDivider(
           margin: EdgeInsets.symmetric(vertical: 6.0, horizontal: 12.0),
         ),
       ],
@@ -500,9 +506,11 @@ class _SortAdvancedHeader extends StatelessWidget {
 
 class _SortRomanizationCard extends StatelessWidget {
   final bool showTitle;
+  final bool dense;
 
   const _SortRomanizationCard({
     required this.showTitle,
+    required this.dense,
   });
 
   void _onTap() {
@@ -518,6 +526,7 @@ class _SortRomanizationCard extends StatelessWidget {
         icon: Broken.translate,
         title: lang.romanization,
         showTitle: showTitle,
+        dense: dense,
         active: romanizeSorting,
         onTap: _onTap,
       ),
@@ -528,10 +537,12 @@ class _SortRomanizationCard extends StatelessWidget {
 class _SortIgnorePrefixCard extends StatelessWidget {
   final Set<TrackSearchFilter> filters;
   final bool showTitle;
+  final bool dense;
 
   const _SortIgnorePrefixCard({
     required this.filters,
     required this.showTitle,
+    required this.dense,
   });
 
   void _onTap(bool isAllIgnored) {
@@ -558,6 +569,7 @@ class _SortIgnorePrefixCard extends StatelessWidget {
           icon: Broken.message_remove,
           title: lang.ignorePrefixes,
           showTitle: showTitle,
+          dense: dense,
           active: isAllIgnored,
           halfActive: ignoredCount > 0 && !isAllIgnored,
           onTap: filters.isEmpty ? null : () => _onTap(isAllIgnored),
@@ -580,8 +592,6 @@ class _SortDictionaryTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
     return ObxO(
       rx: settings.romanizeSorting,
       builder: (context, romanizeSorting) {
@@ -594,7 +604,7 @@ class _SortDictionaryTile extends StatelessWidget {
               borderRadius: 10.0,
               margin: const EdgeInsets.only(top: 4.0),
               padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
-              bgColor: theme.colorScheme.secondaryContainer.withOpacityExt(0.4),
+              bgColor: const NColors(.secondaryContainer, opacity: 0.4),
               onTap: _onTap,
               child: Row(
                 children: [
@@ -606,9 +616,9 @@ class _SortDictionaryTile extends StatelessWidget {
                     width: 12.0,
                   ),
                   Expanded(
-                    child: Text(
+                    child: NamidaText(
                       lang.dictionary,
-                      style: textTheme.displayMedium,
+                      style: NText.medium,
                     ),
                   ),
                   const SizedBox(
@@ -618,9 +628,9 @@ class _SortDictionaryTile extends StatelessWidget {
                     rx: Romanizer.inst.downloadProgress,
                     builder: (context, downloadProgress) {
                       final statusText = downloadProgress != null ? '${(downloadProgress * 100).round()}%' : lang.download;
-                      return Text(
+                      return NamidaText(
                         statusText,
-                        style: textTheme.displaySmall,
+                        style: NText.small,
                       );
                     },
                   ),

@@ -20,6 +20,7 @@ import 'package:namida/core/constants.dart';
 import 'package:namida/core/extensions.dart';
 import 'package:namida/core/icon_fonts/broken_icons.dart';
 import 'package:namida/core/namida_converter_ext.dart';
+import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/translations/language.dart';
 import 'package:namida/core/utils.dart';
 import 'package:namida/main.dart';
@@ -53,9 +54,6 @@ Future<void> showDownloadVideoBottomSheet({
   YoutubeDownloadChapter? chapter,
 }) async {
   colorScheme ??= CurrentColor.inst.color;
-  final context = ctx ?? rootContext;
-  final theme = context.theme;
-  final textTheme = theme.textTheme;
 
   originalIndex ??= initialItemConfig?.originalIndex;
   totalLength ??= initialItemConfig?.totalLength;
@@ -228,14 +226,16 @@ Future<void> showDownloadVideoBottomSheet({
   }
 
   Widget getQualityChipBase({
-    final double? height,
-    final double? width,
-    final Color? bgColor,
-    required final Color? selectedColor,
-    final double verticalPadding = 8.0,
+    double? height,
+    double? width,
+    NColors? bgColor,
+    required Color? selectedColor,
+    double verticalPadding = 8.0,
     required void Function() onTap,
     required Widget? child,
   }) {
+    NColors? chipBgColor = bgColor;
+    chipBgColor ??= selectedColor == null ? NColors.cardTheme : NColors.custom((c) => Color.alphaBlend(selectedColor.withOpacityExt(0.16), c.cardTheme));
     return NamidaInkWell(
       decoration: selectedColor != null
           ? BoxDecoration(
@@ -251,7 +251,7 @@ Future<void> showDownloadVideoBottomSheet({
       padding: EdgeInsets.symmetric(vertical: verticalPadding),
       onTap: onTap,
       borderRadius: 8.0,
-      bgColor: bgColor ?? (selectedColor != null ? Color.alphaBlend(selectedColor.withAlpha(40), theme.cardTheme.color!) : theme.cardTheme.color),
+      bgColor: chipBgColor,
       child: child,
     );
   }
@@ -263,21 +263,20 @@ Future<void> showDownloadVideoBottomSheet({
       onTap: () {},
       width: width,
       height: 38.0,
-      bgColor: theme.colorScheme.surface,
+      bgColor: NColors.surface,
       child: null,
     );
   }
 
   Widget getQualityButton({
-    required final String title,
-    final String subtitle = '',
-    required final bool cacheExists,
-    required final bool selected,
-    final double horizontalPadding = 8.0,
-    final double verticalPadding = 8.0,
+    required String title,
+    String subtitle = '',
+    required bool cacheExists,
+    required bool selected,
+    double horizontalPadding = 8.0,
+    double verticalPadding = 8.0,
     required void Function() onTap,
   }) {
-    final textTheme = context.textTheme;
     final selectedColor = colorScheme!;
     return getQualityChipBase(
       selectedColor: selected ? selectedColor : null,
@@ -297,22 +296,18 @@ Future<void> showDownloadVideoBottomSheet({
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
+                NamidaText(
                   title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: textTheme.displayMedium?.copyWith(
-                    fontSize: 12.0,
-                  ),
+                  style: const NText(.medium, size: .s12),
                 ),
                 if (subtitle != '')
-                  Text(
+                  NamidaText(
                     subtitle,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: textTheme.displaySmall?.copyWith(
-                      fontSize: 12.0,
-                    ),
+                    style: const NText(.small, size: .s12),
                   ),
               ],
             ),
@@ -326,15 +321,15 @@ Future<void> showDownloadVideoBottomSheet({
   }
 
   Widget getTextWidget({
-    required final String title,
-    required final String? subtitle,
-    final IconData? icon,
-    final Widget? leading,
-    final TextStyle? style,
-    required final bool hasWebm,
-    required final bool webmIconEnabled,
-    required final void Function()? onSussyIconTap,
-    required final void Function() onCloseIconTap,
+    required String title,
+    required String? subtitle,
+    IconData? icon,
+    Widget? leading,
+    NText? style,
+    required bool hasWebm,
+    required bool webmIconEnabled,
+    required void Function()? onSussyIconTap,
+    required void Function() onCloseIconTap,
   }) {
     return Padding(
       padding: const EdgeInsets.all(8.0),
@@ -342,16 +337,16 @@ Future<void> showDownloadVideoBottomSheet({
         children: [
           leading ?? Icon(icon),
           const SizedBox(width: 8.0),
-          Text(
+          NamidaText(
             title,
-            style: style ?? context.textTheme.displayMedium,
+            style: style ?? NText.medium,
           ),
           if (subtitle != null) ...[
             const SizedBox(width: 8.0),
             Expanded(
-              child: Text(
+              child: NamidaText(
                 '• $subtitle',
-                style: style ?? context.textTheme.displaySmall,
+                style: style ?? NText.small,
               ),
             ),
             const SizedBox(width: 8.0),
@@ -366,12 +361,14 @@ Future<void> showDownloadVideoBottomSheet({
               icon: webmIconEnabled ? null : Broken.video_octagon,
               onPressed: onSussyIconTap,
               child: webmIconEnabled
-                  ? StackedIcon(
-                      baseIcon: Broken.video_octagon,
-                      secondaryIcon: Broken.cpu,
-                      baseIconColor: context.theme.colorScheme.secondary,
-                      iconSize: 20.0,
-                      secondaryIconSize: 13.0,
+                  ? NBuilder(
+                      builder: (context, colors) => StackedIcon(
+                        baseIcon: Broken.video_octagon,
+                        secondaryIcon: Broken.cpu,
+                        baseIconColor: NColors.fixed(colors.secondary),
+                        iconSize: 20.0,
+                        secondaryIconSize: 13.0,
+                      ),
                     )
                   : null,
             ),
@@ -477,9 +474,9 @@ Future<void> showDownloadVideoBottomSheet({
                                               width: maxWidth,
                                               height: 18.0,
                                               shimmerEnabled: infoShimmerEnabled,
-                                              child: Text(
+                                              child: NamidaText(
                                                 videoInfo?.title ?? videoId,
-                                                style: textTheme.displayMedium,
+                                                style: NText.medium,
                                               ),
                                             ),
                                           ),
@@ -496,21 +493,21 @@ Future<void> showDownloadVideoBottomSheet({
                                                 final date =
                                                     streamResultRx.value?.info?.uploadDate.date ?? streamResultRx.value?.info?.publishDate.date ?? videoInfo?.publishedAt.date;
                                                 final dateFormatted = date?.dateFormattedOriginal;
-                                                return Text(
+                                                return NamidaText(
                                                   [
                                                     videoInfo?.durSeconds?.secondsLabel ?? "00:00",
                                                     ?dateFormatted,
                                                   ].join(' - '),
-                                                  style: textTheme.displaySmall,
+                                                  style: NText.small,
                                                 );
                                               }(),
                                             ),
                                           ),
                                           if (downloadChapter != null) ...[
                                             const SizedBox(height: 2.0),
-                                            Text(
+                                            NamidaText(
                                               '${downloadChapter.number}. ${downloadChapter.title}',
-                                              style: textTheme.displaySmall?.copyWith(fontWeight: FontWeight.w600),
+                                              style: const NText(.small, weight: FontWeight.w600),
                                               maxLines: 1,
                                               overflow: TextOverflow.ellipsis,
                                             ),
@@ -532,15 +529,6 @@ Future<void> showDownloadVideoBottomSheet({
                                           tagMaps: tagsMap,
                                           showSpecificFileOptions: showSpecificFileOptionsInEditTagDialog,
                                           sponsorSegmentsCategories: sponsorSegmentsCategories,
-                                          onDownloadFilenameChanged: (filename) {
-                                            updatefilenameOutput(customName: filename);
-                                            formKey.currentState?.validate();
-                                          },
-                                          onDownloadGroupNameChanged: (newGroupName) {
-                                            groupName = newGroupName;
-                                            formKey.currentState?.validate();
-                                          },
-                                          initialGroupName: initialGroupName,
                                         );
                                       },
                                     ),
@@ -712,24 +700,42 @@ Future<void> showDownloadVideoBottomSheet({
                               crossAxisAlignment: CrossAxisAlignment.start,
                               mainAxisSize: MainAxisSize.max,
                               children: [
-                                Obx((context) {
-                                  final videoOnly = selectedVideoOnlyStream.valueR != null && selectedAudioOnlyStream.valueR == null ? lang.videoOnly : null;
-                                  final audioOnly = selectedVideoOnlyStream.valueR == null && selectedAudioOnlyStream.valueR != null ? lang.audioOnly : null;
-                                  final audioAndVideo = selectedVideoOnlyStream.valueR != null && selectedAudioOnlyStream.valueR != null ? "${lang.video} + ${lang.audio}" : null;
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Obx((context) {
+                                        final videoOnly = selectedVideoOnlyStream.valueR != null && selectedAudioOnlyStream.valueR == null ? lang.videoOnly : null;
+                                        final audioOnly = selectedVideoOnlyStream.valueR == null && selectedAudioOnlyStream.valueR != null ? lang.audioOnly : null;
+                                        final audioAndVideo = selectedVideoOnlyStream.valueR != null && selectedAudioOnlyStream.valueR != null
+                                            ? "${lang.video} + ${lang.audio}"
+                                            : null;
 
-                                  return Text.rich(
-                                    TextSpan(
-                                      text: "${lang.output}: ",
-                                      style: textTheme.displaySmall,
-                                      children: [
-                                        TextSpan(
-                                          text: videoOnly ?? audioOnly ?? audioAndVideo ?? lang.none,
-                                          style: textTheme.displayMedium?.copyWith(color: videoOnly != null ? Colors.red : null),
-                                        ),
-                                      ],
+                                        return Text.rich(
+                                          TextSpan(
+                                            text: "${lang.output}: ",
+                                            style: NText.small.of(context),
+                                            children: [
+                                              TextSpan(
+                                                text: videoOnly ?? audioOnly ?? audioAndVideo ?? lang.none,
+                                                style: NText.medium.of(context).copyWith(color: videoOnly != null ? Colors.red : null),
+                                              ),
+                                            ],
+                                          ),
+                                        );
+                                      }),
                                     ),
-                                  );
-                                }),
+                                    const SizedBox(width: 8.0),
+                                    YTDownloadFolderPicker(
+                                      initialFolder: groupName,
+                                      playlistName: initialGroupName ?? '',
+                                      maxTextWidth: maxWidth * 0.34,
+                                      onChanged: (newGroupName) {
+                                        groupName = newGroupName;
+                                        formKey.currentState?.validate();
+                                      },
+                                    ),
+                                  ],
+                                ),
                                 const SizedBox(height: 18.0),
                                 Form(
                                   key: formKey,
@@ -792,7 +798,7 @@ Future<void> showDownloadVideoBottomSheet({
                                               duration: const Duration(milliseconds: 200),
                                               opacity: enabled ? 1.0 : 0.6,
                                               child: NamidaButton(
-                                                colorScheme: filenameExists.valueR ? Colors.red.withAlpha(80) : null,
+                                                colorScheme: filenameExists.valueR ? Colors.red.withOpacityExt(0.31) : null,
                                                 minHeight: NamidaButton.kDefaultMinHeight * 1.5,
                                                 colors: .saturated,
                                                 icon: Broken.import,

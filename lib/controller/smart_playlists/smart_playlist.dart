@@ -346,12 +346,12 @@ sealed class SmartPlaylistRuleBase<T, T2, F extends SmartPlaylistRuleFilter, S e
   });
 
   static SmartPlaylistRuleBase buildFrom({
-    required final SmartPlaylistFilterType type,
-    required final SmartPlaylistRuleFilter filter,
-    required final SmartPlaylistRuleFilterSource source,
-    required final bool enableCleanup,
-    required final bool clockOnly,
-    required final SmartPlaylistRelativeDuration? relativeDuration,
+    required SmartPlaylistFilterType type,
+    required SmartPlaylistRuleFilter filter,
+    required SmartPlaylistRuleFilterSource source,
+    required bool enableCleanup,
+    required bool clockOnly,
+    required SmartPlaylistRelativeDuration? relativeDuration,
   }) => switch (type) {
     SmartPlaylistFilterType.text => SmartPlaylistRuleText(
       data: null,
@@ -376,7 +376,7 @@ sealed class SmartPlaylistRuleBase<T, T2, F extends SmartPlaylistRuleFilter, S e
       source: source as SmartPlaylistRuleFilterDateTimeSource,
       enableCleanup: enableCleanup,
       clockOnly: clockOnly,
-      relativeDuration: relativeDuration ?? (filter.isRelativeDate ? SmartPlaylistRelativeDuration.initial() : null),
+      relativeDuration: relativeDuration ?? (filter.isRelativeDate ? const SmartPlaylistRelativeDuration.initial() : null),
     ),
     SmartPlaylistFilterType.boolean => SmartPlaylistRuleBoolean(
       filter: filter as SmartPlaylistRuleFilterBoolean,

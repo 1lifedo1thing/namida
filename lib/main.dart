@@ -23,7 +23,6 @@ import 'package:window_manager/window_manager.dart';
 
 import 'package:namida/class/file_parts.dart';
 import 'package:namida/class/route.dart';
-import 'package:namida/class/shortcut_data.dart';
 import 'package:namida/class/track.dart';
 import 'package:namida/controller/backup_controller.dart';
 import 'package:namida/controller/chapters_controller.dart';
@@ -40,6 +39,7 @@ import 'package:namida/controller/lyrics_integrations.dart';
 import 'package:namida/controller/music_web_server/music_web_server_base.dart';
 import 'package:namida/controller/navigator_controller.dart';
 import 'package:namida/controller/notification_controller.dart';
+import 'package:namida/controller/now_playing_broadcaster.dart';
 import 'package:namida/controller/party/party_controller.dart';
 import 'package:namida/controller/platform/app_single_instance/app_single_instance.dart';
 import 'package:namida/controller/platform/base.dart';
@@ -50,6 +50,8 @@ import 'package:namida/controller/platform/window_manager/window_manager.dart';
 import 'package:namida/controller/player_controller.dart';
 import 'package:namida/controller/playlist_controller.dart';
 import 'package:namida/controller/queue_controller.dart';
+import 'package:namida/controller/rhythm_controller.dart';
+import 'package:namida/controller/screenshots_driver.dart';
 import 'package:namida/controller/scroll_search_controller.dart';
 import 'package:namida/controller/search_sort_controller.dart';
 import 'package:namida/controller/settings_controller.dart';
@@ -69,6 +71,7 @@ import 'package:namida/core/enums.dart';
 import 'package:namida/core/extensions.dart';
 import 'package:namida/core/icon_fonts/broken_icons.dart';
 import 'package:namida/core/namida_converter_ext.dart';
+import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/themes.dart';
 import 'package:namida/core/translations/arb/app_localizations.dart';
 import 'package:namida/core/translations/fallback_delegates.dart';
@@ -87,6 +90,7 @@ import 'package:namida/ui/widgets/effects/effects.dart';
 import 'package:namida/ui/widgets/library/track_tile.dart';
 import 'package:namida/ui/widgets/mini_lyrics_window.dart';
 import 'package:namida/ui/widgets/video_widget.dart';
+import 'package:namida/youtube/class/youtube_id.dart';
 import 'package:namida/youtube/controller/youtube_account_controller.dart';
 import 'package:namida/youtube/controller/youtube_controller.dart';
 import 'package:namida/youtube/controller/youtube_history_controller.dart';
@@ -107,7 +111,13 @@ void main(List<String> args) {
         await singleInstance.acquireSingleInstanceOrExit(args);
       }
 
-      runApp(const Namida());
+      const app = Namida();
+      const rootWidget = kScreenshotsMode
+          ? ScreenshotsRoot(
+              child: app,
+            )
+          : app;
+      runApp(rootWidget);
     },
     (error, stack) => logger.error(error.runtimeType, e: error, st: stack),
     zoneValues: {
@@ -141,6 +151,8 @@ Future<bool> _mainAppInitialization() async {
           exit(1);
         }
       }
+    } else if (Platform.isIOS) {
+      NamidaDeviceInfo.iosVersion = await NamidaChannel.inst.getPlatformSdk().catchError((_) => -1);
     }
 
     await [
@@ -223,6 +235,8 @@ Future<bool> _mainAppInitialization() async {
     // -- creating directories
     await AppDirs.values.map((p) => Directory(p).create(recursive: true)).executeAllAndSilentReportErrors();
 
+    await NamidaStorage.inst.prepareUserData().ignoreError();
+
     if (NamidaFeaturesVisibility.isStoragePermissionNotRequired) {
       if (!shouldShowOnBoarding) {
         final settingsExist = await File(AppPaths.SETTINGS).exists().ignoreError() ?? false;
@@ -231,6 +245,7 @@ Future<bool> _mainAppInitialization() async {
     }
 
     await settings.prepareAllSettings();
+    NamidaStorage.inst.initPickedDirectories().ignoreError();
     Language.initialize(); // should be done as early as possible
     TrackTileManager.initialize();
     ShortcutsController.instance?.initUserShortcutsFromSettings();
@@ -296,14 +311,14 @@ Future<bool> _mainAppInitialization() async {
       NamidaDeviceInfo.packageInfoCompleter.future,
     ].executeAllAndSilentReportErrors();
 
-    LyricsIntegrations.init();
-
     // -- best to initialize last, so that tracks are prepared (for info/colors) and rhttp is initialized (for network), etc.
+    // -- lyrics integrations require the player, and must be active before the latest queue loads lyrics
     try {
-      await Player.inst.initializePlayer().whenComplete(prepareLatestQueue);
+      await Player.inst.initializePlayer().then((_) => LyricsIntegrations.init()).whenComplete(prepareLatestQueue);
     } catch (e, st) {
       logger.error('', e: e, st: st);
     }
+    HomeWidgetController.onPlayerReady().ignoreError();
 
     if (SMTCController.instance != null) {
       Player.inst.refreshNotification();
@@ -345,11 +360,12 @@ Future<void> _secondaryAppInitialization(bool shouldShowOnBoarding) async {
       YoutubeController.inst.loadDownloadTasksInfoFileAsync(),
 
       NotificationManager.init(),
-      FlutterVolumeController.updateShowSystemUI(false),
+      if (!NamidaFeaturesVisibility.hidingVolumeHudIsAppWide) FlutterVolumeController.updateShowSystemUI(false),
       NamidaChannel.inst.setCanEnterPip(settings.enablePip.value),
     ].executeAllAndSilentReportErrors();
 
     QueueController.inst.prepareAllQueuesFile().catchError(logger.report);
+    RhythmController.inst.loadIfAnalyzed().catchError(logger.report);
 
     CurrentColor.inst.initialize(); // --> !can block?
 
@@ -363,6 +379,8 @@ Future<void> _secondaryAppInitialization(bool shouldShowOnBoarding) async {
   } catch (e, st) {
     logger.error('_secondaryAppInitialization', e: e, st: st);
   }
+
+  if (kScreenshotsMode) ScreenshotsDriver.inst.run();
 }
 
 void _recheckTimeAwareEssentials() async {
@@ -383,6 +401,12 @@ Future<Set<DirectoryIndex>> _getDefaultDirectoriesToScan(List<String> paths) asy
     } catch (_) {}
   }
 
+  if (Platform.isIOS) {
+    // -- the files app only exposes the documents folder, music dropped anywhere in it counts.
+    addDirToScan(paths[0], ignoreExists: true);
+    return dirsToScanDefault;
+  }
+
   for (final sp in kStoragePaths) {
     addDirToScan(FileParts.joinPath(sp, 'Music'), ignoreExists: !isDesktop);
   }
@@ -391,13 +415,13 @@ Future<Set<DirectoryIndex>> _getDefaultDirectoriesToScan(List<String> paths) asy
       final p = Process.runSync('xdg-user-dir', ['MUSIC']);
       if (p.exitCode == 0) {
         final outputPath = (p.stdout as String).split('\n').first.trim();
-        if (outputPath.isNotEmpty && outputPath != NamidaPlatformBuilder.linuxUserHome) {
+        if (outputPath.isNotEmpty && outputPath != NamidaPlatformBuilder.unixUserHome) {
           addDirToScan(outputPath);
         }
       }
     } catch (_) {}
   }
-  if (!isDesktop) {
+  if (Platform.isAndroid) {
     // -- its more common to find music in downloads for phones, unlike desktop.
     final downloadsFolder = FileParts.joinPath(paths[0], 'Download'); // pp.getDownloadsDirectory() returns app specific downloads, not what we want here
     addDirToScan(downloadsFolder, ignoreExists: true);
@@ -501,6 +525,11 @@ void _initializeIntenties() {
       onError: (err) => NamidaReceiveIntentManager.showErrorPlayingFileSnackbar(error: err.toString()),
     );
   }
+
+  // -- ios & macos: opened files arrive as absolute paths, links keep their scheme
+  NamidaChannel.inst.listenOpenedUrls(
+    (items) => NamidaReceiveIntentManager.executeReceivedItems(items, (f) => f, (f) => f.startsWith('/') ? f : null),
+  );
 }
 
 Future<bool> requestManageStoragePermission({bool request = true, bool showError = true, String? directoryToCreate}) async {
@@ -519,7 +548,16 @@ class Namida extends StatefulWidget {
   @override
   State<Namida> createState() => _NamidaState();
 
+  static bool _isExiting = false;
+
+  /// macos asks before quitting (cmd+q, the dock & menu bar quit, logging out), and again from [disposeAllResourcesAndExit] itself.
+  static Future<AppExitResponse> onExitRequested() async {
+    if (_isExiting) return AppExitResponse.exit;
+    await disposeAllResourcesAndExit();
+  }
+
   static Future<Never> disposeAllResourcesAndExit() async {
+    _isExiting = true;
     await [
       windowManager.hide(),
       TrayController.instance?.dispose(),
@@ -551,7 +589,7 @@ class Namida extends StatefulWidget {
     YoutubeInfoController.dispose();
     await [
       PortsProvider.disposeAll(),
-      ShortcutKeyData.disposeAllHotkeys(),
+      ShortcutsController.instance?.dispose(),
       SearchSortController.inst.disposeResources(),
       NamicoDBWrapper.dispose(),
       SMTCController.instance?.dispose(),
@@ -596,7 +634,7 @@ class _NamidaState extends State<Namida> {
             child: NamidaEffectsLayer.overlay(),
           );
 
-          return Theme(
+          return NTheme(
             data: theme,
             child: WindowController.instance == null
                 ? Stack(
@@ -734,6 +772,7 @@ class _NamidaState extends State<Namida> {
                       navigatorKey: namida.rootNavigatorKey,
                       title: 'Namida',
                       shortcuts: ShortcutsController.instance?.appShortcuts,
+                      actions: ShortcutsController.instance?.appActions,
                       // restorationScopeId: 'Namida',
                       // -- we use custom logic for translations, but the locale is still required for
                       // -- region-specific glyphs, ex: CJK ideographs are rendered differently per locale.
@@ -926,6 +965,7 @@ class NamidaReceiveIntentManager {
           YoutubeAccountController.membership.redirectUrlCompleter?.completeIfWasnt(link);
           return;
         }
+        if (NowPlayingBroadcaster.inst.handleDiscordAuthRedirect(link)) return;
         if (PartyController.parseInvite(link) != null) {
           PartyController.inst.pendingInvite.value = link;
           WidgetsBinding.instance.addPostFrameCallback((_) => const NamidaPartyPage().navigate());
@@ -937,13 +977,31 @@ class NamidaReceiveIntentManager {
       if (files.isNotEmpty) {
         final paths = <String>[];
         final m3uPaths = <String>{};
+        final textFilesPaths = <String>[];
         final unresolved = <String>[];
+
+        bool addLinks(String text) {
+          bool didAdd = false;
+          for (final e in text.split('\n')) {
+            final parts = e.split('https://');
+            for (int i = 1; i < parts.length; i++) {
+              final line = parts[i].trim();
+              if (line.isEmpty) continue;
+              paths.add("https://$line");
+              didAdd = true;
+            }
+          }
+          return didAdd;
+        }
+
         for (var f in files) {
           final realPath = realPathCallback(f);
           if (realPath != null) {
             final path = Platform.isAndroid ? realPath.replaceAll(r'\', '') : realPath;
             if (NamidaFileExtensionsWrapper.m3u.isPathValid(path)) {
               m3uPaths.add(path);
+            } else if (NamidaFileExtensionsWrapper.txt.isPathValid(path)) {
+              textFilesPaths.add(path);
             } else {
               paths.add(path);
             }
@@ -953,21 +1011,29 @@ class NamidaReceiveIntentManager {
               if (value.startsWith('content://') || value.startsWith('file://')) {
                 unresolved.add(value);
               } else {
-                for (final e in value.split('\n')) {
-                  final parts = e.split('https://');
-                  for (int i = 1; i < parts.length; i++) {
-                    final line = parts[i];
-                    if (line.isNotEmpty) paths.add("https://$line");
-                  }
-                }
+                addLinks(value);
               }
             }
           }
         }
 
+        final textFilesWithoutLinks = <String>[];
+        for (final path in textFilesPaths) {
+          String text;
+          try {
+            text = await File(path).readAsString();
+          } catch (_) {
+            unresolved.add(path);
+            continue;
+          }
+          final didAddLinks = addLinks(text);
+          if (!didAddLinks) textFilesWithoutLinks.add(path);
+        }
+
         if (m3uPaths.isNotEmpty) {
           final allTracks = await PlaylistController.inst.readM3UFiles(m3uPaths);
-          final err = await _extractAndPlayExternalFiles(allTracks.map((e) => e.path), dropZone);
+          final action = dropZone?.toExternalFileAction() ?? OnExternalFileOpenAction.replaceQueue;
+          final err = await _extractAndPlayExternalFiles(allTracks.map((e) => e.path), action);
           if (err != null) showErrorPlayingFileSnackbar(error: err);
         } else if (paths.isNotEmpty) {
           final youtubeIds = paths.map((e) {
@@ -979,8 +1045,11 @@ class NamidaReceiveIntentManager {
             return matchPlId;
           }).whereType<String>();
           if (youtubeIds.isNotEmpty) {
-            final youtubeAction = dropZone?.toYoutubeAction() ?? settings.youtube.onYoutubeLinkOpen.value;
-            youtubeAction.execute(youtubeIds);
+            if (dropZone != null) {
+              dropZone.openYoutubeIds(youtubeIds);
+            } else {
+              settings.youtube.onYoutubeLinkOpen.value.execute(youtubeIds);
+            }
           } else if (ytPlaylistsIds.isNotEmpty) {
             for (final plid in ytPlaylistsIds) {
               YTHostedPlaylistSubpage.fromId(playlistId: plid, userPlaylist: null).navigate();
@@ -999,12 +1068,16 @@ class NamidaReceiveIntentManager {
             if (existing.isEmpty) {
               showErrorPlayingFileSnackbar(error: _fileNotFoundError(unresolved));
             } else {
-              final err = await _extractAndPlayExternalFiles(existing, dropZone);
+              final action = dropZone?.toExternalFileAction() ?? settings.onExternalFileOpen.value;
+              final err = await _extractAndPlayExternalFiles(existing, action);
               if (err != null) showErrorPlayingFileSnackbar(error: err);
             }
           }
         } else if (unresolved.isNotEmpty) {
           showErrorPlayingFileSnackbar(error: _fileNotFoundError(unresolved));
+        } else if (textFilesWithoutLinks.isNotEmpty) {
+          final pathsText = textFilesWithoutLinks.join(', ');
+          showErrorPlayingFileSnackbar(error: 'No links found: $pathsText');
         }
       }
     });
@@ -1019,16 +1092,22 @@ class NamidaReceiveIntentManager {
     return buffer.toString();
   }
 
-  static Future<String?> _extractAndPlayExternalFiles(Iterable<String> paths, _DropZone? dropZone) async {
+  static Future<String?> _extractAndPlayExternalFiles(Iterable<String> paths, OnExternalFileOpenAction action) async {
     try {
       final trs = await Indexer.inst.convertPathsToExternalTracks(paths);
       if (trs.isNotEmpty) {
-        switch (dropZone) {
-          case null || _DropZone.play:
+        switch (action) {
+          case OnExternalFileOpenAction.replaceQueue:
             await Player.inst.playOrPause(0, trs, QueueSource.externalFile);
-          case _DropZone.playLast:
+          case OnExternalFileOpenAction.keepQueue:
+            await Player.inst.playKeepingQueue(trs, QueueSource.externalFile);
+          case OnExternalFileOpenAction.playNext:
+            await Player.inst.addToQueue(trs, insertNext: true);
+          case OnExternalFileOpenAction.playLast:
             await Player.inst.addToQueue(trs);
-          case _DropZone.more:
+          case OnExternalFileOpenAction.alwaysAsk:
+            await Player.inst.playWithOptions(0, trs, QueueSource.externalFile);
+          case OnExternalFileOpenAction.showMenu:
             _showExternalTracksDialog(trs);
         }
         return null;
@@ -1198,44 +1277,48 @@ class _DropZoneBox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
-    final backgroundColor = theme.cardColor.withOpacityExt(isHovered ? 0.95 : 0.85);
-    final borderColor = theme.colorScheme.onSurface.withOpacityExt(isHovered ? 0.2 : 0.06);
+    final content = AnimatedOpacity(
+      opacity: isHovered ? 1.0 : 0.5,
+      duration: _animationDuration,
+      curve: Curves.easeOut,
+      child: AnimatedScale(
+        scale: isHovered ? 1.0 : 0.94,
+        duration: _animationDuration,
+        curve: Curves.easeOutBack,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              zone.toIcon(),
+              size: 28.0,
+            ),
+            const SizedBox(width: 12.0),
+            NamidaText(
+              zone.toText(),
+              style: const NText(.large, size: .s20),
+            ),
+          ],
+        ),
+      ),
+    );
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3.0),
-      child: AnimatedDecoration(
-        duration: _animationDuration,
-        curve: Curves.easeOut,
-        decoration: BoxDecoration(
-          color: backgroundColor,
-          border: Border.all(color: borderColor),
-          borderRadius: BorderRadius.circular(16.0.multipliedRadius),
-        ),
-        child: AnimatedOpacity(
-          opacity: isHovered ? 1.0 : 0.5,
-          duration: _animationDuration,
-          curve: Curves.easeOut,
-          child: AnimatedScale(
-            scale: isHovered ? 1.0 : 0.94,
+      child: NBuilder(
+        selfAnimated: true,
+        builder: (context, colors) {
+          final backgroundColor = colors.card.withOpacityExt(isHovered ? 0.95 : 0.85);
+          final borderColor = colors.onSurface.withOpacityExt(isHovered ? 0.2 : 0.06);
+          return AnimatedDecoration(
             duration: _animationDuration,
-            curve: Curves.easeOutBack,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  zone.toIcon(),
-                  size: 28.0,
-                ),
-                const SizedBox(width: 12.0),
-                Text(
-                  zone.toText(),
-                  style: textTheme.displayLarge?.copyWith(fontSize: 20.0),
-                ),
-              ],
+            curve: Curves.easeOut,
+            decoration: BoxDecoration(
+              color: backgroundColor,
+              border: Border.all(color: borderColor),
+              borderRadius: BorderRadius.circular(16.0.multipliedRadius),
             ),
-          ),
-        ),
+            child: content,
+          );
+        },
       ),
     );
   }
@@ -1243,7 +1326,7 @@ class _DropZoneBox extends StatelessWidget {
 
 enum _DropZone {
   play(flex: 5),
-  playLast(flex: 2),
+  choose(flex: 2),
   more(flex: 1),
   ;
 
@@ -1279,19 +1362,31 @@ enum _DropZone {
 
   String toText() => switch (this) {
     _DropZone.play => lang.play,
-    _DropZone.playLast => lang.playLast,
+    _DropZone.choose => '${lang.play} (${lang.choose})',
     _DropZone.more => lang.more,
   };
 
   IconData toIcon() => switch (this) {
     _DropZone.play => Broken.play,
-    _DropZone.playLast => Broken.play_cricle,
+    _DropZone.choose => Broken.row_vertical,
     _DropZone.more => Broken.more,
   };
 
-  OnYoutubeLinkOpenAction toYoutubeAction() => switch (this) {
-    _DropZone.play => OnYoutubeLinkOpenAction.play,
-    _DropZone.playLast => OnYoutubeLinkOpenAction.playLast,
-    _DropZone.more => OnYoutubeLinkOpenAction.alwaysAsk,
+  OnExternalFileOpenAction toExternalFileAction() => switch (this) {
+    _DropZone.play => OnExternalFileOpenAction.replaceQueue,
+    _DropZone.choose => OnExternalFileOpenAction.alwaysAsk,
+    _DropZone.more => OnExternalFileOpenAction.showMenu,
   };
+
+  Future<void> openYoutubeIds(Iterable<String> ids) async {
+    switch (this) {
+      case _DropZone.play:
+        await OnYoutubeLinkOpenAction.play.execute(ids);
+      case _DropZone.choose:
+        final videos = ids.map((id) => YoutubeID(id: id, playlistID: null)).toFixedList();
+        await Player.inst.playWithOptions(0, videos, QueueSourceYoutubeID.ytExternalLink);
+      case _DropZone.more:
+        await OnYoutubeLinkOpenAction.alwaysAsk.execute(ids);
+    }
+  }
 }

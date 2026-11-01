@@ -57,90 +57,79 @@ class AlbumsPage extends StatelessWidget with NamidaRouteWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = context.textTheme;
     const libraryTab = LibraryTab.albums;
     final scrollController = libraryTab.scrollController;
     final countPerRowResolved = countPerRow.resolve(context);
-    final artistTypeColor = context.theme.colorScheme.onSecondaryContainer.withOpacityExt(0.8);
     final isCustomList = albumIdentifiers != null;
 
     const listHeader = ExpandableBoxEmptyAnimatedPadding(tab: libraryTab);
 
     return BackgroundWrapper(
-      child: NamidaScrollbar(
-        controller: scrollController,
-        thumbLabel: isCustomList ? null : _createThumbLabel,
-        child: AnimationLimiter(
-          child: ObxO(
-            rx: albumIdentifiers ?? SearchSortController.inst.albumSearchList,
-            builder: (context, finalAlbums) => ExpandableBoxColumn(
-              tab: libraryTab,
-              header: Obx(
-                (context) {
-                  final sorting = settings.groupSortingOfR(MediaType.album);
-                  final sort = sorting.entries.first.type;
-                  final sortReverse = sorting.reverse;
+      child: AnimationLimiter(
+        child: ObxO(
+          rx: albumIdentifiers ?? SearchSortController.inst.albumSearchList,
+          builder: (context, finalAlbums) => ExpandableBoxColumn(
+            tab: libraryTab,
+            header: Obx(
+              (context) {
+                final sorting = settings.groupSortingOfR(MediaType.album);
+                final sort = sorting.entries.first.type;
+                final sortReverse = sorting.reverse;
+                final sortByMenu = isCustomList
+                    ? null
+                    : SortByMenu(
+                        title: sort.toText(),
+                        popupMenuChild: const SortByMenuAlbums(),
+                        isCurrentlyReversed: sortReverse,
+                        onReverseIconTap: () => SearchSortController.inst.sortMedia(MediaType.album, reverse: !sortReverse),
+                      );
 
-                  final finalAlbumsLength = finalAlbums.length;
-                  final totalAlbumsLength = Indexer.inst.mainMapAlbums.valueR.length;
-                  String leftText = finalAlbumsLength != totalAlbumsLength ? '$finalAlbumsLength/${totalAlbumsLength.displayAlbumKeyword}' : finalAlbumsLength.displayAlbumKeyword;
+                final finalAlbumsLength = finalAlbums.length;
+                final totalAlbumsLength = Indexer.inst.mainMapAlbums.valueR.length;
+                String leftText = finalAlbumsLength != totalAlbumsLength ? '$finalAlbumsLength/${totalAlbumsLength.displayAlbumKeyword}' : finalAlbumsLength.displayAlbumKeyword;
 
-                  return ExpandableBox(
-                    enableHero: enableHero,
-                    enableSearch: enableHeader,
-                    gridWidget: enableGridIconButton && enableHeader
-                        ? ChangeGridCountWidget(
-                            tab: libraryTab,
-                            forStaggered: settings.useAlbumStaggeredGridView.valueR,
-                          )
-                        : null,
-                    isBarVisible: libraryTab.isBarVisible.valueR,
-                    leftText: '',
-                    leftWidgets: [
+                return ExpandableBox(
+                  enableHero: enableHero,
+                  enableSearch: enableHeader,
+                  gridWidget: enableGridIconButton && enableHeader
+                      ? ChangeGridCountWidget(
+                          tab: libraryTab,
+                          forStaggered: settings.useAlbumStaggeredGridView.valueR,
+                        )
+                      : null,
+                  isBarVisible: libraryTab.isBarVisible.valueR,
+                  leftText: enableHeader ? '' : leftText,
+                  leftTextIcon: MediaType.album.toIcon(),
+                  leftWidgets: [
+                    if (enableHeader)
                       NamidaPopupWrapper(
-                        openOnTap: enableHeader,
-                        openOnLongPress: enableHeader,
                         children: _getSinglesAndAlbumsToggles,
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Broken.arrange_circle,
-                              size: 14.0,
-                              color: artistTypeColor,
-                            ),
-                            const SizedBox(width: 4.0),
-                            Text(
-                              leftText,
-                              style: textTheme.displayMedium?.copyWith(
-                                color: artistTypeColor,
-                              ),
-                            ),
-                          ],
+                        childBuilder: (openMenu) => ExpandableBoxChip(
+                          icon: MediaType.album.toIcon(),
+                          label: leftText,
+                          showArrow: true,
+                          onTap: openMenu,
                         ),
                       ),
-                    ],
-                    onSearchBoxVisibilityChange: (newShow) => ScrollSearchController.inst.onSearchBoxVisibiltyChange(libraryTab, newShow),
-                    onCloseButtonPressed: () => ScrollSearchController.inst.clearSearchTextField(libraryTab),
-                    disableSorting: isCustomList,
-                    sortByMenuWidget: SortByMenu(
-                      title: sort.toText(),
-                      popupMenuChild: const SortByMenuAlbums(),
-                      isCurrentlyReversed: sortReverse,
-                      onReverseIconTap: () => SearchSortController.inst.sortMedia(MediaType.album, reverse: !sortReverse),
-                    ),
-                    textField: CustomTextField(
-                      textFieldController: libraryTab.textSearchControllerR,
-                      textFieldHintText: lang.filterAlbums,
-                      onTextFieldValueChanged: (value) => SearchSortController.inst.searchMedia(value, MediaType.album),
-                    ),
-                  );
-                },
-              ),
-              page: SmoothCustomScrollView(
+                  ],
+                  onSearchBoxVisibilityChange: (newShow) => ScrollSearchController.inst.onSearchBoxVisibiltyChange(libraryTab, newShow),
+                  onCloseButtonPressed: () => ScrollSearchController.inst.clearSearchTextField(libraryTab),
+                  sortByMenuWidget: sortByMenu,
+                  textField: CustomTextField(
+                    textFieldController: libraryTab.textSearchControllerR,
+                    textFieldHintText: lang.filterAlbums,
+                    onTextFieldValueChanged: (value) => SearchSortController.inst.searchMedia(value, MediaType.album),
+                  ),
+                );
+              },
+            ),
+            page: NamidaScrollbar(
+              controller: scrollController,
+              thumbLabel: isCustomList ? null : _createThumbLabel,
+              child: SmoothCustomScrollView(
                 controller: scrollController,
                 slivers: [
-                  SliverToBoxAdapter(child: listHeader),
+                  const SliverToBoxAdapter(child: listHeader),
                   Obx(
                     (context) {
                       final albumTileExtent = settings.albumListTileHeight.valueR + 4.0 * 5;

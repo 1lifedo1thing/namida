@@ -34,6 +34,13 @@ abstract class SettingEntry {
     }
   }
 
+  double getBottomGap(bool isLastInGroup) {
+    if (isLastInGroup) return 0.0;
+    final lastChild = children.lastOrNull;
+    final endsWithGroup = lastChild != null && lastChild.children.isNotEmpty;
+    return endsWithGroup ? NamidaExpansionTile.kNestedBottomGap : NamidaExpansionTile.kBottomGap;
+  }
+
   bool containsDeep(SettingEntry key) {
     for (final child in children) {
       if (child == key || child.containsDeep(key)) return true;
@@ -45,8 +52,9 @@ abstract class SettingEntry {
 class SettingEntryTile extends StatelessWidget {
   final SettingEntry entry;
   final SettingSubpageProvider? page;
+  final bool isLastInGroup;
 
-  const SettingEntryTile({super.key, required this.entry, this.page});
+  const SettingEntryTile({super.key, required this.entry, this.page, this.isLastInGroup = false});
 
   @override
   Widget build(BuildContext context) {
@@ -55,7 +63,7 @@ class SettingEntryTile extends StatelessWidget {
 
     final page = this.page;
     final bgColor = page?.getBgColor(entry);
-    final args = (entry: entry, page: page, bgColor: bgColor);
+    final args = (entry: entry, page: page, bgColor: bgColor, isLastInGroup: isLastInGroup);
     final tile = entry.toTile(args);
     final shownTile = page == null || entry != page.initialItem
         ? tile
@@ -271,6 +279,7 @@ class SettingExpansion extends SettingEntry {
   final IconData? icon;
   final Widget? leading;
   final bool Function()? initiallyExpandedWhen;
+  final Widget Function(Widget arrow)? trailingBuilder;
 
   @override
   final List<SettingEntry> children;
@@ -281,6 +290,7 @@ class SettingExpansion extends SettingEntry {
     this.icon,
     this.leading,
     this.initiallyExpandedWhen,
+    this.trailingBuilder,
     required this.children,
     super.aliases,
     super.availability,
@@ -371,15 +381,6 @@ class _SettingChoiceTile<E extends Enum> extends StatelessWidget {
     entry.onChanged?.call(value);
   }
 
-  void _onTap(BuildContext context) {
-    final valueToSubtitle = entry.valueToSubtitle;
-    if (valueToSubtitle == null) {
-      _showMenu(context);
-    } else {
-      _showDialog(valueToSubtitle);
-    }
-  }
-
   Iterable<NamidaPopupItem> _getMenuItems() => entry.values.map(
     (e) => NamidaPopupItem(
       icon: entry.valueToIcon?.call(e) ?? entry.icon,
@@ -391,13 +392,6 @@ class _SettingChoiceTile<E extends Enum> extends StatelessWidget {
       },
     ),
   );
-
-  void _showMenu(BuildContext context) {
-    final menu = NamidaPopupWrapper(
-      childrenDefault: _getMenuItems,
-    );
-    menu.showPopupMenu(context);
-  }
 
   void _showDialog(String Function(E value) valueToSubtitle) {
     NamidaNavigator.inst.navigateDialog(
@@ -444,27 +438,44 @@ class _SettingChoiceTile<E extends Enum> extends StatelessWidget {
         final isEnabled = entry.enabledWhen?.call() ?? true;
         final isValueInSubtitle = entry.isValueInSubtitle;
         final title = entry.title();
-        final hasMenu = entry.valueToSubtitle == null;
-        final valueMenu = hasMenu && !isValueInSubtitle
-            ? NamidaPopupWrapper(
+        final shownTitle = isValueInSubtitle ? '$title:' : title;
+        final subtitle = isValueInSubtitle ? valueText : null;
+        final valueToSubtitle = entry.valueToSubtitle;
+        if (valueToSubtitle != null) {
+          return CustomListTile(
+            bgColor: bgColor,
+            enabled: isEnabled,
+            icon: entry.icon,
+            title: shownTitle,
+            subtitle: subtitle,
+            trailingText: isValueInSubtitle ? null : valueText,
+            onTap: () => _showDialog(valueToSubtitle),
+          );
+        }
+        final valueMenu = isValueInSubtitle
+            ? null
+            : NamidaPopupWrapper(
                 childrenDefault: _getMenuItems,
-                child: Text(
+                child: NamidaText(
                   valueText,
-                  style: CustomListTile.getTrailingTextStyle(context.theme),
+                  style: NText.medium,
+                  color: const NColors(.onSurface, opacity: 0.78),
                   maxLines: 1,
                 ),
-              )
-            : null;
-        final trailingText = isValueInSubtitle || hasMenu ? null : valueText;
-        return CustomListTile(
-          bgColor: bgColor,
-          enabled: isEnabled,
-          icon: entry.icon,
-          title: isValueInSubtitle ? '$title:' : title,
-          subtitle: isValueInSubtitle ? valueText : null,
-          trailing: valueMenu,
-          trailingText: trailingText,
-          onTap: () => _onTap(context),
+              );
+        return NamidaPopupWrapper(
+          childrenDefault: _getMenuItems,
+          openOnTap: isEnabled,
+          openOnLongPress: isEnabled,
+          childBuilder: (openMenu) => CustomListTile(
+            bgColor: bgColor,
+            enabled: isEnabled,
+            icon: entry.icon,
+            title: shownTitle,
+            subtitle: subtitle,
+            trailing: valueMenu,
+            onTap: openMenu,
+          ),
         );
       },
     );
@@ -513,16 +524,19 @@ class _SettingExpansionTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final page = args.page;
     final isTargetWithin = page?.isTargetWithin(entry) == true;
+    final lastChild = entry.children.lastOrNull;
     final children = entry.children
         .map(
           (e) => SettingEntryTile(
             entry: e,
             page: page,
+            isLastInGroup: e == lastChild,
           ),
         )
         .toFixedList();
     final isInitiallyExpanded = entry.initiallyExpandedWhen?.call() == true;
     final subtitle = entry.subtitle?.call();
+    final bottomGap = entry.getBottomGap(args.isLastInGroup);
     return NamidaExpansionTile(
       bgColor: args.bgColor,
       icon: entry.icon,
@@ -530,6 +544,8 @@ class _SettingExpansionTile extends StatelessWidget {
       titleText: entry.title(),
       subtitleText: subtitle,
       initiallyExpanded: isInitiallyExpanded || isTargetWithin,
+      trailingBuilder: entry.trailingBuilder,
+      bottomGap: bottomGap,
       children: children,
     );
   }
@@ -547,14 +563,17 @@ class _SettingToggleGroupTile extends StatelessWidget {
     final setting = entry.setting;
     final isTargetWithin = page?.isTargetWithin(entry) == true;
     final initiallyExpanded = setting.value || isTargetWithin;
+    final lastChild = entry.children.lastOrNull;
     final children = entry.children
         .map(
           (e) => SettingEntryTile(
             entry: e,
             page: page,
+            isLastInGroup: e == lastChild,
           ),
         )
         .toFixedList();
+    final bottomGap = entry.getBottomGap(args.isLastInGroup);
     return Obx(
       (context) {
         final isEnabled = entry.enabledWhen?.call() ?? true;
@@ -574,6 +593,7 @@ class _SettingToggleGroupTile extends StatelessWidget {
             trailingBuilder: (_) => CustomSwitch(
               active: isOn,
             ),
+            bottomGap: bottomGap,
             children: children,
           ),
         );

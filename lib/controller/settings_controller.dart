@@ -18,10 +18,11 @@ import 'package:namida/class/player_config_preset.dart';
 import 'package:namida/class/queue_insertion.dart';
 import 'package:namida/class/shortcut_data.dart';
 import 'package:namida/class/sort_chain.dart';
-import 'package:namida/class/track_sort_presets.dart';
+import 'package:namida/class/named_presets.dart';
 import 'package:namida/controller/directory_index.dart';
 import 'package:namida/controller/file_browser.dart';
 import 'package:namida/controller/platform/shortcuts_manager/shortcuts_manager.dart';
+import 'package:namida/controller/romanizer/romanizer_engine.dart';
 import 'package:namida/controller/sync_manager/sync_manager.dart';
 import 'package:namida/core/constants.dart';
 import 'package:namida/core/enums.dart';
@@ -101,6 +102,7 @@ class _SettingsController extends _SettingsKeysWriter {
   late final language = _keyObject<NamidaLanguage?>('language', null, NamidaLanguage.fromJson, (v) => v?.toJson(), sync: false);
   late final themeMode = _keyEnum('themeMode', ThemeMode.system, ThemeMode.values);
   late final pitchBlack = _key('pitchBlack', false);
+  late final pitchBlackAdv = _key<int?>('pitchBlackAdv', null);
   late final autoColor = _key('autoColor', true, sync: false);
   late final animatedTheme = _key('animatedTheme', true, sync: false);
   late final staticColor = _key<int?>('staticColor_v2', null);
@@ -181,7 +183,7 @@ class _SettingsController extends _SettingsKeysWriter {
     MediaType.language: SortChain.of(const [GroupSortType.title]),
     MediaType.mood: SortChain.of(const [GroupSortType.title]),
     MediaType.tag: SortChain.of(const [GroupSortType.title]),
-    MediaType.playlist: SortChain.of(const [GroupSortType.dateModified]),
+    MediaType.playlist: SortChain.of(const [GroupSortType.modifiedDate]),
   };
 
   /// artist and genre variants share one entry, read through [groupSortingOf].
@@ -194,17 +196,30 @@ class _SettingsController extends _SettingsKeysWriter {
   late final artistAlbumsSort = _key<GroupSortType?>('artistAlbumsSort', null, codec: GroupSortType.values.asCodec());
   late final artistAlbumsSortReversed = _key('artistAlbumsSortReversed', false);
   late final playlistsGroupByTags = _key('playlistsGroupByTags', false);
-  late final ytPlaylistSort = _keyEnum('ytPlaylistSort', GroupSortType.dateModified, GroupSortType.values);
+  late final ytPlaylistSort = _keyEnum('ytPlaylistSort', GroupSortType.modifiedDate, GroupSortType.values);
   late final ytPlaylistSortReversed = _key('ytPlaylistSortReversed', true);
   late final indexMinDurationInSec = _key('indexMinDurationInSec', 5, sync: false);
   late final indexMinFileSizeInB = _key('indexMinFileSizeInB', 100 * 1024, sync: false);
-  late final trackSearchFilter = _keyList(
+
+  /// used while no preset is active, searching reads [trackSearchFilter].
+  late final trackSearchFilterDefault = _keyList(
     'trackSearchFilter',
     isKuru
         ? const [TrackSearchFilter.filename, TrackSearchFilter.title, TrackSearchFilter.artist, TrackSearchFilter.album, TrackSearchFilter.comment, TrackSearchFilter.year]
         : const [TrackSearchFilter.filename, TrackSearchFilter.title, TrackSearchFilter.artist, TrackSearchFilter.album],
     item: TrackSearchFilter.values.asCodec(),
   );
+  late final trackSearchFilterPresets = _keyObject(
+    'trackSearchFilterPresets',
+    const TrackSearchFilterPresets.empty(),
+    NamedPresetsCodec.trackSearchFilter.decode,
+    NamedPresetsCodec.trackSearchFilter.encode,
+  );
+
+  /// the active preset's filters, or [trackSearchFilterDefault].
+  RxBaseCore<List<TrackSearchFilter>> get trackSearchFilter => _activeTrackSearchFilter.filters;
+
+  late final _activeTrackSearchFilter = _ActiveTrackSearchFilter(trackSearchFilterDefault, trackSearchFilterPresets);
   late final playlistSearchFilter = _keyEnumList('playlistSearchFilter_v2', PlaylistSearchFilter.values, PlaylistSearchFilter.values);
   late final directoriesToScan = _keyList<DirectoryIndex>('directoriesToScan', const [], item: const _DirectoryIndexCodec(), sync: false);
   late final directoriesToExclude = _keyList<DirectoryIndex>('directoriesToExclude', const [], item: const _DirectoryIndexCodec(), sync: false);
@@ -259,6 +274,9 @@ class _SettingsController extends _SettingsKeysWriter {
   late final playerBackgroundVignette = _key('playerBackgroundVignette', true, sync: false);
   late final playerBackgroundAnimated = _key('playerBackgroundAnimated', true, sync: false);
   late final playerColorWhenExpanded = _key('playerColorWhenExpanded', true, sync: false);
+  late final lyricsBackground = _keyEnum('lyricsBackground', LyricsBackground.ambientLights, LyricsBackground.values, sync: false);
+  late final lyricsBackgroundAlways = _key('lyricsBackgroundAlways', true, sync: false);
+  late final lyricsVisualizer = _keyEnum('lyricsVisualizer', LyricsVisualizer.none, LyricsVisualizer.values, sync: false);
   late final appWallpaper = _key<String?>('appWallpaper', null, sync: false);
   late final appWallpaperBlur = _key('appWallpaperBlur_v2', 4, sync: false);
   late final appWallpaperDim = _key('appWallpaperDim_v2', 5, sync: false);
@@ -276,6 +294,8 @@ class _SettingsController extends _SettingsKeysWriter {
   late final notificationButtons = _keyList('notificationButtons', _kDefaultNotificationButtons, item: NotificationButton.values.asCodec(), isUnique: true, isNonEmpty: true);
   late final notificationButtonsPlaylist = _key<String?>('notificationButtonsPlaylist', null);
   late final notificationButtonsYTPlaylist = _key<String?>('notificationButtonsYTPlaylist', null);
+  late final nowPlayingSeekBackward = _key('nowPlayingSeekBackward', false);
+  late final nowPlayingSeekForward = _key('nowPlayingSeekForward', false);
   late final enableSearchCleanup = _key('enableSearchCleanup', true);
   late final enableBottomNavBar = _key('enableBottomNavBar', true);
   late final displayAudioInfoMiniplayer = _key('displayAudioInfoMiniplayer', false);
@@ -290,6 +310,7 @@ class _SettingsController extends _SettingsKeysWriter {
   late final embeddedLyricsPriority = _keyEnum('embeddedLyricsPriority', EmbeddedLyricsPriority.onlyWhenSynced, EmbeddedLyricsPriority.values);
   late final romanizeLyrics = _key('romanizeLyrics', false);
   late final romanizeSorting = _key('romanizeSorting', false);
+  late final romanizationDisabledScripts = _keyList('romanizationDisabledScripts', const <RomanizationScript>[], item: RomanizationScript.values.asCodec(), isUnique: true);
   late final swipeableDrawer = _key('swipeableDrawer', true);
   late final dismissibleMiniplayer = _key('dismissibleMiniplayer', true);
   late final enableClipboardMonitoring = _key('enableClipboardMonitoring', false, sync: false);
@@ -300,6 +321,7 @@ class _SettingsController extends _SettingsKeysWriter {
   late final alwaysExpandedSearchbar = _key('alwaysExpandedSearchbar', isKuru ? true : false);
   late final mixedQueue = _key('mixedQueue', false);
   late final askBeforeReplacingQueue = _key('askBeforeReplacingQueue', false);
+  late final onExternalFileOpen = _keyEnum('onExternalFileOpen', OnExternalFileOpenAction.replaceQueue, OnExternalFileOpenAction.values);
   late final bypassRefreshPrompt = _key('bypassRefreshPrompt_v2', false);
   late final desktopTitlebar = _key('desktopTitlebar', true, sync: false);
   late final desktopTitlebarType = _keyEnum('desktopTitlebarType', DesktopTitlebarIconsType.auto, DesktopTitlebarIconsType.values, sync: false);
@@ -337,10 +359,12 @@ class _SettingsController extends _SettingsKeysWriter {
   late final mostPlayedTimeRange = _keyEnum('mostPlayedTimeRange', MostPlayedTimeRange.allTime, MostPlayedTimeRange.values);
   late final mostPlayedCustomDateRange = _keyObject('mostPlayedCustomDateRange_v2', DateRange.dummy(), DateRange.fromJson, (v) => v.toJson());
   late final mostPlayedCustomisStartOfDay = _key('mostPlayedCustomisStartOfDay', true);
+  late final didRepairHistoryDays = _key('didRepairHistoryDays', false, sync: false);
 
   late final ytMostPlayedTimeRange = _keyEnum('ytMostPlayedTimeRange', MostPlayedTimeRange.allTime, MostPlayedTimeRange.values);
   late final ytMostPlayedCustomDateRange = _keyObject('ytMostPlayedCustomDateRange_v2', DateRange.dummy(), DateRange.fromJson, (v) => v.toJson());
   late final ytMostPlayedCustomisStartOfDay = _key('ytMostPlayedCustomisStartOfDay', true);
+  late final ytDidRepairHistoryDays = _key('ytDidRepairHistoryDays', false, sync: false);
 
   late final onTrackSwipeLeft = _keyEnum('onTrackSwipeLeft', TrackExecuteActions.playafter, TrackExecuteActions.values);
   late final onTrackSwipeRight = _keyEnum('onTrackSwipeRight', TrackExecuteActions.openinfo, TrackExecuteActions.values);
@@ -363,6 +387,7 @@ class _SettingsController extends _SettingsKeysWriter {
   late final scrollbarThumbLabel = _key<bool?>('scrollbarThumbLabel', null, sync: false);
   late final tapToScroll = _key<bool?>('tapToScroll', null, sync: false);
   late final enhancedDragToScroll = _key<bool?>('enhancedDragToScroll', null, sync: false);
+  late final easyScrollbarGrab = _key<bool?>('easyScrollbarGrab', null, sync: false);
   late final smoothScrolling = _key<bool?>('smoothScrolling', null, sync: false);
   late final mediaWaveHaptic = _key<bool?>('mediaWaveHaptic', null, sync: false);
   late final backgroundImages = _key<bool?>('backgroundImages', null, sync: false);
@@ -479,7 +504,7 @@ class _SettingsController extends _SettingsKeysWriter {
     'mediaItemsTrackSortingPresets_v2',
     const {},
     key: MediaType.values.asCodec(),
-    value: _ObjectCodec(TrackSortPresets.fromJson, (v) => v.toJson()),
+    value: _ObjectCodec(NamedPresetsCodec.trackSorting.decode, NamedPresetsCodec.trackSorting.encode),
   );
 
   /// [mediaItemsTrackSortingDefault] with each type's active preset applied.
@@ -505,6 +530,7 @@ class _SettingsController extends _SettingsKeysWriter {
 
   late final fontScaleLRC = _key('fontScaleLRC', 1.0);
   late final fontScaleLRCFull = _key<double?>('fontScaleLRCFull', null);
+  late final fontScaleLRCWidescreen = _key('fontScaleLRCWidescreen', 1.6);
 
   static const _kDefaultLyricsEffects = [
     LyricsEffect.focalScale, LyricsEffect.depthBlur, LyricsEffect.springPop, LyricsEffect.interludeDots, LyricsEffect.seekGlide, //
@@ -520,6 +546,7 @@ class _SettingsController extends _SettingsKeysWriter {
   /// queue published to media browser clients (android auto, wear).
   late final mediaBrowserQueue = _key('mediaBrowserQueue', true, sync: false);
   late final nowPlayingBroadcast = _key('nowPlayingBroadcast', false, sync: false);
+  late final discordPresence = _key('discordPresence', false, sync: false);
   late final webhookUrl = _key('webhookUrl', '', sync: false);
   late final webhookEvents = _keySet<WebhookEvent>('webhookEvents', _kDefaultWebhookEvents, item: WebhookEvent.values.asCodec(), sync: false);
   late final lyricsIntegrations = _keySet<LyricsIntegration>('lyricsIntegrations', const {}, item: LyricsIntegration.values.asCodec(), sync: false);
@@ -604,6 +631,9 @@ class _SettingsController extends _SettingsKeysWriter {
     }
     if (groupSorting.isNotEmpty && _raw['mediaGroupSorting'] == null) _raw['mediaGroupSorting'] = groupSorting;
 
+    _migratePlaylistModifiedDate(_raw['mediaGroupSorting']);
+    if (_raw['ytPlaylistSort'] == GroupSortType.dateModified.name) _raw['ytPlaylistSort'] = GroupSortType.modifiedDate.name;
+
     final isFavouriteInNotification = _dropKey('displayFavouriteButtonInNotification') == true;
     final isStopInNotification = _dropKey('displayStopButtonInNotification') != false;
     final didCustomizeNotification = isFavouriteInNotification || !isStopInNotification;
@@ -641,12 +671,27 @@ class _SettingsController extends _SettingsKeysWriter {
     };
   }
 
+  /// playlists defaulted to [GroupSortType.dateModified], which only albums and artists sort by.
+  static void _migratePlaylistModifiedDate(dynamic groupSortingJson) {
+    if (groupSortingJson is! Map) return;
+    final playlistSortingJson = groupSortingJson[MediaType.playlist.name];
+    if (playlistSortingJson is! Map) return;
+    final sorts = playlistSortingJson['sorts'];
+    if (sorts is! List) return;
+    for (int i = 0; i < sorts.length; i++) {
+      final entry = SortEntry.fromJson(sorts[i], GroupSortType.values);
+      if (entry == null || entry.type != GroupSortType.dateModified) continue;
+      final fixedEntry = SortEntry(GroupSortType.modifiedDate, reverse: entry.reverse);
+      sorts[i] = fixedEntry.toJson();
+    }
+  }
+
   /// writes to the active preset, [toDefault] writes to the default chain and deselects the preset.
   void updateMediaItemsTrackSorting(MediaType media, SortChain<SortType> sorting, {bool toDefault = false}) {
     final presets = mediaItemsTrackSortingPresets.value[media];
     final hasActivePreset = presets?.activeIndex != null;
     if (presets != null && hasActivePreset && !toDefault) {
-      final newPresets = presets.withActiveSorting(sorting);
+      final newPresets = presets.withActiveValue(sorting);
       mediaItemsTrackSortingPresets.update((map) => map[media] = newPresets);
       return;
     }
@@ -674,7 +719,7 @@ class _SettingsController extends _SettingsKeysWriter {
     final presets = mediaItemsTrackSortingPresets.value[media] ?? const TrackSortPresets.empty();
     if (!presets.canAdd) return;
     final sorting = mediaItemsTrackSorting.value[media] ?? const SortChain<SortType>([]);
-    final preset = TrackSortPreset(name: name, sorting: sorting);
+    final preset = TrackSortPreset(name: name, value: sorting);
     final newPresets = presets.withAdded(preset);
     mediaItemsTrackSortingPresets.update((map) => map[media] = newPresets);
   }
@@ -698,6 +743,46 @@ class _SettingsController extends _SettingsKeysWriter {
         map[media] = newPresets;
       }
     });
+  }
+
+  /// writes to the active preset, or to [trackSearchFilterDefault] while none is active.
+  void updateTrackSearchFilter(List<TrackSearchFilter> filters) {
+    final presets = trackSearchFilterPresets.value;
+    if (presets.activeIndex == null) {
+      trackSearchFilterDefault.replace(filters);
+      return;
+    }
+    final newPresets = presets.withActiveValue(filters);
+    trackSearchFilterPresets.save(newPresets);
+  }
+
+  void selectTrackSearchFilterPreset(int? index) {
+    final presets = trackSearchFilterPresets.value;
+    if (presets.activeIndex == index) return;
+    final newPresets = presets.withActive(index);
+    trackSearchFilterPresets.save(newPresets);
+  }
+
+  /// saves the active filters as a new preset and selects it.
+  void addTrackSearchFilterPreset(String name) {
+    final presets = trackSearchFilterPresets.value;
+    if (!presets.canAdd) return;
+    final preset = TrackSearchFilterPreset(name: name, value: trackSearchFilter.value);
+    final newPresets = presets.withAdded(preset);
+    trackSearchFilterPresets.save(newPresets);
+  }
+
+  void renameTrackSearchFilterPreset(int index, String name) {
+    final presets = trackSearchFilterPresets.value;
+    final newPreset = presets.presets[index].copyWith(name: name);
+    final newPresets = presets.withReplaced(index, newPreset);
+    trackSearchFilterPresets.save(newPresets);
+  }
+
+  void removeTrackSearchFilterPreset(int index) {
+    final presets = trackSearchFilterPresets.value;
+    final newPresets = presets.withRemoved(index);
+    trackSearchFilterPresets.save(newPresets);
   }
 
   void updateGroupSorting(MediaType media, SortChain<GroupSortType> sorting) {
@@ -802,10 +887,31 @@ class _ActiveTrackSorting {
     for (final e in _presets.value.entries) {
       final preset = e.value.activePreset;
       if (preset == null) continue;
-      newSorting[e.key] = preset.sorting;
+      newSorting[e.key] = preset.value;
     }
     if (mapEquals(newSorting, sorting.value)) return;
     sorting.value = _ProtectedMap(newSorting);
+  }
+}
+
+class _ActiveTrackSearchFilter {
+  final _SettingsListKey<TrackSearchFilter> _defaultFilters;
+  final SettingsKey<TrackSearchFilterPresets> _presets;
+
+  final filters = Rx<List<TrackSearchFilter>>(const []);
+
+  _ActiveTrackSearchFilter(this._defaultFilters, this._presets) {
+    _rebuild();
+    _defaultFilters.addListener(_rebuild);
+    _presets.addListener(_rebuild);
+  }
+
+  void _rebuild() {
+    final presetFilters = _presets.value.activePreset?.value;
+    final newFilters = presetFilters ?? _defaultFilters.value;
+    if (listEquals(newFilters, filters.value)) return;
+    final protectedFilters = presetFilters == null ? newFilters : _ProtectedList(presetFilters);
+    filters.value = protectedFilters;
   }
 }
 

@@ -1,14 +1,17 @@
 name: namida
 description: A Beautiful and Feature-rich Music Player, With YouTube & Video Support Built in Flutter
 publish_to: "none"
-version: 8.2.0-beta+261014207
+version: 8.5.0-beta+261026020
 
 environment:
-  sdk: ">=3.12.2 <4.0.0"
-  flutter: 3.44.8
+  sdk: ">=3.13.7 <4.0.0"
+  flutter: 3.47.8
 
 dependency_overrides:
   intl: ^0.20.2
+  # -- ffmpeg_kit_extended_flutter needs 2.x, mecab_for_dart & android_libcpp_shared still ask for 1.x.
+  # -- their hooks build fine on 2.x, which only stopped OS/Architecture working in const maps and sets.
+  code_assets: ^2.1.0
 
   on_audio_query_platform_interface:
     git:
@@ -25,6 +28,10 @@ dependency_overrides:
     git:
       url: https://github.com/media-kit/media-kit
       path: media_kit
+  android_libcpp_shared: # 0.2.x with the 0.3.1 fix, until mecab_for_dart allows ^0.3.1
+    git:
+      url: https://github.com/MSOB7YY/android_libcpp_shared
+      ref: copy-libcpp-to-output
 
 dependencies:
   flutter:
@@ -81,7 +88,11 @@ dependencies:
       url: https://github.com/MSOB7YY/screen_brightness
       path: screen_brightness/
   native_device_orientation: ^2.1.1
-  home_widget: ^0.9.2
+  home_widget:
+    git:
+      url: https://github.com/MSOB7YY/home_widget
+      path: packages/home_widget
+      ref: namida
   flutter_local_notifications: ^22.0.0-dev.3
   flutter_sharing_intent:
     git:
@@ -109,6 +120,7 @@ dependencies:
   namico_db_wrapper:
     git:
       url: https://github.com/namidaco/namico_db_wrapper
+  sqlite3: ^3.5.0
   flutter_native_splash: ^2.4.8
 
   # ---- Web Servers ----
@@ -121,8 +133,7 @@ dependencies:
   smb_connect:
     git:
       url: https://github.com/MSOB7YY/smb_connect
-  dartssh2: ^2.14.0
-  ftpconnect: ^2.0.10
+  dartssh2: ^2.22.5
 
   # ---- Audio Indexing & Playback ----
   just_audio:
@@ -135,13 +146,25 @@ dependencies:
       url: https://github.com/MSOB7YY/audio_service
       path: audio_service/
       ref: minor
+  audio_session: ^0.2.0
   media_kit:
     git:
       url: https://github.com/media-kit/media-kit
       path: media_kit
-  media_kit_video: ^2.0.1
+  # -- git cuz pub ones dont have swift pkg yet
+  media_kit_video:
+    git:
+      url: https://github.com/media-kit/media-kit
+      path: media_kit_video
   media_kit_libs_linux: ^1.2.1
-  media_kit_libs_macos_video: ^1.1.4
+  media_kit_libs_macos_video:
+    git:
+      url: https://github.com/media-kit/media-kit
+      path: libs/macos/media_kit_libs_macos_video
+  media_kit_libs_ios_video: # -- 1.1.5 (libmpv 0.7.2) lets namida own the ios audio session
+    git:
+      url: https://github.com/media-kit/media-kit
+      path: libs/ios/media_kit_libs_ios_video
   media_kit_libs_windows_video: ^1.0.11
   http_cache_stream: ^0.2.0
   namida_waveform:
@@ -160,10 +183,16 @@ dependencies:
       path: packages/on_audio_query
 
   # ---- Video Indexing & Playback ----
-  ffmpeg_kit_flutter:
+  # -- ffmpeg & ffprobe run in process through FFI on every platform, external/ffmpeg_build/README.md has why
+  ffmpeg_kit_extended_flutter:
     git:
-      url: https://github.com/MSOB7YY/ffmpeg-kit
-      path: flutter/flutter
+      url: https://github.com/MSOB7YY/ffmpeg-kit-extended
+      ref: namida
+      path: flutter
+  # ffmpeg_kit_flutter:
+  #   git:
+  #     url: https://github.com/MSOB7YY/ffmpeg-kit
+  #     path: flutter/flutter
   youtipie:
     git:
       url: https://github.com/namidaco/youtipie
@@ -176,11 +205,11 @@ dependencies:
 
   # ---- Image Utilities ----
   palette_generator: ^0.3.3
+  material_color_utilities: any # -- pinned by flutter
 
   # ---- UI Rendering ----
   flutter_staggered_animations: ^1.1.1
   flutter_staggered_grid_view: ^0.7.0
-  flex_color_picker: ^3.8.0
   flutter_animate: ^4.2.0+1
   dynamic_color: ^1.6.7
   super_sliver_list: ^0.4.1
@@ -258,19 +287,26 @@ hooks:
   user_defines:
     sqlite3:
       source: sqlite3mc
-    # Prebuilt waveform library dir (desktop):
+    # Prebuilt waveform library dir (windows & linux):
     # - built by external/ffmpeg_build/build_waveform.sh with a static decode-only FFmpeg (no system deps).
     # - if missing, builds from source against system FFmpeg (dev only, not for release).
-    # - Android: ignored, links ffmpeg-kit's FFmpeg.
+    # - Android, iOS & macOS: ignored, links the libffmpegkit ffmpeg_kit_extended_flutter ships.
     namida_waveform:
       prebuilt_dir: external/ffmpeg_build
+    # -- libffmpegkit bundles kept in external/ffmpeg_build by its fetch_ffmpegkit.sh, so nothing is downloaded while building
+    ffmpeg_kit_extended_flutter:
+      android: external/ffmpeg_build/ffmpegkit/bundle-namida-shared-small-lgpl-release.aar
+      ios: external/ffmpeg_build/ffmpegkit/bundle-namida-ios-universal-small-lgpl.xcframework.zip
+      macos: external/ffmpeg_build/ffmpegkit/bundle-namida-macos-universal-small-lgpl.xcframework.zip
+      linux: external/ffmpeg_build/ffmpegkit/bundle-namida-linux-x86_64-shared-small-lgpl.zip
+      windows: external/ffmpeg_build/ffmpegkit/bundle-namida-windows-x86_64-shared-small-lgpl.zip
 
 flutter_native_splash:
   image: assets/namida_icon.png
   color: "#fff5eb"
   color_dark: "#161212"
   android: true
-  ios: false
+  ios: true
   web: false
   android_12:
     color: "#fff5eb"

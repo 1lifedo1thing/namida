@@ -35,6 +35,7 @@ import 'package:namida/controller/settings_controller.dart';
 import 'package:namida/controller/settings_search_controller.dart';
 import 'package:namida/controller/sync_manager/sync_manager.dart';
 import 'package:namida/controller/tagger_controller.dart';
+import 'package:namida/controller/video_controller.dart';
 import 'package:namida/core/constants.dart';
 import 'package:namida/core/dirs_file_filter.dart';
 import 'package:namida/core/enums.dart';
@@ -49,6 +50,7 @@ import 'package:namida/ui/widgets/settings/indexer_settings.dart';
 
 part 'indexer_artwork_extract_strategies.dart';
 part 'indexer_favourites_sorting.dart';
+part 'indexer_filtered_files.dart';
 
 class Indexer<T extends Track> {
   static Indexer get inst => _instance;
@@ -139,7 +141,7 @@ class Indexer<T extends Track> {
   var externalTracksMappedByPath = <String, TrackExtended>{};
   final trackStatsMap = <Track, TrackStats>{}.obs;
 
-  var allFolderCovers = <Folder, String>{}; // {directoryPath, imagePath}
+  Map<Folder, String>? _allFolderCovers; // {directoryPath, imagePath}
   var allTracksMappedByYTID = <String, List<T>>{};
 
   /// Used to prevent duplicated track (by filename).
@@ -159,8 +161,10 @@ class Indexer<T extends Track> {
     return alltracks;
   }
 
+  bool get didListFolderCovers => _allFolderCovers != null;
+
   String? getFallbackFolderArtworkPath({required Folder folder}) {
-    return this.allFolderCovers[folder]; // folder hash already resolves extra/removed path separator
+    return this._allFolderCovers?[folder]; // folder hash already resolves extra/removed path separator
   }
 
   bool imageObtainedBefore(String imagePath) => _pendingArtworksCompressed[imagePath] != null || _pendingArtworksFullRes[imagePath] != null;
@@ -304,7 +308,7 @@ class Indexer<T extends Track> {
       );
     } else {
       currentFiles ??= await getAudioFilesForRefresh();
-      final difference = getPathsDifference(currentFiles);
+      final difference = await getPathsDifference(currentFiles);
       differenceStats = allowDeletion ? difference : difference.withoutDeletedPaths();
 
       await _fetchAllSongsAndWriteToFile(
@@ -375,7 +379,7 @@ class Indexer<T extends Track> {
           addIfNonZero(lang.tracksExcludedByNomedia, this.tracksExcludedByNoMedia.value);
           addIfNonZero(lang.filteredBySizeAndDuration, this.filteredForSizeDurationTracks.value);
         }
-        snackyy(title: lang.done, message: msgParts.join('\n'));
+        snackyy(title: lang.done, message: msgParts.join('\n'), displayDuration: SnackDisplayDuration.veryLong);
       }
     }
   }
@@ -888,10 +892,14 @@ class Indexer<T extends Track> {
 
     final finalNewOldTracks = <TrackExtended, TrackExtended?>{};
 
+    final currentTrack = Player.inst.currentTrack?.track;
+    Track? linkChangedCurrentTrack;
+
     for (final e in tracksMap.entries) {
       final ot = e.key;
       final nt = e.value.asTrack() as T;
       newTracks.add(nt);
+      if (ot == currentTrack && ot.youtubeLink != e.value.youtubeLink) linkChangedCurrentTrack = currentTrack;
       if (externalTracksMappedByPath.containsKey(ot.path)) {
         _addExternalTrack(e.value, null);
       } else {
@@ -912,6 +920,8 @@ class Indexer<T extends Track> {
     _addTheseTracksToAlbumGenreArtistEtc(finalNewOldTracks);
     _sortAndRefreshTracks();
     tracksInfoList.refresh();
+
+    if (linkChangedCurrentTrack != null) VideoController.inst.updateCurrentVideo(linkChangedCurrentTrack);
 
     SearchSortController.inst.refreshPortsIfNecessary();
     final globalSearchText = ScrollSearchController.inst.searchTextEditingController.text;
@@ -1079,6 +1089,8 @@ class Indexer<T extends Track> {
     tracksExcludedByNoMedia.value = 0;
   }
 
+  late final _filteredFiles = _FilteredFilesMemory(AppPaths.TRACKS_FILTERED);
+
   /// Removes deleted paths of [filesDiff], fetches its new paths and re-fetches the modified ones.
   ///
   /// [bypassAllChecks] will bypass `duration`, `size` & similar filenames checks.
@@ -1092,14 +1104,20 @@ class Indexer<T extends Track> {
   }) async {
     _resetCounters();
     final serversFetchQueue = _startServersTracksCountFetch();
+    await _filteredFiles.ensureLoaded();
 
     if (forceReIndex) {
       await _clearLists();
+      _filteredFiles.clear();
       if (!useMediaStore) {
         final currentFiles = await _listAudioFiles(withStats: true);
-        filesDiff = getPathsDifference(currentFiles);
+        filesDiff = await getPathsDifference(currentFiles);
       }
     }
+
+    final stillFilteredPaths = filesDiff?.filteredPaths ?? const <String>{};
+    _filteredFiles.retainOnly(stillFilteredPaths);
+    filteredForSizeDurationTracks.value += stillFilteredPaths.length;
 
     final audioFiles = filesDiff?.newPaths ?? const <String>{};
     final modifiedFiles = filesDiff?.modifiedPaths ?? const <String>{};
@@ -1113,7 +1131,12 @@ class Indexer<T extends Track> {
     if (deletedPaths.isNotEmpty) {
       tracksInfoList.removeWhere((tr) {
         final remove = deletedPaths.contains(tr.path);
-        if (remove) unawaited(_tracksDBManager.delete(tr.path));
+        if (remove) {
+          allTracksMappedByYTID[tr.youtubeID]?.remove(tr);
+          allTracksMappedByPath.remove(tr.path);
+          _currentFileNamesMap.remove(tr.path.getFilename);
+          unawaited(_tracksDBManager.delete(tr.path));
+        }
         return remove;
       });
     }
@@ -1157,25 +1180,34 @@ class Indexer<T extends Track> {
 
         final splittersConfigs = _createSplitConfig();
         final shouldExtractArtwork = _isArtworkCachingEnabled;
-        Future<TrackExtended?> extractFunction(FAudioModel item) => convertTagToTrack(
-          trackPath: item.tags.path,
-          stats: filesStats?[item.tags.path],
-          trackInfo: item,
-          didExtractArtwork: shouldExtractArtwork,
-          tryExtractingFromFilename: true,
-          minDur: minDur,
-          minSize: minSize,
-          onMinDurTrigger: () {
+        Future<TrackExtended?> extractFunction(FAudioModel item) {
+          final path = item.tags.path;
+          final fileStats = filesStats?[path];
+
+          TrackExtended? onFiltered() {
             filteredForSizeDurationTracks.value++;
+            final size = fileStats?.size;
+            final modifiedMS = fileStats?.modifiedMS;
+            if (isModified || size == null || modifiedMS == null) return null;
+            final durationMS = item.hasError ? 0 : item.durationMS ?? 0;
+            _filteredFiles.add(path, size: size, modifiedMS: modifiedMS, durationMS: durationMS);
             return null;
-          },
-          onMinSizeTrigger: () {
-            filteredForSizeDurationTracks.value++;
-            return null;
-          },
-          onError: (_) => null,
-          splittersConfigs: splittersConfigs,
-        );
+          }
+
+          return convertTagToTrack(
+            trackPath: path,
+            stats: fileStats,
+            trackInfo: item,
+            didExtractArtwork: shouldExtractArtwork,
+            tryExtractingFromFilename: true,
+            minDur: minDur,
+            minSize: minSize,
+            onMinDurTrigger: onFiltered,
+            onMinSizeTrigger: onFiltered,
+            onError: (_) => null,
+            splittersConfigs: splittersConfigs,
+          );
+        }
 
         final stream = await NamidaTaggerController.inst.extractMetadataAsStream(
           paths: paths,
@@ -1211,9 +1243,18 @@ class Indexer<T extends Track> {
     /// removes tracks after changing `duration` or `size`.
     int networkTracksRemoved = 0;
     tracksInfoList.removeWhere((tr) {
-      final remove = networkTrackMapsToRemove.any((map) => map.containsKey(tr.path)) || (tr.durationMS != 0 && tr.durationMS < minDur * 1000) || tr.size < minSize;
+      final isFiltered = (tr.durationMS != 0 && tr.durationMS < minDur * 1000) || tr.size < minSize;
+      final remove = isFiltered || networkTrackMapsToRemove.any((map) => map.containsKey(tr.path));
       if (remove) {
-        if (tr.isNetwork) networkTracksRemoved++;
+        if (tr.isNetwork) {
+          networkTracksRemoved++;
+        } else if (isFiltered) {
+          filteredForSizeDurationTracks.value++;
+          if (!useMediaStore) {
+            final trExt = tr.toTrackExt();
+            _filteredFiles.add(tr.path, size: trExt.size, modifiedMS: trExt.dateModified, durationMS: trExt.durationMS);
+          }
+        }
         allTracksMappedByPath.remove(tr.path);
         allTracksMappedByYTID.remove(tr.youtubeID);
         _currentFileNamesMap.remove(tr.path.getFilename);
@@ -1247,6 +1288,8 @@ class Indexer<T extends Track> {
     Indexer.createDefaultNamidaArtworkIfRequired();
     TrackTileManager.onTrackItemPropChange();
     SearchSortController.inst.refreshPortsIfNecessary();
+
+    await _filteredFiles.saveIfChanged();
   }
 
   List<_ServerTracksFetchInfo> _startServersTracksCountFetch() {
@@ -1512,6 +1555,15 @@ class Indexer<T extends Track> {
     }
   }
 
+  void updateTrackLyrics(Track track, String lyrics) {
+    final path = track.path;
+    final trx = allTracksMappedByPath[path];
+    if (trx == null) return;
+    final newTrExt = trx.copyWith(lyrics: lyrics, generatePathHash: false);
+    allTracksMappedByPath[path] = newTrExt;
+    unawaited(_tracksDBManager.put(path, newTrExt.toJsonWithoutPath()));
+  }
+
   static List<String> splitByCommaList(String listText) {
     final moodsFinalLookup = <String, bool>{};
     final moodsFinal = <String>[];
@@ -1587,7 +1639,7 @@ class Indexer<T extends Track> {
   }
 
   /// [incomingWins] skips the newest wins check, ex: restoring a backup.
-  Future<void> importTrackStats(Iterable<TrackStats> incomingStats, String senderDeviceId, {bool incomingWins = false}) async {
+  Future<int> importTrackStats(Iterable<TrackStats> incomingStats, String senderDeviceId, {bool incomingWins = false}) async {
     final dbEntries = <MapEntry<String, Map<String, dynamic>>>[];
     for (final incoming in incomingStats) {
       final resolvedTrack = SyncPathResolver.resolveTrackByPath(senderDeviceId, incoming.track.path);
@@ -1612,9 +1664,10 @@ class Indexer<T extends Track> {
       if (track is Video) json['v'] = true;
       dbEntries.add(MapEntry(track.path, json));
     }
-    if (dbEntries.isEmpty) return;
+    if (dbEntries.isEmpty) return 0;
     trackStatsMap.refresh();
     await _trackStatsDBManager.putAll(dbEntries, (e) => e);
+    return dbEntries.length;
   }
 
   /// stats of another stats db (ex: an extracted backup), [oldJsonFilePath] is its pre-db json if any.
@@ -2074,14 +2127,20 @@ class Indexer<T extends Track> {
     return paths;
   }
 
-  IndexerFilesDiff getPathsDifference(DirsFileFilterResult currentFiles) {
+  Future<IndexerFilesDiff> getPathsDifference(DirsFileFilterResult currentFiles) async {
+    final filteredFiles = _filteredFiles;
+    await filteredFiles.ensureLoaded();
+
     final newPaths = <String>{};
     final modifiedPaths = <String>{};
     final deletedPaths = _getPhysicalMediasPaths();
+    final filteredPaths = <String>{};
     final newAndModifiedStats = <String, FileStatsAdv>{};
 
     final allTracksMappedByPath = this.allTracksMappedByPath;
     final stats = currentFiles.stats;
+    final minSize = settings.indexMinFileSizeInB.value;
+    final minDurMS = settings.indexMinDurationInSec.value * 1000;
     int index = -1;
     for (final path in currentFiles.allPaths) {
       index++;
@@ -2095,6 +2154,11 @@ class Indexer<T extends Track> {
         if (isSameDate && trExt.size == stats.sizeAt(index)) continue;
         modifiedPaths.add(path);
       } else {
+        final isStillFiltered = stats != null && filteredFiles.isStillFiltered(path, stats, index, minSize: minSize, minDurMS: minDurMS);
+        if (isStillFiltered) {
+          filteredPaths.add(path);
+          continue;
+        }
         newPaths.add(path);
       }
       final fileStats = stats?.toStatsAt(index);
@@ -2105,6 +2169,7 @@ class Indexer<T extends Track> {
       newPaths: newPaths,
       modifiedPaths: modifiedPaths,
       deletedPaths: deletedPaths,
+      filteredPaths: filteredPaths,
       stats: newAndModifiedStats,
     );
   }
@@ -2140,7 +2205,7 @@ class Indexer<T extends Track> {
 
     allAudioFiles.value = allPaths;
     tracksExcludedByNoMedia.value += result.excludedByNoMedia.length;
-    allFolderCovers = result.folderCovers;
+    _allFolderCovers = result.folderCovers;
 
     printy("Paths Found: ${allPaths.length}");
     return result;
@@ -2400,7 +2465,7 @@ class _IndexerIsolateExecuter {
 
     final tracksDBManager = await DBWrapper.openFromInfoSyncTry(
       fileInfo: tracksDbInfo,
-      config: DBConfig(
+      config: const DBConfig(
         createIfNotExist: true,
         autoDisposeTimerDuration: null, // we close manually
       ),
@@ -2560,6 +2625,9 @@ class IndexerFilesDiff {
   final Set<String> modifiedPaths;
   final Set<String> deletedPaths;
 
+  /// unchanged files still filtered by size or duration, left out of [newPaths].
+  final Set<String> filteredPaths;
+
   /// of new and modified files.
   final Map<String, FileStatsAdv> stats;
 
@@ -2567,6 +2635,7 @@ class IndexerFilesDiff {
     required this.newPaths,
     required this.modifiedPaths,
     required this.deletedPaths,
+    required this.filteredPaths,
     required this.stats,
   });
 
@@ -2575,6 +2644,7 @@ class IndexerFilesDiff {
       newPaths: newPaths,
       modifiedPaths: modifiedPaths,
       deletedPaths: const {},
+      filteredPaths: filteredPaths,
       stats: stats,
     );
   }

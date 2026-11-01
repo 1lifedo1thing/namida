@@ -9,6 +9,7 @@ import 'package:namida/base/tracks_search_wrapper.dart';
 import 'package:namida/base/history_days_rebuilder.dart';
 import 'package:namida/base/pull_to_refresh.dart';
 import 'package:namida/base/tracks_search_widget_mixin.dart';
+import 'package:namida/class/jump_highlight.dart';
 import 'package:namida/class/route.dart';
 import 'package:namida/class/track.dart';
 import 'package:namida/controller/current_color.dart';
@@ -17,6 +18,7 @@ import 'package:namida/controller/indexer_controller.dart';
 import 'package:namida/controller/navigator_controller.dart';
 import 'package:namida/controller/playlist_controller.dart';
 import 'package:namida/controller/scroll_search_controller.dart';
+import 'package:namida/controller/selected_tracks_controller.dart';
 import 'package:namida/controller/settings_controller.dart';
 import 'package:namida/core/constants.dart';
 import 'package:namida/core/dimensions.dart';
@@ -25,12 +27,14 @@ import 'package:namida/core/extensions.dart';
 import 'package:namida/core/functions.dart';
 import 'package:namida/core/icon_fonts/broken_icons.dart';
 import 'package:namida/core/namida_converter_ext.dart';
+import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/themes.dart';
 import 'package:namida/core/translations/language.dart';
 import 'package:namida/core/utils.dart';
 import 'package:namida/ui/dialogs/common_dialogs.dart';
 import 'package:namida/ui/dialogs/general_popup_dialog.dart';
 import 'package:namida/ui/dialogs/track_listens_dialog.dart';
+import 'package:namida/ui/pages/main_page.dart';
 import 'package:namida/ui/pages/subpages/most_played_subpage.dart';
 import 'package:namida/ui/widgets/animated_widgets.dart';
 import 'package:namida/ui/widgets/artwork.dart';
@@ -65,9 +69,15 @@ class _HistoryTracksPageState extends State<HistoryTracksPage>
   List<Track> _searchableTracks = const [];
 
   @override
-  Iterable<TrackExtended> getTracksExtended() {
-    _searchableTracks = HistoryController.inst.topTracksMapListens.value.keysSortedByValue.toFixedList();
-    return _searchableTracks.map((e) => e.toTrackExt());
+  List<Selectable> getSearchableTracks() {
+    return _searchableTracks = HistoryController.inst.topTracksMapListens.value.keysSortedByValue.toFixedList();
+  }
+
+  @override
+  Iterable<Selectable> getFilteredTracks(List<int> searchResults) {
+    final filteredHistory = _getFilteredHistory();
+    if (filteredHistory == null) return const [];
+    return filteredHistory.days.expand((day) => filteredHistory.dayItems[day] ?? const []);
   }
 
   /// new listens arrive while playing, the filter stays as typed and [_onHistoryChanged] re-reads the listens.
@@ -182,24 +192,18 @@ class _HistoryTracksPageState extends State<HistoryTracksPage>
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
     final trackTileExtent = Dimensions.inst.trackTileItemExtent;
     const dayHeaderExtent = kHistoryDayHeaderHeightWithPadding;
 
     const dayHeaderHeight = kHistoryDayHeaderHeight;
-    final dayHeaderBgColor = Color.alphaBlend(theme.cardTheme.color!.withAlpha(140), theme.scaffoldBackgroundColor);
     final dayHeaderSideColor = CurrentColor.inst.color;
-
-    final dayHeaderShadowColor = Color.alphaBlend(theme.shadowColor.withAlpha(140), theme.scaffoldBackgroundColor).withOpacityExt(0.4);
 
     final filteredHistory = _getFilteredHistory();
     final isFiltering = filteredHistory != null;
     final shownDays = filteredHistory?.days ?? historyDays;
     final shownDaysLength = shownDays.length;
 
-    final highlightColor = theme.colorScheme.onSurface.withAlpha(40);
-    final smallTextStyle = textTheme.displaySmall?.copyWith(fontSize: 12.0);
+    final smallTextStyle = NText.small.of(context).copyWith(fontSize: 12.0);
 
     final isSearchBoxShown = _isSearchBoxShown;
     final yearsRow = getYearsRowWidget(
@@ -280,7 +284,7 @@ class _HistoryTracksPageState extends State<HistoryTracksPage>
                     child: AnimatedSize(
                       duration: animationDuration,
                       child: hasScrolledEnough
-                          ? SizedBox.shrink()
+                          ? const SizedBox.shrink()
                           : Padding(
                               padding: const EdgeInsets.only(bottom: yearsRowBottomPadding),
                               child: yearsRow,
@@ -303,6 +307,11 @@ class _HistoryTracksPageState extends State<HistoryTracksPage>
                 ObxO(
                   rx: HistoryController.inst.historyMap,
                   builder: (context, history) {
+                    List<TrackWithDate>? dayItemsAt(int dayPosition) {
+                      final day = shownDays[dayPosition];
+                      return filteredHistory?.dayItems[day] ?? history[day];
+                    }
+
                     // -- refresh sublist when history change
                     return ObxO(
                       rx: HistoryController.inst.highlightedItem,
@@ -317,36 +326,45 @@ class _HistoryTracksPageState extends State<HistoryTracksPage>
                         itemBuilder: (context, index) {
                           final day = shownDays[index];
                           final dayInMs = super.dayToMillis(day);
-                          final tracks = filteredHistory?.dayItems[day] ?? history[day] ?? [];
+                          final tracks = dayItemsAt(index) ?? [];
+                          final rangeOrder = SectionedRangeOrder(index, shownDaysLength, dayItemsAt);
                           final isHighlightedDay = !isFiltering && highlightedItem != null && day == highlightedItem.dayToHighLight;
+
+                          final dayHeaderMenu = NamidaIconButton(
+                            icon: Broken.more,
+                            horizontalPadding: 8.0,
+                            iconSize: 22.0,
+                            onPressed: () {
+                              showGeneralPopupDialog(
+                                tracks.toTracks(),
+                                dayInMs.dateFormattedOriginal,
+                                tracks.length.displayTrackKeyword,
+                                QueueSource.history,
+                                tracksWithDates: tracks,
+                                playlistName: k_PLAYLIST_NAME_HISTORY,
+                                showPlayAllReverse: true,
+                              );
+                            },
+                          );
 
                           return StickyHeader(
                             key: ValueKey(index),
-                            header: NamidaHistoryDayHeaderBox(
-                              height: dayHeaderHeight,
-                              title: [
-                                dayInMs.dateFormattedOriginal,
-                                tracks.length.displayTrackKeyword,
-                              ].join('  •  '),
-                              sideColor: dayHeaderSideColor,
-                              bgColor: dayHeaderBgColor,
-                              shadowColor: dayHeaderShadowColor,
-                              menu: NamidaIconButton(
-                                icon: Broken.more,
-                                horizontalPadding: 8.0,
-                                iconSize: 22.0,
-                                onPressed: () {
-                                  showGeneralPopupDialog(
-                                    tracks.toTracks(),
+                            header: NBuilder(
+                              builder: (context, colors) {
+                                final dayHeaderBgColor = Color.alphaBlend(colors.cardTheme.withOpacityExt(0.55), colors.scaffold);
+                                final dayHeaderShadowColor = Color.alphaBlend(colors.shadow.withOpacityExt(0.55), colors.scaffold).withOpacityExt(0.4);
+                                return NamidaHistoryDayHeaderBox(
+                                  height: dayHeaderHeight,
+                                  title: [
                                     dayInMs.dateFormattedOriginal,
                                     tracks.length.displayTrackKeyword,
-                                    QueueSource.history,
-                                    tracksWithDates: tracks,
-                                    playlistName: k_PLAYLIST_NAME_HISTORY,
-                                    showPlayAllReverse: true,
-                                  );
-                                },
-                              ),
+                                  ].join('  •  '),
+                                  sideColor: dayHeaderSideColor,
+                                  bgColor: dayHeaderBgColor,
+                                  shadowColor: dayHeaderShadowColor,
+                                  menu: dayHeaderMenu,
+                                );
+                              },
                             ),
                             content: SuperSmoothListView.builder(
                               padding: const EdgeInsets.only(bottom: kHistoryDayListBottomPadding, top: kHistoryDayListTopPadding),
@@ -363,7 +381,8 @@ class _HistoryTracksPageState extends State<HistoryTracksPage>
                                   trackOrTwd: tr,
                                   index: i,
                                   tracks: tracks,
-                                  bgColor: isHighlightedDay && i == highlightedItem.indexOfSmallList ? highlightColor : null,
+                                  rangeOrder: rangeOrder,
+                                  isJumpHighlighted: isHighlightedDay && i == highlightedItem.indexOfSmallList,
                                   thirdLineText: tr.dateAdded.dateAndClockFormattedOriginal,
                                   topRightWidget: topRightWidget,
                                 );
@@ -384,7 +403,7 @@ class _HistoryTracksPageState extends State<HistoryTracksPage>
         AnimatedOpacity(
           opacity: hasScrolledEnough ? 1.0 : 0.0,
           duration: animationDuration,
-          child: hasScrolledEnough ? yearsRow : SizedBox.shrink(),
+          child: hasScrolledEnough ? yearsRow : const SizedBox.shrink(),
         ),
       ],
     );
@@ -419,8 +438,6 @@ class MostPlayedTracksPage extends StatelessWidget with NamidaRouteWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
     return TrackTilePropertiesProvider(
       configs: const TrackTilePropertiesConfigs(
         queueSource: QueueSource.mostPlayed,
@@ -479,15 +496,15 @@ class MostPlayedTracksPage extends StatelessWidget with NamidaRouteWidget {
                     trackOrTwd: track,
                     tracks: tracks,
                     onRightAreaTap: () => showTrackListensDialog(track, datesOfListen: listens),
-                    trailingWidget: Container(
+                    trailingWidget: NContainer(
                       padding: const EdgeInsets.all(6.0),
-                      decoration: BoxDecoration(
-                        color: theme.scaffoldBackgroundColor,
+                      decoration: (colors) => BoxDecoration(
+                        color: colors.scaffold,
                         shape: BoxShape.circle,
                       ),
-                      child: Text(
+                      child: NamidaText(
                         listens.length.formatDecimal(),
-                        style: textTheme.displaySmall,
+                        style: NText.small,
                       ),
                     ),
                   );
@@ -536,7 +553,6 @@ class _EmptyPlaylistSubpageState extends State<EmptyPlaylistSubpage> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
     return TrackTilePropertiesProvider(
       configs: TrackTilePropertiesConfigs(
         queueSource: QueueSource.playlist(null),
@@ -567,7 +583,7 @@ class _EmptyPlaylistSubpageState extends State<EmptyPlaylistSubpage> {
             SliverPadding(
               padding: EdgeInsets.symmetric(horizontal: Dimensions.inst.availableAppContentWidth * 0.15).add(const EdgeInsets.only(bottom: 8.0)),
               sliver: SliverToBoxAdapter(
-                child: Theme(
+                child: NTheme(
                   data: AppThemes.inst.getAppTheme(Colors.red, !context.isDarkMode),
                   child: NamidaButton(
                     icon: Broken.trash,
@@ -588,12 +604,12 @@ class _EmptyPlaylistSubpageState extends State<EmptyPlaylistSubpage> {
                   showRail: false,
                   onExpansionChanged: (value) => setState(() => isExpanded = value),
                   children: [
-                    Container(
+                    NContainer(
                       clipBehavior: Clip.antiAlias,
                       height: context.height * 0.5,
                       width: context.width,
-                      decoration: BoxDecoration(
-                        color: theme.cardColor,
+                      decoration: (colors) => BoxDecoration(
+                        color: colors.card,
                         borderRadius: BorderRadius.circular(18.0.multipliedRadius),
                       ),
                       child: SuperSmoothListView.builder(
@@ -660,7 +676,11 @@ class NormalPlaylistTracksPage extends StatefulWidget with NamidaRouteWidget {
   final String playlistName;
   final bool disableAnimation;
   final bool isLibraryTab;
-  const NormalPlaylistTracksPage({super.key, required this.playlistName, this.disableAnimation = false, this.isLibraryTab = false});
+
+  /// scrolls to the first of them in the playlist & highlights it.
+  final List<Track>? focusTracks;
+
+  const NormalPlaylistTracksPage({super.key, required this.playlistName, this.disableAnimation = false, this.isLibraryTab = false, this.focusTracks});
 
   @override
   State<NormalPlaylistTracksPage> createState() => _NormalPlaylistTracksPageState();
@@ -669,9 +689,8 @@ class NormalPlaylistTracksPage extends StatefulWidget with NamidaRouteWidget {
 class _NormalPlaylistTracksPageState extends State<NormalPlaylistTracksPage>
     with TickerProviderStateMixin, PullToRefreshMixin, PortsProvider<TracksSearchParams>, TracksSearchWidgetMixin<NormalPlaylistTracksPage> {
   @override
-  Iterable<TrackExtended> getTracksExtended() {
-    final playlist = PlaylistController.inst.getPlaylist(widget.playlistName);
-    return playlist?.tracks.map((e) => e.track.toTrackExt()) ?? [];
+  List<Selectable> getSearchableTracks() {
+    return PlaylistController.inst.getPlaylist(widget.playlistName)?.tracks ?? const <TrackWithDate>[];
   }
 
   @override
@@ -682,6 +701,25 @@ class _NormalPlaylistTracksPageState extends State<NormalPlaylistTracksPage>
 
   late String? _playlistM3uPath = PlaylistController.inst.getPlaylist(widget.playlistName)?.m3uPath;
   late String? _playlistRemoteSourceKey = PlaylistController.inst.getPlaylist(widget.playlistName)?.remoteSource?.sourceKey;
+
+  @override
+  void initState() {
+    super.initState();
+    final focusTracks = widget.focusTracks;
+    if (focusTracks != null) WidgetsBinding.instance.addPostFrameCallback((_) => _focusFirstOf(focusTracks));
+  }
+
+  void _focusFirstOf(List<Track> focusTracks) {
+    if (!mounted) return;
+    final tracksWithDate = PlaylistController.inst.getPlaylist(widget.playlistName)?.tracks;
+    final position = scrollController.positions.lastOrNull;
+    if (tracksWithDate == null || position == null) return;
+    final focusTracksSet = focusTracks.toSet();
+    final index = tracksWithDate.indexWhere((e) => focusTracksSet.contains(e.track));
+    if (index < 0) return;
+    JumpHighlight.showBriefly(tracksWithDate[index], index, inQueue: false);
+    MainPageFABResumeButton.jumpToItem(index, Dimensions.inst.trackTileItemExtent, widget.route, position: position);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -704,6 +742,7 @@ class _NormalPlaylistTracksPageState extends State<NormalPlaylistTracksPage>
           if (tracksWithDate.isEmpty) return EmptyPlaylistSubpage(playlist: playlist);
 
           final searchResults = this.searchResults;
+          final rangeOrder = searchResults == null ? null : FilteredRangeOrder(searchResults);
 
           final sort = playlist.sortsType?.firstOrNull?.type;
           final sortReverse = playlist.sortReverse;
@@ -747,8 +786,6 @@ class _NormalPlaylistTracksPageState extends State<NormalPlaylistTracksPage>
                   height: height,
                 ),
               ),
-              onReorderStart: (index) => super.enablePullToRefresh = false,
-              onReorderEnd: (index) => super.enablePullToRefresh = true,
               onReorder: searchResults != null || playlist.isReadOnly ? null : (oldIndex, newIndex) => PlaylistController.inst.reorderTrack(playlist, oldIndex, newIndex),
               stickyHeader: TracksSearchWidgetBoxBase(
                 state: this,
@@ -756,19 +793,21 @@ class _NormalPlaylistTracksPageState extends State<NormalPlaylistTracksPage>
                   tracksWithDate.displayTrackKeyword,
                   tracksWithDate.totalDurationFormatted,
                 ].join(' - '),
-                sort: sort,
-                sortReverse: sortReverse,
-                onSortTap: () => NamidaOnTaps.inst.onPlaylistSubPageTracksSortIconTap(
-                  playlist.name,
-                  PlaylistController.inst,
-                  SortType.values,
-                  (sort) => sort.toText(),
-                  (sort) => sort.toIcon(),
+                sorting: TracksSearchBoxSorting(
+                  sort: sort,
+                  reverse: sortReverse,
+                  onSortTap: () => NamidaOnTaps.inst.onPlaylistSubPageTracksSortIconTap(
+                    playlist.name,
+                    PlaylistController.inst,
+                    SortType.values,
+                    (sort) => sort.toText(),
+                    (sort) => sort.toIcon(),
+                  ),
+                  onReverseIconTap: (newSortReverse) {
+                    PlaylistController.inst.updatePropertyInPlaylist(playlist.name, itemsSortReverse: newSortReverse);
+                    PlaylistController.inst.resetCanReorder();
+                  },
                 ),
-                onReverseIconTap: (newSortReverse) {
-                  PlaylistController.inst.updatePropertyInPlaylist(playlist.name, itemsSortReverse: newSortReverse);
-                  PlaylistController.inst.resetCanReorder();
-                },
               ),
               itemExtent: Dimensions.inst.trackTileItemExtent,
               itemBuilder: (context, i) {
@@ -793,6 +832,7 @@ class _NormalPlaylistTracksPageState extends State<NormalPlaylistTracksPage>
                       index: index,
                       trackOrTwd: trackWithDate,
                       tracks: tracksWithDate,
+                      rangeOrder: rangeOrder,
                     ),
                   ),
                 );
@@ -855,6 +895,7 @@ class ThreeLineSmallContainers extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final barColor = color ?? NColorsData.targetOf(context).listTileIcon.withOpacityExt(0.47);
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: List<Widget>.filled(
@@ -868,7 +909,7 @@ class ThreeLineSmallContainers extends StatelessWidget {
             height: 1.2,
             animateHeight: false,
             decoration: BoxDecoration(
-              color: color ?? context.theme.listTileTheme.iconColor?.withAlpha(120),
+              color: barColor,
             ),
           ),
         ),

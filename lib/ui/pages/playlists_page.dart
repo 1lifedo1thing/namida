@@ -31,6 +31,7 @@ import 'package:namida/core/extensions.dart';
 import 'package:namida/core/functions.dart';
 import 'package:namida/core/icon_fonts/broken_icons.dart';
 import 'package:namida/core/namida_converter_ext.dart';
+import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/translations/language.dart';
 import 'package:namida/core/utils.dart';
 import 'package:namida/main.dart';
@@ -181,7 +182,7 @@ class _PlaylistsPageState extends State<PlaylistsPage> with TickerProviderStateM
               subtitle: lang.createNewPlaylist,
               onTap: () {
                 _closeDialog();
-                CreatePlaylistButton().promptCreate();
+                const CreatePlaylistButton().promptCreate();
               },
             ),
             CustomListTile(
@@ -246,7 +247,11 @@ class _PlaylistsPageState extends State<PlaylistsPage> with TickerProviderStateM
     );
   }
 
+  late final _addingOrder = _AddingOrder({...?widget.tracksToAdd});
+
   void _onAddToPlaylist({required LocalPlaylist playlist, required bool allTracksExist, required bool allowAddingEverything}) {
+    final sorting = settings.groupSortingOf(MediaType.playlist);
+    _addingOrder.freeze(sorting);
     if (allTracksExist == true) {
       final indexes = <int>[];
       playlist.tracks.loopAdv((e, index) {
@@ -368,7 +373,6 @@ class _PlaylistsPageState extends State<PlaylistsPage> with TickerProviderStateM
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = context.textTheme;
     final tracksToAdd = widget.tracksToAdd;
     final isInsideDialog = tracksToAdd != null;
     final enableHero = !isInsideDialog;
@@ -399,54 +403,54 @@ class _PlaylistsPageState extends State<PlaylistsPage> with TickerProviderStateM
           ]),
         ),
         onPointerCancel: (event) => onVerticalDragFinish(),
-        child: NamidaScrollbar(
-          controller: scrollController,
-          thumbLabel: _createThumbLabel,
-          child: AnimationLimiter(
-            child: ExpandableBoxColumn(
-              tab: libraryTab,
-              header: Obx(
-                (context) {
-                  final finalPlaylistsLength = SearchSortController.inst.playlistSearchList.valueR.length;
-                  final totalPlaylistsLength = PlaylistController.inst.playlistsMap.valueR.length;
-                  String leftText = finalPlaylistsLength != totalPlaylistsLength
-                      ? '$finalPlaylistsLength/${totalPlaylistsLength.displayPlaylistKeyword}'
-                      : finalPlaylistsLength.displayPlaylistKeyword;
-                  final sorting = settings.groupSortingOfR(MediaType.playlist);
-                  final sortReverse = sorting.reverse;
+        child: AnimationLimiter(
+          child: ExpandableBoxColumn(
+            tab: libraryTab,
+            header: Obx(
+              (context) {
+                final finalPlaylistsLength = SearchSortController.inst.playlistSearchList.valueR.length;
+                final totalPlaylistsLength = PlaylistController.inst.playlistsMap.valueR.length;
+                String leftText = finalPlaylistsLength != totalPlaylistsLength
+                    ? '$finalPlaylistsLength/${totalPlaylistsLength.displayPlaylistKeyword}'
+                    : finalPlaylistsLength.displayPlaylistKeyword;
+                final sorting = settings.groupSortingOfR(MediaType.playlist);
+                final sortReverse = sorting.reverse;
 
-                  return ExpandableBox(
-                    enableHero: widget.enableHero && enableHero,
-                    gridWidget: isInsideDialog
-                        ? null
-                        : const ChangeGridCountWidget(
-                            tab: libraryTab,
-                          ),
-                    isBarVisible: libraryTab.isBarVisible.valueR,
-                    leftText: leftText,
-                    onSearchBoxVisibilityChange: (newShow) => ScrollSearchController.inst.onSearchBoxVisibiltyChange(libraryTab, newShow),
-                    onCloseButtonPressed: () => ScrollSearchController.inst.clearSearchTextField(libraryTab),
-                    disableSorting: tracksToAdd != null && tracksToAdd.isNotEmpty,
-                    sortByMenuWidget: SortByMenu(
-                      title: sorting.entries.first.type.toText(),
-                      popupMenuChild: const SortByMenuPlaylist(),
-                      isCurrentlyReversed: sortReverse,
-                      onReverseIconTap: () => SearchSortController.inst.sortMedia(MediaType.playlist, reverse: !sortReverse),
-                    ),
-                    textField: CustomTextField(
-                      textFieldController: libraryTab.textSearchControllerR,
-                      textFieldHintText: lang.filterPlaylists,
-                      onTextFieldValueChanged: (value) => SearchSortController.inst.searchMedia(value, MediaType.playlist),
-                    ),
-                  );
-                },
-              ),
-              page: Stack(
-                children: [
-                  SmoothCustomScrollView(
+                return ExpandableBox(
+                  enableHero: widget.enableHero && enableHero,
+                  gridWidget: isInsideDialog
+                      ? null
+                      : const ChangeGridCountWidget(
+                          tab: libraryTab,
+                        ),
+                  isBarVisible: libraryTab.isBarVisible.valueR,
+                  leftText: leftText,
+                  leftTextIcon: libraryTab.toIcon(),
+                  onSearchBoxVisibilityChange: (newShow) => ScrollSearchController.inst.onSearchBoxVisibiltyChange(libraryTab, newShow),
+                  onCloseButtonPressed: () => ScrollSearchController.inst.clearSearchTextField(libraryTab),
+                  sortByMenuWidget: SortByMenu(
+                    title: sorting.entries.first.type.toText(),
+                    popupMenuChild: const SortByMenuPlaylist(),
+                    isCurrentlyReversed: sortReverse,
+                    onReverseIconTap: () => SearchSortController.inst.sortMedia(MediaType.playlist, reverse: !sortReverse),
+                  ),
+                  textField: CustomTextField(
+                    textFieldController: libraryTab.textSearchControllerR,
+                    textFieldHintText: lang.filterPlaylists,
+                    onTextFieldValueChanged: (value) => SearchSortController.inst.searchMedia(value, MediaType.playlist),
+                  ),
+                );
+              },
+            ),
+            page: Stack(
+              children: [
+                NamidaScrollbar(
+                  controller: scrollController,
+                  thumbLabel: _createThumbLabel,
+                  child: SmoothCustomScrollView(
                     controller: scrollController,
                     slivers: [
-                      SliverToBoxAdapter(child: listHeader),
+                      const SliverToBoxAdapter(child: listHeader),
 
                       if (!isInsideDialog)
                         SliverToBoxAdapter(
@@ -493,21 +497,25 @@ class _PlaylistsPageState extends State<PlaylistsPage> with TickerProviderStateM
                                   const SizedBox(width: 8.0),
                                   ObxO(
                                     rx: _isSelecting,
-                                    builder: (context, isSelecting) => NamidaButton(
-                                      icon: Broken.task_square,
-                                      iconSize: 20.0,
-                                      tooltip: () => lang.selectPlaylists,
-                                      onTap: _toggleSelecting,
-                                      colorScheme: isSelecting ? context.theme.colorScheme.secondaryContainer : null,
+                                    builder: (context, isSelecting) => NBuilder(
+                                      builder: (context, colors) => NamidaButton(
+                                        icon: Broken.task_square,
+                                        iconSize: 20.0,
+                                        tooltip: () => lang.selectPlaylists,
+                                        onTap: _toggleSelecting,
+                                        colorScheme: isSelecting ? colors.secondaryContainer : null,
+                                      ),
                                     ),
                                   ),
                                   const SizedBox(width: 8.0),
-                                  NamidaButton(
-                                    icon: Broken.edit_2,
-                                    iconSize: 20.0,
-                                    tooltip: () => _isReordering ? lang.disableReordering : lang.enableReordering,
-                                    onTap: _toggleReordering,
-                                    colorScheme: _isReordering ? context.theme.colorScheme.secondaryContainer : null,
+                                  NBuilder(
+                                    builder: (context, colors) => NamidaButton(
+                                      icon: Broken.edit_2,
+                                      iconSize: 20.0,
+                                      tooltip: () => _isReordering ? lang.disableReordering : lang.enableReordering,
+                                      onTap: _toggleReordering,
+                                      colorScheme: _isReordering ? colors.secondaryContainer : null,
+                                    ),
                                   ),
                                   const SizedBox(width: 8.0),
                                   NamidaButton(
@@ -572,7 +580,7 @@ class _PlaylistsPageState extends State<PlaylistsPage> with TickerProviderStateM
                                     SizedBox(width: defaultCardHorizontalPadding),
                                   ],
                                 ),
-                                SizedBox(height: 12.0),
+                                const SizedBox(height: 12.0),
                                 Row(
                                   children: [
                                     SizedBox(width: defaultCardHorizontalPadding),
@@ -649,7 +657,7 @@ class _PlaylistsPageState extends State<PlaylistsPage> with TickerProviderStateM
                                                 },
                                                 onLongPress: () => NamidaDialogs.inst.showSmartPlaylistDialog(smplWrapper),
                                                 borderRadius: 8.0,
-                                                bgColor: context.theme.colorScheme.secondary.withOpacityExt(0.12),
+                                                bgColor: const NColors(.secondary, opacity: 0.12),
                                                 child: Row(
                                                   mainAxisSize: MainAxisSize.min,
                                                   children: [
@@ -664,11 +672,11 @@ class _PlaylistsPageState extends State<PlaylistsPage> with TickerProviderStateM
                                                     ),
                                                     const SizedBox(width: 6.0),
                                                     Flexible(
-                                                      child: Text(
+                                                      child: NamidaText(
                                                         smplWrapper.value.name,
                                                         softWrap: false,
                                                         overflow: TextOverflow.fade,
-                                                        style: textTheme.displayMedium,
+                                                        style: NText.medium,
                                                       ),
                                                     ),
                                                     const SizedBox(width: 12.0),
@@ -699,7 +707,7 @@ class _PlaylistsPageState extends State<PlaylistsPage> with TickerProviderStateM
                           ),
                         ),
                       ],
-                      const SliverPadding(padding: EdgeInsets.only(top: 10.0)),
+                      const SliverPadding(padding: EdgeInsets.only(top: 12.0)),
                       if (isInsideDialog)
                         SliverToBoxAdapter(
                           child: ObxOClass(
@@ -720,6 +728,7 @@ class _PlaylistsPageState extends State<PlaylistsPage> with TickerProviderStateM
                                   );
                                 },
                                 checkmarkStatus: allTracksExist,
+                                openPlaylistFocusing: tracksToAdd,
                               );
                             },
                           ),
@@ -753,8 +762,6 @@ class _PlaylistsPageState extends State<PlaylistsPage> with TickerProviderStateM
                               rx: PlaylistController.inst.getCustomIndicesOrderListRx(),
                               builder: (context, customIndicesOrderList) => NamidaSliverReorderableList(
                                 itemExtent: Dimensions.playlistTileItemExtent,
-                                onReorderStart: (index) => super.enablePullToRefresh = false,
-                                onReorderEnd: (index) => super.enablePullToRefresh = true,
                                 onReorder: (oldIndex, newIndex) async {
                                   final sorting = settings.groupSortingOf(MediaType.playlist);
                                   if (sorting.firstType != GroupSortType.custom) {
@@ -796,12 +803,11 @@ class _PlaylistsPageState extends State<PlaylistsPage> with TickerProviderStateM
                             )
                           : Obx(
                               (context) {
-                                final sort = settings.groupSortingOfR(MediaType.playlist).entries.first.type;
+                                final sorting = settings.groupSortingOfR(MediaType.playlist);
+                                final sort = sorting.entries.first.type;
                                 final sortTextIsUseless = sort == GroupSortType.title || sort == GroupSortType.numberOfTracks || sort == GroupSortType.duration;
                                 final extraTextResolver = sortTextIsUseless ? null : SearchSortController.inst.getGroupSortExtraTextResolverPlaylist(sort);
-
-                                late final existingStatus = <String, bool>{};
-                                late final sortedIndices = <String, int>{};
+                                final existingStatus = _addingOrder.existingStatus;
 
                                 return ObxPrefer(
                                   enabled: sort.requiresHistory,
@@ -813,33 +819,9 @@ class _PlaylistsPageState extends State<PlaylistsPage> with TickerProviderStateM
                                       builder: (context, playlistsMap) => ObxO(
                                         rx: SearchSortController.inst.playlistSearchList,
                                         builder: (context, playlistSearchListPre) {
-                                          List<String> playlistSearchList;
-                                          if (tracksToAdd != null && tracksToAdd.isNotEmpty) {
-                                            // -- put playlists having the tracks at first
-                                            final playlistSearchListWritable = <String>[];
-                                            final shouldReSort = existingStatus.isEmpty; // sort only once, so that refresh won't make them jump around
-
-                                            for (final key in playlistSearchListPre) {
-                                              final playlist = playlistsMap[key]!;
-                                              if (playlist.isReadOnly) continue; // -- can't add tracks to read-only playlists
-                                              playlistSearchListWritable.add(key);
-                                              final allTracksExist = tracksToAdd.every((trackToAdd) => playlist.tracks.firstWhereEff((e) => e.track == trackToAdd) != null);
-                                              existingStatus[key] = allTracksExist;
-                                            }
-                                            final playlistSearchListSorted = playlistSearchListWritable.sortedByPrecomputed(
-                                              (key) => sortedIndices[key] ?? (existingStatus[key] == true ? -2 : -1),
-                                            );
-                                            if (shouldReSort) {
-                                              int index = 0;
-                                              for (final p in playlistSearchListSorted) {
-                                                sortedIndices[p] = index;
-                                                index++;
-                                              }
-                                            }
-                                            playlistSearchList = playlistSearchListSorted;
-                                          } else {
-                                            playlistSearchList = playlistSearchListPre;
-                                          }
+                                          final playlistSearchList = tracksToAdd != null && tracksToAdd.isNotEmpty
+                                              ? _addingOrder.sort(playlistSearchListPre, playlistsMap, sorting)
+                                              : playlistSearchListPre;
 
                                           final onAddTap = tracksToAdd == null
                                               ? null
@@ -863,6 +845,7 @@ class _PlaylistsPageState extends State<PlaylistsPage> with TickerProviderStateM
                                                 extraTextResolver: extraTextResolver,
                                                 existingStatus: existingStatus,
                                                 onAddTap: onAddTap,
+                                                tracksToAdd: tracksToAdd,
                                                 selection: isSelecting ? _selection : null,
                                               ),
                                             );
@@ -896,6 +879,7 @@ class _PlaylistsPageState extends State<PlaylistsPage> with TickerProviderStateM
                                                         extraTextResolver: extraTextResolver,
                                                         existingStatus: existingStatus,
                                                         onAddTap: onAddTap,
+                                                        tracksToAdd: tracksToAdd,
                                                         selection: isSelecting ? _selection : null,
                                                       ),
                                                   ],
@@ -913,9 +897,9 @@ class _PlaylistsPageState extends State<PlaylistsPage> with TickerProviderStateM
                       if (!isInsideDialog) kBottomPaddingWidgetSliver,
                     ],
                   ),
-                  pullToRefreshWidget,
-                ],
-              ),
+                ),
+                pullToRefreshWidget,
+              ],
             ),
           ),
         ),
@@ -929,6 +913,52 @@ class _PlaylistsPageState extends State<PlaylistsPage> with TickerProviderStateM
       onClose: _toggleSelecting,
       child: page,
     );
+  }
+}
+
+/// playlists having the tracks go first, the first add/remove freezes the order so edited playlists don't jump around, until the sorting changes.
+class _AddingOrder {
+  final Set<Track> tracksToAdd;
+  _AddingOrder(this.tracksToAdd);
+
+  final existingStatus = <String, bool>{};
+
+  List<String> _shownNames = const [];
+  Map<String, int>? _frozenIndices;
+  SortChain<GroupSortType>? _frozenSorting;
+
+  List<String> sort(List<String> names, Map<String, LocalPlaylist> playlistsMap, SortChain<GroupSortType> sorting) {
+    final writableNames = <String>[];
+    for (final key in names) {
+      final playlist = playlistsMap[key]!;
+      if (playlist.isReadOnly) continue;
+      writableNames.add(key);
+      existingStatus[key] = _hasAllTracks(playlist);
+    }
+    final frozenIndices = sorting == _frozenSorting ? _frozenIndices : null;
+    final shownNames = writableNames.sortedByPrecomputed((key) => frozenIndices?[key] ?? (existingStatus[key] == true ? -2 : -1));
+    _shownNames = shownNames;
+    return shownNames;
+  }
+
+  bool _hasAllTracks(LocalPlaylist playlist) {
+    final missingTracks = Set<Track>.of(tracksToAdd);
+    for (final e in playlist.tracks) {
+      if (missingTracks.remove(e.track) && missingTracks.isEmpty) return true;
+    }
+    return false;
+  }
+
+  void freeze(SortChain<GroupSortType> sorting) {
+    if (sorting == _frozenSorting) return;
+    final indices = <String, int>{};
+    int index = 0;
+    for (final name in _shownNames) {
+      indices[name] = index;
+      index++;
+    }
+    _frozenIndices = indices;
+    _frozenSorting = sorting;
   }
 }
 
@@ -1147,13 +1177,62 @@ class _PlaylistsSelection {
     );
   }
 
-  Future<void> export() async {
+  void export() {
     final names = selectedNames.value.toList();
-    final directoryPath = await NamidaFileBrowser.getDirectory(note: lang.export);
-    if (directoryPath == null) return;
+    final defaultDirectoryPath = AppDirs.M3UPlaylists;
+    NamidaNavigator.inst.navigateDialog(
+      dialog: CustomBlurryDialog(
+        title: '${lang.export} (M3U)',
+        normalTitleStyle: true,
+        icon: Broken.directbox_send,
+        actions: const [
+          CancelButton(),
+        ],
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CustomListTile(
+              icon: Broken.folder,
+              title: lang.convertToM3UPlaylist,
+              subtitle: defaultDirectoryPath,
+              trailingRaw: NamidaTooltip(
+                message: () => lang.defaultLabel,
+                child: const Icon(
+                  Broken.star_1,
+                  size: 18.0,
+                ),
+              ),
+              onTap: () {
+                NamidaNavigator.inst.closeDialog();
+                _convertToM3U(names);
+              },
+            ),
+            CustomListTile(
+              icon: Broken.folder_add,
+              title: lang.pickFromStorage,
+              onTap: () async {
+                NamidaNavigator.inst.closeDialog();
+                final directoryPath = await NamidaFileBrowser.getDirectory(note: lang.export);
+                if (directoryPath == null) return;
+                await _exportTo(names, directoryPath);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _exportTo(List<String> names, String directoryPath) async {
     if (!await requestManageStoragePermission()) return;
     final exportedCount = await PlaylistController.inst.exportPlaylistsToM3UFiles(names, directoryPath);
     snackyy(message: '${lang.savedIn}: $directoryPath (${exportedCount.displayPlaylistKeyword})');
+  }
+
+  Future<void> _convertToM3U(List<String> names) async {
+    if (!await requestManageStoragePermission()) return;
+    final convertedCount = await PlaylistController.inst.convertPlaylistsToM3U(names);
+    snackyy(message: '${lang.savedIn}: ${AppDirs.M3UPlaylists} (${convertedCount.displayPlaylistKeyword})');
   }
 
   void promptDelete() {
@@ -1185,9 +1264,9 @@ class _PlaylistsSelection {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
+              NamidaText(
                 '${lang.delete}: ${names.length.displayPlaylistKeyword}?',
-                style: namida.textTheme.displayMedium,
+                style: NText.medium,
               ),
               if (m3uCount > 0) ...[
                 const SizedBox(
@@ -1222,6 +1301,7 @@ class _PlaylistsSliver extends StatelessWidget {
   final String? Function(LocalPlaylist playlist)? extraTextResolver;
   final Map<String, bool> existingStatus;
   final void Function(LocalPlaylist playlist, bool allTracksExist)? onAddTap;
+  final List<Track>? tracksToAdd;
   final _PlaylistsSelection? selection;
 
   const _PlaylistsSliver({
@@ -1234,6 +1314,7 @@ class _PlaylistsSliver extends StatelessWidget {
     required this.extraTextResolver,
     required this.existingStatus,
     required this.onAddTap,
+    required this.tracksToAdd,
     required this.selection,
   });
 
@@ -1270,6 +1351,7 @@ class _PlaylistsSliver extends StatelessWidget {
               onTap: onAddTap != null ? () => onAddTap(playlist, allTracksExist == true) : () => NamidaOnTaps.inst.onNormalPlaylistTap(key),
               checkmarkStatus: allTracksExist,
               extraText: extraText, // dont fallback to prevent confusion
+              openPlaylistFocusing: tracksToAdd,
             );
           }
           return AnimatingTile(
@@ -1474,8 +1556,6 @@ class _PlaylistSourceBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cardColor = context.theme.cardColor;
-    final cardColorTransparent = cardColor.withAlpha(0);
     final fadeWidth = iconSize * 0.8;
     final topPadding = iconSize * 0.2;
     final rightPadding = iconSize * 0.45;
@@ -1484,10 +1564,10 @@ class _PlaylistSourceBadge extends StatelessWidget {
       children: [
         Positioned.fill(
           child: IgnorePointer(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
+            child: NDecoratedBox(
+              decoration: (colors) => BoxDecoration(
                 gradient: LinearGradient(
-                  colors: [cardColorTransparent, cardColor],
+                  colors: [colors.card.withOpacityExt(0.0), colors.card],
                   stops: const [0.0, 0.4],
                 ),
               ),
@@ -1579,16 +1659,15 @@ class _PlaylistSelectionHighlight extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final secondary = context.theme.colorScheme.secondary;
     return IgnorePointer(
       child: AnimatedOpacity(
         opacity: isSelected ? 1.0 : 0.0,
         duration: const Duration(milliseconds: 200),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: secondary.withOpacityExt(0.12),
+        child: NDecoratedBox(
+          decoration: (colors) => BoxDecoration(
+            color: colors.secondary.withOpacityExt(0.12),
             border: Border.all(
-              color: secondary.withOpacityExt(0.8),
+              color: colors.secondary.withOpacityExt(0.8),
               width: 2.0,
             ),
             borderRadius: BorderRadius.circular(12.0.multipliedRadius),
@@ -1616,15 +1695,13 @@ class _TagSectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
     final key = section.key;
     final color = section.color;
     final selection = this.selection;
     return NamidaInkWell(
       margin: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
       padding: const EdgeInsets.symmetric(horizontal: 12.0),
-      bgColor: theme.colorScheme.secondaryContainer.withOpacityExt(0.15),
+      bgColor: const NColors(.secondaryContainer, opacity: 0.15),
       onTap: onTap,
       onLongPress: onLongPress,
       enableSecondaryTap: true,
@@ -1646,9 +1723,9 @@ class _TagSectionHeader extends StatelessWidget {
           Expanded(
             child: Padding(
               padding: const EdgeInsets.symmetric(vertical: 10.0),
-              child: Text(
+              child: NamidaText(
                 key.toText(),
-                style: textTheme.displayMedium,
+                style: NText.medium,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -1659,9 +1736,9 @@ class _TagSectionHeader extends StatelessWidget {
               selection: selection,
               names: section.names,
             ),
-          Text(
+          NamidaText(
             section.names.length.displayPlaylistKeyword,
-            style: textTheme.displaySmall,
+            style: NText.small,
           ),
           const SizedBox(
             width: 6.0,
@@ -1719,16 +1796,13 @@ class _PlaylistsSelectionBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
-    final barColor = Color.alphaBlend(theme.colorScheme.secondaryContainer.withOpacityExt(0.3), theme.scaffoldBackgroundColor);
-    return ColoredBox(
-      color: theme.scaffoldBackgroundColor,
-      child: Container(
+    return NColoredBox(
+      color: NColors.scaffold,
+      child: NContainer(
         margin: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
         padding: const EdgeInsets.all(6.0),
-        decoration: BoxDecoration(
-          color: barColor,
+        decoration: (colors) => BoxDecoration(
+          color: Color.alphaBlend(colors.secondaryContainer.withOpacityExt(0.3), colors.scaffold),
           borderRadius: BorderRadius.circular(16.0.multipliedRadius),
         ),
         child: ObxO(
@@ -1752,15 +1826,15 @@ class _PlaylistsSelectionBar extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
+                      NamidaText(
                         selectedCount.displayPlaylistKeyword,
-                        style: textTheme.displayMedium,
+                        style: NText.medium,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      Text(
+                      NamidaText(
                         tracksCount.displayTrackKeyword,
-                        style: textTheme.displaySmall,
+                        style: NText.small,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -1852,7 +1926,7 @@ class _SelectionBarButton extends StatelessWidget {
       height: 32.0,
       margin: const EdgeInsetsDirectional.only(start: 4.0),
       borderRadius: 11.0,
-      bgColor: context.theme.colorScheme.secondaryContainer.withOpacityExt(0.45),
+      bgColor: const NColors(.secondaryContainer, opacity: 0.45),
       alignment: Alignment.center,
       onTap: onTap,
       child: Icon(
@@ -1883,6 +1957,11 @@ class _SelectionShortcuts extends StatelessWidget {
     required this.child,
   });
 
+  static final _kSelectAllActivator = HardwareKeyboardUtils.primarySingleActivator(LogicalKeyboardKey.keyA);
+  static final _kInvertActivator = HardwareKeyboardUtils.primarySingleActivator(LogicalKeyboardKey.keyI);
+  static const _kDeleteActivator = SingleActivator(LogicalKeyboardKey.delete);
+  static const _kCloseActivator = SingleActivator(LogicalKeyboardKey.escape);
+
   @override
   Widget build(BuildContext context) {
     final focusChild = Focus(
@@ -1894,10 +1973,10 @@ class _SelectionShortcuts extends StatelessWidget {
       builder: (context, isSelecting) {
         final bindings = <ShortcutActivator, VoidCallback>{
           if (isSelecting) ...{
-            const SingleActivator(LogicalKeyboardKey.keyA, control: true): selection.selectAll,
-            const SingleActivator(LogicalKeyboardKey.keyI, control: true): selection.invert,
-            const SingleActivator(LogicalKeyboardKey.delete): selection.promptDelete,
-            const SingleActivator(LogicalKeyboardKey.escape): onClose,
+            _kSelectAllActivator: selection.selectAll,
+            _kInvertActivator: selection.invert,
+            _kDeleteActivator: selection.promptDelete,
+            _kCloseActivator: onClose,
           },
         };
         return CallbackShortcuts(

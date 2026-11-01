@@ -8,7 +8,10 @@ import 'package:youtipie/class/result_wrapper/list_wrapper_base.dart';
 import 'package:youtipie/class/result_wrapper/playlist_mix_result.dart';
 import 'package:youtipie/class/result_wrapper/playlist_result.dart';
 import 'package:youtipie/class/result_wrapper/playlist_result_base.dart';
+import 'package:youtipie/class/music/music_browse_endpoint.dart';
 import 'package:youtipie/class/stream_info_item/stream_info_item.dart';
+import 'package:youtipie/class/youtipie_feed/channel_info_item.dart';
+import 'package:youtipie/class/youtipie_feed/music_album_info_item.dart';
 import 'package:youtipie/class/youtipie_feed/playlist_basic_info.dart';
 import 'package:youtipie/class/youtipie_feed/playlist_info_item.dart';
 import 'package:youtipie/class/youtipie_feed/playlist_info_item_user.dart';
@@ -17,6 +20,7 @@ import 'package:youtipie/youtipie.dart';
 import 'package:namida/base/pull_to_refresh.dart';
 import 'package:namida/base/youtube_streams_manager.dart';
 import 'package:namida/class/route.dart';
+import 'package:namida/controller/current_color.dart';
 import 'package:namida/controller/navigator_controller.dart';
 import 'package:namida/controller/player_controller.dart';
 import 'package:namida/controller/settings_controller.dart';
@@ -25,7 +29,7 @@ import 'package:namida/core/dimensions.dart';
 import 'package:namida/core/enums.dart';
 import 'package:namida/core/extensions.dart';
 import 'package:namida/core/icon_fonts/broken_icons.dart';
-import 'package:namida/core/namida_converter_ext.dart';
+import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/themes.dart';
 import 'package:namida/core/translations/language.dart';
 import 'package:namida/core/utils.dart';
@@ -37,6 +41,7 @@ import 'package:namida/youtube/controller/youtube_history_controller.dart';
 import 'package:namida/youtube/controller/youtube_info_controller.dart';
 import 'package:namida/youtube/controller/youtube_playlist_controller.dart';
 import 'package:namida/youtube/functions/yt_playlist_utils.dart';
+import 'package:namida/youtube/pages/yt_music_page.dart';
 import 'package:namida/youtube/pages/yt_playlist_download_subpage.dart';
 import 'package:namida/youtube/widgets/yt_history_video_card.dart';
 import 'package:namida/youtube/widgets/yt_thumbnail.dart';
@@ -180,7 +185,7 @@ class _YTNormalPlaylistSubpageState extends State<YTNormalPlaylistSubpage> {
   Widget build(BuildContext context) {
     const horizontalBigThumbPadding = 12.0;
     final theme = AppThemes.inst.getAppTheme(bgColor, !context.isDarkMode);
-    return AnimatedThemeOrTheme(
+    return NTheme(
       duration: const Duration(milliseconds: 300),
       data: theme,
       child: BackgroundWrapper(
@@ -255,20 +260,20 @@ class _YTNormalPlaylistSubpageState extends State<YTNormalPlaylistSubpage> {
                                     mainAxisSize: MainAxisSize.min,
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      Text(
+                                      NamidaText(
                                         playlistCurrentName.translatePlaylistName(),
-                                        style: theme.textTheme.displayLarge,
+                                        style: NText.large,
                                       ),
                                       const SizedBox(height: 6.0),
-                                      Text(
+                                      NamidaText(
                                         playlist.tracks.length.displayVideoKeyword,
-                                        style: theme.textTheme.displaySmall,
+                                        style: NText.small,
                                       ),
                                       if (playlist.comment != '') ...[
                                         const SizedBox(height: 2.0),
-                                        Text(
+                                        NamidaText(
                                           playlist.comment,
-                                          style: theme.textTheme.displaySmall,
+                                          style: NText.small,
                                         ),
                                       ],
                                     ],
@@ -279,19 +284,19 @@ class _YTNormalPlaylistSubpageState extends State<YTNormalPlaylistSubpage> {
                                     mainAxisAlignment: MainAxisAlignment.end,
                                     children: [
                                       NamidaIconButton(
-                                        iconColor: context.defaultIconColor(bgColor),
+                                        iconColor: NColors.defaultIcon(mainColor: bgColor),
                                         icon: Broken.shuffle,
                                         tooltip: () => lang.shuffle,
                                         onPressed: () => Player.inst.playOrPause(0, playlist.tracks, widget.queueSource, shuffle: true),
                                       ),
                                       NamidaIconButton(
-                                        iconColor: context.defaultIconColor(bgColor),
+                                        iconColor: NColors.defaultIcon(mainColor: bgColor),
                                         icon: Broken.play_cricle,
                                         tooltip: () => lang.playLast,
                                         onPressed: () => Player.inst.addToQueue(playlist.tracks, insertNext: false),
                                       ),
                                       NamidaIconButton(
-                                        iconColor: context.defaultIconColor(bgColor),
+                                        iconColor: NColors.defaultIcon(mainColor: bgColor),
                                         icon: Broken.import,
                                         onPressed: () async {
                                           YTPlaylistDownloadPage(
@@ -343,9 +348,9 @@ class _YTNormalPlaylistSubpageState extends State<YTNormalPlaylistSubpage> {
                                         ],
                                         child: Padding(
                                           padding: const EdgeInsets.symmetric(horizontal: 4.0),
-                                          child: Icon(
+                                          child: NIcon(
                                             Broken.more_2,
-                                            color: context.defaultIconColor(bgColor),
+                                            color: NColors.defaultIcon(mainColor: bgColor),
                                           ),
                                         ),
                                       ),
@@ -427,7 +432,7 @@ class _YTNormalPlaylistSubpageState extends State<YTNormalPlaylistSubpage> {
 
 class YTHostedPlaylistSubpage extends StatefulWidget with NamidaRouteWidget {
   @override
-  String? get name => playlist.basicInfo.title;
+  String? get name => album?.title ?? playlist.basicInfo.title;
   @override
   RouteType get route => RouteType.YOUTUBE_PLAYLIST_SUBPAGE_HOSTED;
 
@@ -435,16 +440,21 @@ class YTHostedPlaylistSubpage extends StatefulWidget with NamidaRouteWidget {
   final PlaylistInfoItemUser? userPlaylist;
   final bool isMixPlaylist;
 
+  /// set when opened from youtube music, [playlist] is then the album's tracks.
+  final MusicAlbumInfoItem? album;
+
   const YTHostedPlaylistSubpage({
     super.key,
     required this.playlist,
     required this.userPlaylist,
+    this.album,
   }) : isMixPlaylist = playlist is YoutiPieMixPlaylistResult;
 
   YTHostedPlaylistSubpage.fromId({
     super.key,
     required String playlistId,
     required this.userPlaylist,
+    this.album,
   }) : playlist = _EmptyPlaylistResult(playlistId: playlistId),
        isMixPlaylist = PlaylistInfoItem.isMixPlaylist(playlistId);
 
@@ -582,6 +592,9 @@ class _YTHostedPlaylistSubpageState extends State<YTHostedPlaylistSubpage> with 
   Widget build(BuildContext context) {
     const horizontalBigThumbPadding = 12.0;
     final playlist = _playlist;
+    final album = widget.album;
+    final title = album?.title ?? playlist.basicInfo.title;
+    final albumArtUrl = album?.thumbnails.pick()?.url;
     final displayedStreams = _displayedStreams;
 
     const itemsThumbnailHeight = Dimensions.youtubeThumbnailHeight;
@@ -621,11 +634,11 @@ class _YTHostedPlaylistSubpageState extends State<YTHostedPlaylistSubpage> with 
     final hasMoreStreamsLeft = playlist.canFetchNext;
     final theme = AppThemes.inst.getAppTheme(bgColor, !context.isDarkMode);
     return VideoTilePropertiesProvider(
-      configs: VideoTilePropertiesConfigs(
+      configs: const VideoTilePropertiesConfigs(
         queueSource: QueueSourceYoutubeID.ytPlaylistHosted,
         showMoreIcon: true,
       ),
-      builder: (properties) => AnimatedThemeOrTheme(
+      builder: (properties) => NTheme(
         duration: const Duration(milliseconds: 300),
         data: theme,
         child: BackgroundWrapper(
@@ -639,7 +652,9 @@ class _YTHostedPlaylistSubpageState extends State<YTHostedPlaylistSubpage> with 
               listview: (controller) => NamidaListViewRaw(
                 scrollController: controller,
                 infoBox: (maxWidth) {
+                  final headerIconColor = Color.alphaBlend((bgColor ?? CurrentColor.inst.color).withOpacityExt(0.47), context.theme.colorScheme.onSurface);
                   final bigThumbWidth = maxWidth - horizontalBigThumbPadding * 2;
+                  final bigThumbHeight = bigThumbWidth * 9 / 16;
                   return Align(
                     alignment: Alignment.topCenter,
                     child: Stack(
@@ -678,19 +693,33 @@ class _YTHostedPlaylistSubpageState extends State<YTHostedPlaylistSubpage> with 
                             crossAxisAlignment: CrossAxisAlignment.start,
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              YoutubeThumbnail(
-                                type: ThumbnailType.playlist,
-                                key: Key("$firstID"),
-                                width: bigThumbWidth,
-                                height: (bigThumbWidth * 9 / 16),
-                                forceSquared: true,
-                                compressed: false,
-                                isImportantInCache: true,
-                                preferLowerRes: false,
-                                customUrl: thumbnailUrl,
-                                videoId: firstID,
-                                blur: 0.0,
-                              ),
+                              album != null
+                                  ? Center(
+                                      child: YoutubeThumbnail(
+                                        type: ThumbnailType.playlist,
+                                        key: Key(album.id),
+                                        width: bigThumbHeight,
+                                        height: bigThumbHeight,
+                                        compressed: false,
+                                        isImportantInCache: true,
+                                        preferLowerRes: false,
+                                        customUrl: albumArtUrl,
+                                        blur: 0.0,
+                                      ),
+                                    )
+                                  : YoutubeThumbnail(
+                                      type: ThumbnailType.playlist,
+                                      key: Key("$firstID"),
+                                      width: bigThumbWidth,
+                                      height: bigThumbHeight,
+                                      forceSquared: true,
+                                      compressed: false,
+                                      isImportantInCache: true,
+                                      preferLowerRes: false,
+                                      customUrl: thumbnailUrl,
+                                      videoId: firstID,
+                                      blur: 0.0,
+                                    ),
                               const SizedBox(height: 24.0),
                               FlexList(
                                 verticalSpacing: 8.0,
@@ -698,27 +727,33 @@ class _YTHostedPlaylistSubpageState extends State<YTHostedPlaylistSubpage> with 
                                   Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      Text(
-                                        playlist.basicInfo.title,
-                                        style: theme.textTheme.displayLarge,
+                                      NamidaText(
+                                        title,
+                                        style: NText.large,
                                       ),
                                       const SizedBox(height: 6.0),
-                                      Text(
+                                      NamidaText(
                                         videosCountTextFinal ?? '',
-                                        style: theme.textTheme.displaySmall,
+                                        style: NText.small,
                                       ),
-                                      if (uploaderTitleAndViews.isNotEmpty == true) ...[
+                                      if (album != null) ...[
                                         const SizedBox(height: 2.0),
-                                        Text(
+                                        _AlbumSubtitle(
+                                          album: album,
+                                          style: NText.small.of(context),
+                                        ),
+                                      ] else if (uploaderTitleAndViews.isNotEmpty == true) ...[
+                                        const SizedBox(height: 2.0),
+                                        NamidaText(
                                           uploaderTitleAndViews,
-                                          style: theme.textTheme.displaySmall,
+                                          style: NText.small,
                                         ),
                                       ],
                                       if (description != null && description.isNotEmpty) ...[
                                         const SizedBox(height: 2.0),
-                                        Text(
+                                        NamidaText(
                                           description,
-                                          style: theme.textTheme.displaySmall,
+                                          style: NText.small,
                                         ),
                                       ],
                                     ],
@@ -729,7 +764,7 @@ class _YTHostedPlaylistSubpageState extends State<YTHostedPlaylistSubpage> with 
                                     mainAxisAlignment: MainAxisAlignment.end,
                                     children: [
                                       NamidaIconButton(
-                                        iconColor: context.defaultIconColor(bgColor),
+                                        iconColor: NColors.fixed(headerIconColor),
                                         icon: Broken.shuffle,
                                         tooltip: () => lang.shuffle,
                                         onPressed: () async {
@@ -739,7 +774,7 @@ class _YTHostedPlaylistSubpageState extends State<YTHostedPlaylistSubpage> with 
                                         },
                                       ),
                                       NamidaIconButton(
-                                        iconColor: context.defaultIconColor(bgColor),
+                                        iconColor: NColors.fixed(headerIconColor),
                                         icon: Broken.play_cricle,
                                         tooltip: () => lang.playLast,
                                         onPressed: () async {
@@ -749,7 +784,7 @@ class _YTHostedPlaylistSubpageState extends State<YTHostedPlaylistSubpage> with 
                                         },
                                       ),
                                       NamidaIconButton(
-                                        iconColor: context.defaultIconColor(bgColor),
+                                        iconColor: NColors.fixed(headerIconColor),
                                         icon: Broken.import,
                                         onPressed: () async {
                                           final videos = await _getAllPlaylistVideos();
@@ -760,7 +795,7 @@ class _YTHostedPlaylistSubpageState extends State<YTHostedPlaylistSubpage> with 
                                           }
                                           YTPlaylistDownloadPage(
                                             ids: videos,
-                                            playlistName: playlist.basicInfo.title,
+                                            playlistName: title,
                                             infoLookup: infoLookup,
                                             playlistInfo: playlist.basicInfo,
                                           ).navigate();
@@ -780,7 +815,7 @@ class _YTHostedPlaylistSubpageState extends State<YTHostedPlaylistSubpage> with 
                                           padding: const EdgeInsets.symmetric(horizontal: 4.0),
                                           child: Icon(
                                             Broken.more_2,
-                                            color: context.defaultIconColor(bgColor),
+                                            color: headerIconColor,
                                           ),
                                         ),
                                       ),
@@ -800,8 +835,8 @@ class _YTHostedPlaylistSubpageState extends State<YTHostedPlaylistSubpage> with 
                   SliverMainAxisGroup(
                     slivers: [
                       PinnedHeaderSliver(
-                        child: ColoredBox(
-                          color: theme.scaffoldBackgroundColor,
+                        child: NColoredBox(
+                          color: NColors.scaffold,
                           child: Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 6.0),
                             child: Row(
@@ -883,6 +918,48 @@ class _YTHostedPlaylistSubpageState extends State<YTHostedPlaylistSubpage> with 
           ),
         ),
       ),
+    );
+  }
+}
+
+class _AlbumSubtitle extends StatelessWidget {
+  final MusicAlbumInfoItem album;
+  final TextStyle? style;
+
+  const _AlbumSubtitle({required this.album, required this.style});
+
+  static void _openArtist(ChannelInfoItem artist) {
+    final artistTitle = artist.title ?? '';
+    YTMusicBrowseSubpage(
+      endpoint: YoutiPieMusicBrowseEndpoint(artist.id),
+      title: artistTitle,
+    ).navigate();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final artists = album.artists;
+    final text = Text(
+      album.subtitle,
+      style: style,
+    );
+    if (artists.isEmpty) return text;
+    if (artists.length == 1) {
+      return NamidaInkWell(
+        borderRadius: 4.0,
+        onTap: () => _openArtist(artists.first),
+        child: text,
+      );
+    }
+    return NamidaPopupWrapper(
+      childrenDefault: () => artists.map(
+        (artist) => NamidaPopupItem(
+          icon: Broken.user,
+          title: artist.title ?? '',
+          onTap: () => _openArtist(artist),
+        ),
+      ),
+      child: text,
     );
   }
 }

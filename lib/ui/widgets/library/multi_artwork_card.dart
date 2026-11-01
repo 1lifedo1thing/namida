@@ -7,7 +7,7 @@ import 'package:namida/class/track.dart';
 import 'package:namida/controller/settings_controller.dart';
 import 'package:namida/core/dimensions.dart';
 import 'package:namida/core/extensions.dart';
-import 'package:namida/core/utils.dart';
+import 'package:namida/core/ntheme.dart';
 import 'package:namida/ui/widgets/artwork.dart';
 import 'package:namida/ui/widgets/baked_blur.dart';
 import 'package:namida/ui/widgets/custom_widgets.dart';
@@ -46,14 +46,14 @@ class MultiArtworkCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
     final imageSize = imageSizeOf(width);
     final remainingVerticalSpace = (height - imageSize).withMinimum(0.0);
     final itemImagePercentageMultiplier = imageSize * 0.02;
     double getFontSize(double m) => (remainingVerticalSpace * m).withMaximum(15.0);
     final topRightText = this.topRightText;
     final topRightFontSize = getFontSize(0.24).withMaximum(12.0);
+    final artworkFile = this.artworkFile;
+    final hasCustomArtwork = artworkFile != null && artworkFile.existsSync();
     Widget cardStack = Stack(
       children: [
         MultiArtworks(
@@ -63,7 +63,7 @@ class MultiArtworkCard extends StatelessWidget {
           tracks: tracks.toImageTracks(),
           thumbnailSize: imageSize,
           iconSize: (12.0 * itemImagePercentageMultiplier).withMinimum(12.0),
-          artworkFile: artworkFile,
+          existingArtworkFile: hasCustomArtwork ? artworkFile : null,
         ),
         Positioned(
           left: 0.0,
@@ -85,7 +85,7 @@ class MultiArtworkCard extends StatelessWidget {
                       tag: 'line1_$heroTag',
                       child: Text(
                         name,
-                        style: textTheme.displayMedium?.copyWith(fontSize: getFontSize(0.38)),
+                        style: NText.medium.of(context).copyWith(fontSize: getFontSize(0.38)),
                         softWrap: false,
                         overflow: TextOverflow.fade,
                       ),
@@ -98,10 +98,12 @@ class MultiArtworkCard extends StatelessWidget {
                         tracks.displayTrackKeyword,
                         tracks.totalDurationFormatted,
                       ].join(' - '),
-                      style: textTheme.displaySmall?.copyWith(
-                        fontWeight: FontWeight.w400,
-                        fontSize: getFontSize(0.28),
-                      ),
+                      style: NText.small
+                          .of(context)
+                          .copyWith(
+                            fontWeight: FontWeight.w400,
+                            fontSize: getFontSize(0.28),
+                          ),
                       softWrap: false,
                       overflow: TextOverflow.fade,
                     ),
@@ -123,10 +125,12 @@ class MultiArtworkCard extends StatelessWidget {
                   fit: BoxFit.scaleDown,
                   child: Text(
                     topRightText,
-                    style: textTheme.displaySmall?.copyWith(
-                      fontSize: topRightFontSize,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: NText.small
+                        .of(context)
+                        .copyWith(
+                          fontSize: topRightFontSize,
+                          fontWeight: FontWeight.bold,
+                        ),
                     softWrap: false,
                     overflow: TextOverflow.fade,
                   ),
@@ -149,11 +153,11 @@ class MultiArtworkCard extends StatelessWidget {
         child: cardStack,
       );
     }
-    return Container(
+    return NContainer(
       clipBehavior: Clip.antiAlias,
       margin: const EdgeInsets.symmetric(horizontal: Dimensions.gridHorizontalPadding),
-      decoration: BoxDecoration(
-        color: theme.cardColor,
+      decoration: (colors) => BoxDecoration(
+        color: colors.card,
         borderRadius: BorderRadius.circular(12.0.multipliedRadius),
       ),
       child: cardStack,

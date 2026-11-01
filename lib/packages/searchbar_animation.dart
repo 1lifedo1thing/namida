@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'package:namida/core/utils.dart';
 import 'package:namida/ui/widgets/custom_widgets.dart';
 
 class SearchBarAnimation extends StatefulWidget {
@@ -115,6 +116,7 @@ class SearchBarAnimation extends StatefulWidget {
   final Radius? cursorRadius;
 
   final bool initiallyAlwaysExpanded;
+  final RxBaseCore<bool>? isOpenWhileAlwaysExpanded;
 
   const SearchBarAnimation({
     super.key,
@@ -158,6 +160,7 @@ class SearchBarAnimation extends StatefulWidget {
     this.cursorHeight,
     this.cursorRadius,
     this.initiallyAlwaysExpanded = false,
+    this.isOpenWhileAlwaysExpanded,
   });
 
   @override
@@ -167,8 +170,13 @@ class SearchBarAnimation extends StatefulWidget {
 class SearchBarAnimationState extends State<SearchBarAnimation> with SingleTickerProviderStateMixin {
   bool _alwaysExpanded = false;
   void setAlwaysExpanded(bool val) {
-    _alwaysExpanded = val;
+    setState(() {
+      _alwaysExpanded = val;
+      if (val) _switcher = true;
+    });
   }
+
+  RxBaseCore<bool>? get _alwaysExpandedOpenRx => _alwaysExpanded ? widget.isOpenWhileAlwaysExpanded : null;
 
   late AnimationController _animationController;
   final FocusNode focusNode = FocusNode();
@@ -222,6 +230,14 @@ class SearchBarAnimationState extends State<SearchBarAnimation> with SingleTicke
   Widget build(BuildContext context) {
     final smallButtonTotalPadding = _SBDimensions.d5 * 2 + widget.buttonWidgetSmallPadding;
     final smallButtonTotalPaddingPart = smallButtonTotalPadding * 0.6;
+    Widget buttonIconWidget = _switcher ? widget.secondaryButtonWidget : widget.buttonWidget;
+    final alwaysExpandedOpenRx = _alwaysExpandedOpenRx;
+    if (alwaysExpandedOpenRx != null) {
+      buttonIconWidget = ObxO(
+        rx: alwaysExpandedOpenRx,
+        builder: (context, isOpen) => isOpen ? widget.secondaryButtonWidget : widget.buttonWidget,
+      );
+    }
     return Container(
       height: _SBDimensions.d60,
       alignment: widget.isSearchBoxOnRightSide ? Alignment.centerRight : Alignment.centerLeft,
@@ -268,7 +284,10 @@ class SearchBarAnimationState extends State<SearchBarAnimation> with SingleTicke
                 child: AnimatedOpacity(
                   opacity: (!_switcher) ? _SBDimensions.d0 : _SBDimensions.d1,
                   duration: const Duration(milliseconds: _SBDimensions.t700),
-                  child: widget.trailingWidget,
+                  child: _EmptyTextDimmer(
+                    controller: widget.textEditingController,
+                    child: widget.trailingWidget,
+                  ),
                 ),
               ),
               AnimatedPositioned(
@@ -326,13 +345,10 @@ class SearchBarAnimationState extends State<SearchBarAnimation> with SingleTicke
                           child: DecoratedBoxTransition(
                             decoration: decorationTween.animate(_animationController),
                             child: TapDetector(
-                              onTap: () {
-                                widget.onPressButton?.call(!_switcher);
-                                _onTapFunctionOriginalAnim();
-                              },
+                              onTap: _onButtonTap,
                               child: CircleAvatar(
                                 backgroundColor: widget.buttonColour,
-                                child: _switcher ? widget.secondaryButtonWidget : widget.buttonWidget,
+                                child: buttonIconWidget,
                               ),
                             ),
                           ),
@@ -355,13 +371,10 @@ class SearchBarAnimationState extends State<SearchBarAnimation> with SingleTicke
                                 : null,
                           ),
                           child: TapDetector(
-                            onTap: () {
-                              widget.onPressButton?.call(!_switcher);
-                              _onTapFunction();
-                            },
+                            onTap: _onButtonTap,
                             child: CircleAvatar(
                               backgroundColor: widget.buttonColour,
-                              child: _switcher ? widget.secondaryButtonWidget : widget.buttonWidget,
+                              child: buttonIconWidget,
                             ),
                           ),
                         ),
@@ -372,6 +385,13 @@ class SearchBarAnimationState extends State<SearchBarAnimation> with SingleTicke
         ),
       ),
     );
+  }
+
+  void _onButtonTap() {
+    final isButtonOpen = _alwaysExpandedOpenRx?.value ?? _switcher;
+    final shouldOpen = !isButtonOpen;
+    widget.onPressButton?.call(shouldOpen);
+    openCloseSearchBar(forceOpen: shouldOpen);
   }
 
   void openCloseSearchBar({bool forceOpen = false}) {
@@ -513,6 +533,59 @@ class SearchBarAnimationState extends State<SearchBarAnimation> with SingleTicke
   }
 }
 
+class _EmptyTextDimmer extends StatefulWidget {
+  final TextEditingController controller;
+  final Widget child;
+
+  const _EmptyTextDimmer({required this.controller, required this.child});
+
+  @override
+  State<_EmptyTextDimmer> createState() => _EmptyTextDimmerState();
+}
+
+class _EmptyTextDimmerState extends State<_EmptyTextDimmer> {
+  late bool _isEmpty = widget.controller.text.isEmpty;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_onTextChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant _EmptyTextDimmer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller == widget.controller) return;
+    oldWidget.controller.removeListener(_onTextChanged);
+    widget.controller.addListener(_onTextChanged);
+    _onTextChanged();
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_onTextChanged);
+    super.dispose();
+  }
+
+  void _onTextChanged() {
+    final isEmpty = widget.controller.text.isEmpty;
+    if (isEmpty == _isEmpty) return;
+    setState(() => _isEmpty = isEmpty);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      ignoring: _isEmpty,
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: _SBDimensions.t400),
+        opacity: _isEmpty ? 0.5 : 1.0,
+        child: widget.child,
+      ),
+    );
+  }
+}
+
 /// Colours for searchbar widget
 class _SBColor {
   static const Color transparent = Colors.transparent;
@@ -547,6 +620,7 @@ class _SBDimensions {
 
   /// Time values
   static const int t200 = 200;
+  static const int t400 = 200;
   static const int t700 = 700;
   static const int t1000 = 1000;
 }

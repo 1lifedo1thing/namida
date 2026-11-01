@@ -22,7 +22,7 @@ import 'package:namida/controller/vibrator_controller.dart';
 import 'package:namida/core/enums.dart';
 import 'package:namida/core/extensions.dart';
 import 'package:namida/core/icon_fonts/broken_icons.dart';
-import 'package:namida/core/namida_converter_ext.dart';
+import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/translations/language.dart';
 import 'package:namida/core/utils.dart';
 import 'package:namida/packages/miniplayer.dart';
@@ -30,6 +30,7 @@ import 'package:namida/packages/miniplayer_base.dart';
 import 'package:namida/ui/dialogs/set_lrc_dialog.dart';
 import 'package:namida/ui/widgets/artwork.dart';
 import 'package:namida/ui/widgets/custom_widgets.dart';
+import 'package:namida/ui/widgets/effects/effects.dart';
 import 'package:namida/ui/widgets/lyrics_karaoke_text.dart';
 import 'package:namida/ui/widgets/player_transport_controls.dart';
 import 'package:namida/youtube/class/youtube_id.dart';
@@ -52,7 +53,7 @@ class LyricsLRCParsedView extends StatefulWidget {
   final double? maxHeight;
   final double? verticalPadding;
   final Widget? bottomPadding;
-  final bool largeText;
+  final SettingsKey<double>? fontScaleKey;
   final bool insideMiniplayerCard;
   final bool fadeOnEmptyLine;
   final bool showJumpButton;
@@ -60,6 +61,8 @@ class LyricsLRCParsedView extends StatefulWidget {
 
   /// receives the overlay's animated visibility, so siblings can match its backdrop.
   final ValueNotifier<double>? visibilityNotifier;
+
+  final bool canHoldToCopyLine;
 
   const LyricsLRCParsedView({
     super.key,
@@ -71,7 +74,7 @@ class LyricsLRCParsedView extends StatefulWidget {
     this.allowOverflow = true,
     this.useSafeArea = true,
     this.blurColorMaskOpacity = 0.6,
-    this.largeText = false,
+    this.fontScaleKey,
     this.insideMiniplayerCard = false,
     this.fadeOnEmptyLine = true,
     this.showJumpButton = false,
@@ -81,6 +84,7 @@ class LyricsLRCParsedView extends StatefulWidget {
     this.maxHeight,
     this.verticalPadding,
     this.bottomPadding,
+    this.canHoldToCopyLine = true,
   });
 
   @override
@@ -151,8 +155,7 @@ class LyricsLRCParsedViewState extends State<LyricsLRCParsedView> with SingleTic
     super.initState();
     _mountedViews.add(this);
     if (widget.visibilityNotifier != null) _visibility.addListener(_reportVisibility);
-    settings.fontScaleLRC.addListener(_onFontScaleSettingChanged);
-    if (_largeText) settings.fontScaleLRCFull.addListener(_onFontScaleSettingChanged);
+    _fontScaleListenable.addListener(_onFontScaleSettingChanged);
     _effectsKey.addListener(_onEffectsSettingChanged);
     final lrc = Lyrics.inst.currentLyricsLRC.value;
     final txt = Lyrics.inst.currentLyricsText.value;
@@ -291,7 +294,10 @@ class LyricsLRCParsedViewState extends State<LyricsLRCParsedView> with SingleTic
     // -- stable per highlight state, so repeated ticks don't refresh the list
     final positionMS = didOverlapEnd ? _overlapEndMS : newLineDuration.inMilliseconds;
 
+    final scheduledLyrics = lyrics;
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      // -- [newIndex] belongs to the lyrics shown when this was scheduled
+      if (!mounted || !identical(lyrics, scheduledLyrics)) return;
       _overlapEndMS = _nextOverlapEndMS(newIndex, positionMS);
       _latestUpdatedLineInfo.value = (newLineDuration, newIndex, positionMS);
 
@@ -299,11 +305,7 @@ class LyricsLRCParsedViewState extends State<LyricsLRCParsedView> with SingleTic
         _currentIndex = newIndex;
         final list = _list;
         if (list != null && list.canScrollTo(newIndex)) list.scrollToIndex(newIndex, jump: jump);
-        try {
-          _currentLine = lyrics[newIndex].lyrics;
-        } catch (_) {
-          _currentLine = '';
-        }
+        _currentLine = lyrics[newIndex].lyrics;
         if (_updateOpacityForEmptyLines) {
           final line = _currentLine;
           late final emptyLine = _checkIfTextEmpty(_currentLine);
@@ -324,7 +326,7 @@ class LyricsLRCParsedViewState extends State<LyricsLRCParsedView> with SingleTic
 
               if (butIsItWorth) {
                 Timer(Duration(milliseconds: timeToWaitMS), () {
-                  if (line == _currentLine && _isCurrentLineEmpty != emptyLine) {
+                  if (mounted && line == _currentLine && _isCurrentLineEmpty != emptyLine) {
                     _updateIsCurrentLineEmpty(emptyLine);
                   }
                 });
@@ -351,6 +353,13 @@ class LyricsLRCParsedViewState extends State<LyricsLRCParsedView> with SingleTic
   Timer? _scrollTimer;
   final _canAnimateScroll = true.obs;
 
+  static const _kCopyLineHoldDuration = Duration(seconds: 1);
+
+  void _copyLine(String text) {
+    VibratorController.medium();
+    Lyrics.inst.copyLine(text);
+  }
+
   final _scrollTick = _LyricsScrollTick();
 
   final _latestUpdatedLineInfo = Rxn<(Duration? timestamp, int? index, int positionMS)>();
@@ -365,8 +374,6 @@ class LyricsLRCParsedViewState extends State<LyricsLRCParsedView> with SingleTic
   /// position at which an earlier, still highlighted line ends and needs the highlight recomputed
   int _overlapEndMS = _kNoOverlapEndMS;
 
-  late final bool _largeText = widget.isFullScreenView || widget.largeText;
-
   late final _effectsKey = widget.isFullScreenView ? settings.lyricsEffectsExpanded : settings.lyricsEffectsNormal;
   late LyricsEffects _effects = LyricsEffects.of(_effectsKey.value);
 
@@ -374,9 +381,20 @@ class LyricsLRCParsedViewState extends State<LyricsLRCParsedView> with SingleTic
   late double _previousFontMultiplier = _fontMultiplier;
   late double _fontMultiplier = _getFontMultiplierSetting();
 
+  late final Listenable _fontScaleListenable = _createFontScaleListenable();
+
+  Listenable _createFontScaleListenable() {
+    final fontScaleKey = widget.fontScaleKey;
+    if (fontScaleKey != null) return fontScaleKey;
+    if (widget.isFullScreenView) return Listenable.merge([settings.fontScaleLRC, settings.fontScaleLRCFull]);
+    return settings.fontScaleLRC;
+  }
+
   double _getFontMultiplierSetting() {
+    final fontScaleKey = widget.fontScaleKey;
+    if (fontScaleKey != null) return fontScaleKey.value;
     final normalMultiplier = settings.fontScaleLRC.value;
-    if (!_largeText) return normalMultiplier;
+    if (!widget.isFullScreenView) return normalMultiplier;
     return settings.fontScaleLRCFull.value ?? normalMultiplier;
   }
 
@@ -389,14 +407,21 @@ class LyricsLRCParsedViewState extends State<LyricsLRCParsedView> with SingleTic
   }
 
   void _saveFontMultiplier() {
-    _largeText ? settings.fontScaleLRCFull.save(_fontMultiplier) : settings.fontScaleLRC.save(_fontMultiplier);
+    final fontScaleKey = widget.fontScaleKey;
+    if (fontScaleKey != null) {
+      fontScaleKey.save(_fontMultiplier);
+    } else if (widget.isFullScreenView) {
+      settings.fontScaleLRCFull.save(_fontMultiplier);
+    } else {
+      settings.fontScaleLRC.save(_fontMultiplier);
+    }
   }
 
   @override
   void dispose() {
+    _scrollTimer?.cancel();
     _mountedViews.remove(this);
-    settings.fontScaleLRC.removeListener(_onFontScaleSettingChanged);
-    if (_largeText) settings.fontScaleLRCFull.removeListener(_onFontScaleSettingChanged);
+    _fontScaleListenable.removeListener(_onFontScaleSettingChanged);
     _effectsKey.removeListener(_onEffectsSettingChanged);
     _cardSlide.removeListener(_onCardSlideTick);
     widget.visibilityNotifier?.value = 0.0;
@@ -442,32 +467,30 @@ class LyricsLRCParsedViewState extends State<LyricsLRCParsedView> with SingleTic
 
   // -- mouse scroll
   void _onPointerSignal(dynamic _) {
-    if (HardwareKeyboard.instance.isControlPressed) return;
+    if (HardwareKeyboard.instance.isPrimaryModifierPressed) return;
     _onPointerDown(null);
     _onPointerUp(null);
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
-    final isDark = theme.brightness == Brightness.dark;
+    final isDark = context.isDarkMode;
     final fullscreen = widget.isFullScreenView;
     const maxLyricsWidth = 864.0;
     final alignAtStart = fullscreen && context.width < maxLyricsWidth; // -- align at center if screen got too wide
-    final initialFontSize = widget.baseFontSize ?? (_largeText ? 26.0 : 15.0);
-    final normalTextStyle = textTheme.displayMedium!.copyWith(fontSize: _fontMultiplier * initialFontSize);
+    final initialFontSize = widget.baseFontSize ?? (fullscreen ? 26.0 : 15.0);
+    final normalTextStyle = NText.medium.of(context).copyWith(fontSize: _fontMultiplier * initialFontSize);
     final plainLyricsTextStyle = normalTextStyle.copyWith(height: 1.8);
     final fullscreenIconButton = fullscreen && widget.canShowToggleFullscreenButton
-        ? Container(
+        ? NContainer(
             clipBehavior: Clip.antiAlias,
             padding: const EdgeInsets.all(4.0),
-            decoration: BoxDecoration(
+            decoration: (colors) => BoxDecoration(
               shape: BoxShape.circle,
               boxShadow: [
                 BoxShadow(
                   blurRadius: 8.0,
-                  color: theme.scaffoldBackgroundColor.withOpacityExt(0.7),
+                  color: colors.scaffold.withOpacityExt(0.7),
                 ),
               ],
             ),
@@ -513,16 +536,16 @@ class LyricsLRCParsedViewState extends State<LyricsLRCParsedView> with SingleTic
                           top: 0,
                           child: IconButton(
                             tooltip: lang.exit,
-                            icon: Icon(
+                            icon: NIcon(
                               Broken.arrow_left_2,
                               size: 22.0,
-                              color: context.defaultIconColor(),
+                              color: NColors.defaultIcon(),
                             ),
                             onPressed: widget.onCloseFullscreenButtonTap ?? toggleFullscreen,
                           ),
                         ),
                         Padding(
-                          padding: EdgeInsetsGeometry.symmetric(horizontal: 48.0 + 8.0),
+                          padding: const EdgeInsetsGeometry.symmetric(horizontal: 48.0 + 8.0),
                           child: ObxO(
                             rx: YoutubeInfoController.utils.lazyInfoRefresh,
                             builder: (context, _) {
@@ -532,12 +555,12 @@ class LyricsLRCParsedViewState extends State<LyricsLRCParsedView> with SingleTic
                                   ? NamidaMiniPlayerYoutubeID.textBuilder(context, item)
                                   : null;
                               return textData == null
-                                  ? Text(
+                                  ? NamidaText(
                                       lang.lyrics,
                                       maxLines: 1,
                                       overflow: TextOverflow.fade,
                                       softWrap: false,
-                                      style: textTheme.displayLarge,
+                                      style: NText.large,
                                     )
                                   : Column(
                                       mainAxisSize: MainAxisSize.min,
@@ -545,24 +568,20 @@ class LyricsLRCParsedViewState extends State<LyricsLRCParsedView> with SingleTic
                                       crossAxisAlignment: CrossAxisAlignment.center,
                                       children: [
                                         if (textData.firstLineGood)
-                                          Text(
+                                          NamidaText(
                                             textData.firstLine,
                                             maxLines: textData.secondLine == '' ? 2 : 1,
                                             overflow: TextOverflow.fade,
                                             softWrap: textData.secondLine.isEmpty,
-                                            style: textTheme.displayMedium?.copyWith(
-                                              fontSize: 17.0,
-                                            ),
+                                            style: const NText(.medium, size: .s17),
                                           ),
                                         if (textData.firstLineGood && textData.secondLineGood) const SizedBox(height: 4.0),
                                         if (textData.secondLineGood)
-                                          Text(
+                                          NamidaText(
                                             textData.secondLine,
                                             softWrap: false,
                                             overflow: TextOverflow.fade,
-                                            style: textTheme.displayMedium?.copyWith(
-                                              fontSize: 15.0,
-                                            ),
+                                            style: const NText(.medium, size: .s15),
                                           ),
                                       ],
                                     );
@@ -581,8 +600,7 @@ class LyricsLRCParsedViewState extends State<LyricsLRCParsedView> with SingleTic
                               showLRCSetDialog(currentItem, CurrentColor.inst.miniplayerColor);
                             },
                             icon: NamidaMiniPlayerBase.getLrcButton(
-                              theme,
-                              color: context.defaultIconColor(),
+                              color: NColors.defaultIcon(),
                               iconSize: 22.0,
                             ),
                           ),
@@ -606,70 +624,8 @@ class LyricsLRCParsedViewState extends State<LyricsLRCParsedView> with SingleTic
               fit: StackFit.expand,
               alignment: Alignment.center,
               children: [
-                ClipRect(
-                  child: NamidaBlur(
-                    fixArtifacts: true,
-                    blur: 60.0,
-                    child: FittedBox(
-                      fit: BoxFit.cover,
-                      child: ObxO(
-                        rx: Player.inst.currentItem,
-                        builder: (context, item) {
-                          Widget child;
-                          if (item is YoutubeID) {
-                            final vidId = item.id;
-                            child = YoutubeThumbnail(
-                              type: ThumbnailType.video,
-                              key: Key(vidId),
-                              isImportantInCache: true,
-                              width: context.width,
-                              borderRadius: 0,
-                              blur: 0,
-                              disableBlurBgSizeShrink: true,
-                              videoId: vidId,
-                              displayFallbackIcon: false,
-                              compressed: true,
-                              preferLowerRes: true,
-                              forceSquared: true,
-                              fit: BoxFit.cover,
-                            );
-                          } else {
-                            final track = item is Selectable ? item.track : null;
-                            child = ArtworkWidget(
-                              key: ValueKey(track?.path),
-                              track: track,
-                              path: track?.pathToImage,
-                              thumbnailSize: context.width,
-                              width: context.width,
-                              borderRadius: 0,
-                              blur: 0,
-                              disableBlurBgSizeShrink: true,
-                              compressed: true,
-                              forceSquared: true,
-                              fit: BoxFit.cover,
-                            );
-                          }
-
-                          return CustomAnimatedSwitcher(
-                            duration: const Duration(milliseconds: 1200),
-                            switchInCurve: Curves.easeInOutQuart,
-                            switchOutCurve: Curves.easeInOutQuart,
-                            child: child,
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-                ),
-                Positioned.fill(
-                  child: ColoredBox(
-                    color: context.isDarkMode ? Colors.black.withOpacityExt(0.4) : Colors.white.withOpacityExt(0.2),
-                  ),
-                ),
-                Positioned.fill(
-                  child: ColoredBox(
-                    color: context.theme.scaffoldBackgroundColor.withOpacityExt(widget.blurColorMaskOpacity),
-                  ),
+                _LyricsFullscreenBackground(
+                  maskOpacity: widget.blurColorMaskOpacity,
                 ),
                 // -- old design, simple color/gradient
                 // Positioned.fill(
@@ -714,7 +670,7 @@ class LyricsLRCParsedViewState extends State<LyricsLRCParsedView> with SingleTic
         ShaderFadingWidget(
           biggerValues: fullscreen,
           child: ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: maxLyricsWidth),
+            constraints: const BoxConstraints(maxWidth: maxLyricsWidth),
             child: Builder(
               builder: (context) {
                 return Obx(
@@ -802,15 +758,13 @@ class LyricsLRCParsedViewState extends State<LyricsLRCParsedView> with SingleTic
                                     final isEarlierLineStillRunning = distanceDiffFromSelected != null && distanceDiffFromSelected < 0 && lineEndsMS[index] > positionMS;
                                     final selected = distanceDiffFromSelected == 0 || isBGLyrics || selectedLineTimestamp == lrc.timestamp || isEarlierLineStillRunning;
                                     final selectedAndEmpty = selected && _checkIfTextEmpty(text);
-                                    var bgColor = selected && !isBGLyrics
-                                        ? Color.alphaBlend(miniplayerColor.withAlpha(140), theme.scaffoldBackgroundColor).withOpacityExt(
-                                            selectedAndEmpty
-                                                ? 0.1
-                                                : fullscreen
-                                                ? 0.4
-                                                : 0.5,
-                                          )
-                                        : null;
+                                    final hasBgColor = selected && !isBGLyrics;
+                                    final bgColorOpacity = selectedAndEmpty
+                                        ? 0.1
+                                        : fullscreen
+                                        ? 0.4
+                                        : 0.5;
+                                    var isBgColorDimmed = false;
 
                                     EdgeInsetsGeometry lineMargin = EdgeInsets.symmetric(
                                       vertical: /* (selected ? 2.0 : 0.0) + */ (fullscreen ? 8.0 : 2.0),
@@ -852,12 +806,12 @@ class LyricsLRCParsedViewState extends State<LyricsLRCParsedView> with SingleTic
                                         // -- v1
                                         textAlign = TextAlign.start;
                                         alignment = AlignmentDirectional.centerStart;
-                                        padding = padding.add(EdgeInsetsDirectional.only(start: 12.0, end: 64.0));
+                                        padding = padding.add(const EdgeInsetsDirectional.only(start: 12.0, end: 64.0));
                                       } else if (person == 2) {
                                         // -- v2
                                         textAlign = TextAlign.end;
                                         alignment = AlignmentDirectional.centerEnd;
-                                        padding = padding.add(EdgeInsetsDirectional.only(start: 64.0, end: 12.0));
+                                        padding = padding.add(const EdgeInsetsDirectional.only(start: 64.0, end: 12.0));
                                       } else if (person >= 3) {
                                         // -- v3
                                         textAlign = TextAlign.center;
@@ -916,9 +870,7 @@ class LyricsLRCParsedViewState extends State<LyricsLRCParsedView> with SingleTic
                                         textStyle = textStyle.copyWith(
                                           fontSize: textStyle.fontSize! * multiplier,
                                         );
-                                        if (bgColor != null) {
-                                          bgColor = bgColor.withOpacityExt(bgColor.a * 0.75);
-                                        }
+                                        isBgColorDimmed = true;
                                       }
 
                                       if (!isFirst) {
@@ -987,6 +939,12 @@ class LyricsLRCParsedViewState extends State<LyricsLRCParsedView> with SingleTic
                                       );
                                     }
 
+                                    final bgColor = hasBgColor
+                                        ? NColors.custom((colors) {
+                                            final color = Color.alphaBlend(miniplayerColor.withOpacityExt(0.55), colors.scaffold).withOpacityExt(bgColorOpacity);
+                                            return isBgColorDimmed ? color.withOpacityExt(color.a * 0.75) : color;
+                                          })
+                                        : null;
                                     final lineWidget = NamidaInkWell(
                                       alignment: alignment,
                                       bgColor: bgColor,
@@ -998,6 +956,26 @@ class LyricsLRCParsedViewState extends State<LyricsLRCParsedView> with SingleTic
                                       padding: padding,
                                       child: textWidget,
                                     );
+
+                                    Widget lineTapArea = Material(
+                                      type: MaterialType.transparency,
+                                      child: InkWell(
+                                        splashFactory: InkSparkle.splashFactory,
+                                        onTap: () {
+                                          _canAnimateScroll.value = true;
+                                          _currentIndex = null; // reset so that tapping the current line still animates to it
+                                          Player.inst.seek(lrc.timestamp); //  should auto scroll bcz position changes
+                                        },
+                                      ),
+                                    );
+                                    if (widget.canHoldToCopyLine) {
+                                      lineTapArea = LongPressDetector(
+                                        duration: _kCopyLineHoldDuration,
+                                        enableSecondaryTap: true,
+                                        onLongPress: () => _copyLine(text),
+                                        child: lineTapArea,
+                                      );
+                                    }
 
                                     return Directionality(
                                       textDirection: textDirection,
@@ -1011,17 +989,7 @@ class LyricsLRCParsedViewState extends State<LyricsLRCParsedView> with SingleTic
                                             alignment: Alignment.center,
                                             children: [
                                               Positioned.fill(
-                                                child: Material(
-                                                  type: MaterialType.transparency,
-                                                  child: InkWell(
-                                                    splashFactory: InkSparkle.splashFactory,
-                                                    onTap: () {
-                                                      _canAnimateScroll.value = true;
-                                                      _currentIndex = null; // reset so that tapping the current line still animates to it
-                                                      Player.inst.seek(lrc.timestamp); //  should auto scroll bcz position changes
-                                                    },
-                                                  ),
-                                                ),
+                                                child: lineTapArea,
                                               ),
                                               IgnorePointer(
                                                 child: NamidaHero(
@@ -1106,6 +1074,15 @@ class LyricsLRCParsedViewState extends State<LyricsLRCParsedView> with SingleTic
           child: Stack(
             alignment: Alignment.center,
             children: [
+              if (fullscreen)
+                Positioned.fill(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                    child: _LyricsIdleVisualizer(
+                      opacity: mpAnimation,
+                    ),
+                  ),
+                ),
               Positioned.fill(
                 child: FadeIgnoreTransition(
                   opacity: mpAnimation,
@@ -1136,19 +1113,19 @@ class LyricsLRCParsedViewState extends State<LyricsLRCParsedView> with SingleTic
                           _canAnimateScroll.value = true;
                         },
                         padding: const EdgeInsets.symmetric(vertical: 8.0),
-                        bgColor: context.theme.colorScheme.secondary.withOpacityExt(0.3),
+                        bgColor: const NColors(.secondary, opacity: 0.3),
                         child: Row(
                           mainAxisSize: .min,
                           children: [
                             const SizedBox(width: 12.0),
-                            Icon(
+                            const Icon(
                               Broken.cd,
                               size: 18.0,
                             ),
                             const SizedBox(width: 6.0),
-                            Text(
+                            NamidaText(
                               lang.jump,
-                              style: context.textTheme.displayMedium,
+                              style: NText.medium,
                             ),
                             const SizedBox(width: 12.0),
                           ],
@@ -1186,7 +1163,8 @@ class LyricsLRCParsedViewState extends State<LyricsLRCParsedView> with SingleTic
             onScaleUpdate: (details) => _setFontMultiplier(details.scale * _previousFontMultiplier),
             onScaleEnd: (details) => _saveFontMultiplier(),
             onScaleReset: () {
-              _setFontMultiplier(1.0);
+              final defaultMultiplier = widget.fontScaleKey?.fallback ?? 1.0;
+              _setFontMultiplier(defaultMultiplier);
               _saveFontMultiplier();
             },
           ),
@@ -1201,6 +1179,146 @@ class LyricsLRCParsedViewState extends State<LyricsLRCParsedView> with SingleTic
     }
 
     return finalStack;
+  }
+}
+
+// by claude
+class _LyricsFullscreenBackground extends StatelessWidget {
+  final double maskOpacity;
+
+  const _LyricsFullscreenBackground({required this.maskOpacity});
+
+  static const _switchDuration = Duration(milliseconds: 800);
+
+  static bool _isAmbientShownR() => settings.lyricsBackgroundAlways.valueR || !Lyrics.inst.lyricsCanBeAvailable.valueR;
+
+  @override
+  Widget build(BuildContext context) {
+    return Obx(
+      (context) {
+        final ambient = settings.lyricsBackground.valueR.ambient;
+        final child = ambient != null && _isAmbientShownR()
+            ? NamidaAmbientBackdrop(
+                key: ValueKey(ambient),
+                kind: ambient,
+                isReactive: true,
+                isUnderText: true,
+              )
+            : _LyricsFullscreenArtwork(
+                maskOpacity: maskOpacity,
+              );
+        return CustomAnimatedSwitcher(
+          duration: _switchDuration,
+          switchInCurve: Curves.easeInOutQuart,
+          switchOutCurve: Curves.easeInOutQuart,
+          child: child,
+        );
+      },
+    );
+  }
+}
+
+class _LyricsFullscreenArtwork extends StatelessWidget {
+  final double maskOpacity;
+
+  const _LyricsFullscreenArtwork({required this.maskOpacity});
+
+  @override
+  Widget build(BuildContext context) {
+    final artworkWidget = ClipRect(
+      child: NamidaBlur(
+        fixArtifacts: true,
+        blur: 60.0,
+        child: FittedBox(
+          fit: BoxFit.cover,
+          child: ObxO(
+            rx: Player.inst.currentItem,
+            builder: (context, item) {
+              Widget child;
+              if (item is YoutubeID) {
+                final vidId = item.id;
+                child = YoutubeThumbnail(
+                  type: ThumbnailType.video,
+                  key: Key(vidId),
+                  isImportantInCache: true,
+                  width: context.width,
+                  borderRadius: 0,
+                  blur: 0,
+                  disableBlurBgSizeShrink: true,
+                  videoId: vidId,
+                  displayFallbackIcon: false,
+                  compressed: true,
+                  preferLowerRes: true,
+                  forceSquared: true,
+                  fit: BoxFit.cover,
+                );
+              } else {
+                final track = item is Selectable ? item.track : null;
+                child = ArtworkWidget(
+                  key: ValueKey(track?.path),
+                  track: track,
+                  path: track?.pathToImage,
+                  thumbnailSize: context.width,
+                  width: context.width,
+                  borderRadius: 0,
+                  blur: 0,
+                  disableBlurBgSizeShrink: true,
+                  compressed: true,
+                  forceSquared: true,
+                  fit: BoxFit.cover,
+                );
+              }
+
+              return CustomAnimatedSwitcher(
+                duration: const Duration(milliseconds: 1200),
+                switchInCurve: Curves.easeInOutQuart,
+                switchOutCurve: Curves.easeInOutQuart,
+                child: child,
+              );
+            },
+          ),
+        ),
+      ),
+    );
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        artworkWidget,
+        ColoredBox(
+          color: context.isDarkMode ? Colors.black.withOpacityExt(0.4) : Colors.white.withOpacityExt(0.2),
+        ),
+        NColoredBox(
+          color: NColors(.scaffold, opacity: maskOpacity),
+        ),
+      ],
+    );
+  }
+}
+
+// by claude
+class _LyricsIdleVisualizer extends StatelessWidget {
+  final Animation<double> opacity;
+
+  const _LyricsIdleVisualizer({required this.opacity});
+
+  static const _switchDuration = Duration(milliseconds: 600);
+
+  @override
+  Widget build(BuildContext context) {
+    return Obx(
+      (context) {
+        final isEnabled = settings.lyricsVisualizer.valueR != LyricsVisualizer.none;
+        final isShown = isEnabled && !Lyrics.inst.lyricsCanBeAvailable.valueR;
+        return CustomAnimatedSwitcher(
+          duration: _switchDuration,
+          child: isShown
+              ? NamidaVisualizer.lyrics(
+                  opacity: opacity,
+                )
+              : const SizedBox(),
+        );
+      },
+    );
   }
 }
 
@@ -2093,11 +2211,11 @@ class LyricsOverlayBackdrop extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bgColor = context.theme.scaffoldBackgroundColor;
     final animation = Listenable.merge([mpAnimation, visibility]);
     return Obx(
       (context) {
-        final maskColor = Color.alphaBlend(CurrentColor.inst.miniplayerColor.withOpacityExt(0.25), bgColor);
+        final colors = NColorsData.of(context);
+        final maskColor = Color.alphaBlend(CurrentColor.inst.miniplayerColor.withOpacityExt(0.25), colors.scaffold);
         return AnimatedBuilder(
           animation: animation,
           child: child,

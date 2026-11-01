@@ -219,7 +219,7 @@ Future<void> _watchAndCopyBinariesForDir(MapEntry<String, Directory> entry) asyn
     d.deleteSync(recursive: true); // ensure deleted so that detection happens after building ends.
   } catch (_) {}
   while (!d.existsSync()) {
-    await Future.delayed(Duration(milliseconds: 10));
+    await Future.delayed(const Duration(milliseconds: 10));
   }
   print('====--> detected change in $d, copying binaries...');
 
@@ -227,7 +227,7 @@ Future<void> _watchAndCopyBinariesForDir(MapEntry<String, Directory> entry) asyn
 
   final releaseBinDir = Directory('${d.path}/bin');
   releaseBinDir.createSync(recursive: false);
-  for (final element in Directory('external/ffmpeg_build/linux').listSync()) {
+  for (final element in Directory('external/ffmpeg_build/obsolete/linux').listSync()) {
     if (element is File) {
       final filename = element.path.split('/').last;
       element.copySync('${releaseBinDir.path}/$filename');

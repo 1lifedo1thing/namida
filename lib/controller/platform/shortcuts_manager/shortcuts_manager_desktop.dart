@@ -10,25 +10,28 @@ class _ShortcutsManagerDesktop extends ShortcutsManager {
     // ------------------- playback -------------------
     ShortcutKeyActivator(
       action: HotkeyAction.play_pause,
+      category: ShortcutCategory.playback,
       key: LogicalKeyboardKey.space,
-      skipInTextFields: true,
       callback: Player.inst.togglePlayPause,
       title: () => "${lang.play}/${lang.pause}",
     ),
     ShortcutKeyActivator(
       action: HotkeyAction.seek_backwards,
+      category: ShortcutCategory.playback,
       key: LogicalKeyboardKey.arrowLeft,
       callback: Player.inst.seekSecondsBackward,
       title: () => "<- ${lang.seekbar}",
     ),
     ShortcutKeyActivator(
       action: HotkeyAction.seek_forwards,
+      category: ShortcutCategory.playback,
       key: LogicalKeyboardKey.arrowRight,
       callback: Player.inst.seekSecondsForward,
       title: () => "${lang.seekbar} ->",
     ),
     ShortcutKeyActivator(
       action: HotkeyAction.volume_up,
+      category: ShortcutCategory.playback,
       key: LogicalKeyboardKey.arrowUp,
       control: true,
       includeRepeats: true,
@@ -40,6 +43,7 @@ class _ShortcutsManagerDesktop extends ShortcutsManager {
     ),
     ShortcutKeyActivator(
       action: HotkeyAction.volume_down,
+      category: ShortcutCategory.playback,
       key: LogicalKeyboardKey.arrowDown,
       control: true,
       includeRepeats: true,
@@ -51,6 +55,7 @@ class _ShortcutsManagerDesktop extends ShortcutsManager {
     ),
     ShortcutKeyActivator(
       action: HotkeyAction.previous,
+      category: ShortcutCategory.playback,
       key: LogicalKeyboardKey.arrowLeft,
       control: true,
       callback: Player.inst.previous,
@@ -58,6 +63,7 @@ class _ShortcutsManagerDesktop extends ShortcutsManager {
     ),
     ShortcutKeyActivator(
       action: HotkeyAction.next,
+      category: ShortcutCategory.playback,
       key: LogicalKeyboardKey.arrowRight,
       control: true,
       callback: Player.inst.next,
@@ -65,8 +71,10 @@ class _ShortcutsManagerDesktop extends ShortcutsManager {
     ),
     ShortcutKeyActivator(
       action: HotkeyAction.stop_after_current,
+      category: ShortcutCategory.playback,
       key: LogicalKeyboardKey.space,
       control: true,
+      isControlLiteral: true,
       callback: () {
         final isStopping = Player.inst.toggleStopAfterCurrent();
         _showSnack(message: "${lang.stopAfterThisTrack}: ${isStopping ? '✓' : '✗'}");
@@ -74,12 +82,14 @@ class _ShortcutsManagerDesktop extends ShortcutsManager {
       title: () => lang.stopAfterThisTrack,
     ),
     ShortcutKeyActivator(
+      category: ShortcutCategory.playback,
       key: LogicalKeyboardKey.arrowLeft,
       shift: true,
       callback: () => ChaptersController.inst.seekToAdjacent(forward: false),
       title: () => lang.previousChapter,
     ),
     ShortcutKeyActivator(
+      category: ShortcutCategory.playback,
       key: LogicalKeyboardKey.arrowRight,
       shift: true,
       callback: () => ChaptersController.inst.seekToAdjacent(forward: true),
@@ -88,8 +98,10 @@ class _ShortcutsManagerDesktop extends ShortcutsManager {
 
     // -------------------
     ShortcutKeyActivator(
+      category: ShortcutCategory.track,
       key: LogicalKeyboardKey.keyH,
       control: true,
+      isControlLiteral: true,
       callback: () async {
         final currentItem = Player.inst.currentItem.value;
         if (currentItem is YoutubeID && Player.inst.displayFavouriteButtonAsLike) {
@@ -137,12 +149,14 @@ class _ShortcutsManagerDesktop extends ShortcutsManager {
       title: () => "${lang.favourites}/${lang.like}: ${lang.add}/${lang.remove}",
     ),
     ShortcutKeyActivator(
+      category: ShortcutCategory.track,
       key: LogicalKeyboardKey.keyB,
       control: true,
       callback: BookmarksController.inst.addAtCurrentPosition,
       title: () => lang.addBookmark,
     ),
     ShortcutKeyActivator(
+      category: ShortcutCategory.others,
       key: LogicalKeyboardKey.keyF,
       control: true,
       callback: () {
@@ -158,12 +172,14 @@ class _ShortcutsManagerDesktop extends ShortcutsManager {
       title: () => lang.search,
     ),
     ShortcutKeyActivator(
+      category: ShortcutCategory.others,
       key: LogicalKeyboardKey.keyR,
       control: true,
       callback: Indexer.inst.refreshLibraryAndCheckForDiff,
       title: () => lang.refreshLibrary,
     ),
     ShortcutKeyActivator(
+      category: ShortcutCategory.others,
       key: LogicalKeyboardKey.keyE,
       control: true,
       callback: () {
@@ -188,12 +204,15 @@ class _ShortcutsManagerDesktop extends ShortcutsManager {
       title: () => lang.openMiniplayer,
     ),
     ShortcutKeyActivator(
+      category: ShortcutCategory.others,
       key: LogicalKeyboardKey.keyQ,
       control: true,
+      isControlLiteral: true,
       callback: openPlayerQueue,
       title: () => lang.openQueue,
     ),
     ShortcutKeyActivator(
+      category: ShortcutCategory.lyrics,
       key: LogicalKeyboardKey.keyL,
       control: true,
       callback: () {
@@ -206,6 +225,7 @@ class _ShortcutsManagerDesktop extends ShortcutsManager {
       title: () => lang.lyrics,
     ),
     ShortcutKeyActivator(
+      category: ShortcutCategory.lyrics,
       key: LogicalKeyboardKey.keyL,
       control: true,
       shift: true,
@@ -220,6 +240,7 @@ class _ShortcutsManagerDesktop extends ShortcutsManager {
       title: () => "${lang.lyrics} (${lang.fullscreen})",
     ),
     ShortcutKeyActivator(
+      category: ShortcutCategory.others,
       key: LogicalKeyboardKey.keyP,
       control: true,
       shift: true,
@@ -229,33 +250,35 @@ class _ShortcutsManagerDesktop extends ShortcutsManager {
         }
 
         Timer(
-          Duration(milliseconds: 100),
+          const Duration(milliseconds: 100),
           NamidaSettingSearchBar.open,
         );
       },
       title: () => lang.settings,
     ),
     ShortcutKeyActivator(
+      category: ShortcutCategory.playback,
       key: LogicalKeyboardKey.keyS,
       control: true,
       shift: true,
-      callback: () {
-        // final shuffleAll = settings.player.shuffleAllTracks.value;
-        // Player.inst.shuffleTracks(shuffleAll);
-        // _showSnack(
-        //   message: "${shuffleAll ? lang.shuffleAll : lang.shuffleNext}: ${lang.done}",
-        // );
-        final shuffleQueue = !settings.player.shuffleQueue.value;
-        settings.player.shuffleQueue.save(shuffleQueue);
+      callback: () async {
+        final mode = settings.player.shuffleButtonMode.value ?? ShuffleButtonMode.toggle;
+        await Player.inst.shuffleByMode(mode);
+        final message = switch (mode) {
+          ShuffleButtonMode.toggle => "${lang.shuffle}: ${settings.player.shuffleQueue.value ? '✓' : '✗'}",
+          ShuffleButtonMode.next || ShuffleButtonMode.all => "${mode.toText()}: ${lang.done}",
+        };
         _showSnack(
-          message: "${lang.shuffle}: ${shuffleQueue ? '✓' : '✗'}",
+          message: message,
         );
       },
       title: () => lang.shuffle,
     ),
     ShortcutKeyActivator(
+      category: ShortcutCategory.playback,
       key: LogicalKeyboardKey.tab,
       control: true,
+      isControlLiteral: true,
       callback: () {
         final e = Player.inst.cycleRepeatMode();
         _showSnack(
@@ -265,8 +288,9 @@ class _ShortcutsManagerDesktop extends ShortcutsManager {
       title: () => lang.repeatMode,
     ),
     // -----------------
-    for (final key in const [LogicalKeyboardKey.equal, LogicalKeyboardKey.numpadAdd])
+    for (final key in const [LogicalKeyboardKey.equal, LogicalKeyboardKey.add, LogicalKeyboardKey.numpadAdd])
       ShortcutKeyActivator(
+        category: ShortcutCategory.others,
         key: key,
         control: true,
         includeRepeats: true,
@@ -275,6 +299,7 @@ class _ShortcutsManagerDesktop extends ShortcutsManager {
       ),
     for (final key in const [LogicalKeyboardKey.minus, LogicalKeyboardKey.numpadSubtract])
       ShortcutKeyActivator(
+        category: ShortcutCategory.others,
         key: key,
         control: true,
         includeRepeats: true,
@@ -282,6 +307,7 @@ class _ShortcutsManagerDesktop extends ShortcutsManager {
         title: () => lang.zoom,
       ),
     ShortcutKeyActivator(
+      category: ShortcutCategory.others,
       key: LogicalKeyboardKey.digit0,
       control: true,
       callback: () => ScaleDetectorState.topmost?.reset(),
@@ -290,6 +316,7 @@ class _ShortcutsManagerDesktop extends ShortcutsManager {
     // -----------------
     for (int i = 1; i <= 9; i++)
       ShortcutKeyActivator(
+        category: ShortcutCategory.track,
         key: LogicalKeyboardKey(0x00000000030 + i),
         control: true,
         alt: true,
@@ -327,6 +354,7 @@ class _ShortcutsManagerDesktop extends ShortcutsManager {
     // -----------------
     for (int i = 1; i <= 9; i++)
       ShortcutKeyActivator(
+        category: ShortcutCategory.others,
         key: LogicalKeyboardKey(0x00000000030 + i),
         control: true,
         callback: () {
@@ -342,6 +370,7 @@ class _ShortcutsManagerDesktop extends ShortcutsManager {
 
     // ================
     ShortcutKeyActivator(
+      category: ShortcutCategory.others,
       key: LogicalKeyboardKey.f11,
       callback: () async {
         final isFullscreen = await windowManager.isFullScreen();
@@ -350,6 +379,7 @@ class _ShortcutsManagerDesktop extends ShortcutsManager {
       title: () => lang.fullscreen,
     ),
     ShortcutKeyActivator(
+      category: ShortcutCategory.lyrics,
       key: LogicalKeyboardKey.keyL,
       control: true,
       alt: true,
@@ -357,13 +387,19 @@ class _ShortcutsManagerDesktop extends ShortcutsManager {
       title: () => lang.miniLyricsWindow,
     ),
     ShortcutKeyActivator(
+      category: ShortcutCategory.others,
       key: LogicalKeyboardKey.escape,
       callback: () {
         if (NamidaWindowManager.isMiniLyricsMode.value) {
           WindowController.instance?.exitMiniLyricsMode();
-        } else {
-          NamidaNavigator.inst.back();
+          return;
         }
+        final focusedItem = _getFocusedItem();
+        if (focusedItem != null && !ShortcutsManager.isTextFieldFocused()) {
+          focusedItem.unfocus();
+          return;
+        }
+        NamidaNavigator.inst.back();
       },
       title: () => lang.exit,
     ),
@@ -371,10 +407,10 @@ class _ShortcutsManagerDesktop extends ShortcutsManager {
 
   FocusAttachment? _attachment;
 
-  /// arrow keys are mapped to [DirectionalFocusIntent]/[ScrollIntent] by [WidgetsApp.defaultShortcuts],
-  /// and since those are dispatched from the focused node upwards, they get consumed before ever
-  /// reaching our root scope handler. text fields are unaffected, they consume arrows earlier
-  /// through [DefaultTextEditingShortcuts].
+  /// ctrl+arrows are mapped to [ScrollIntent] by [WidgetsApp.defaultShortcuts], and since those are dispatched
+  /// from the focused node upwards, they get consumed before ever reaching our root scope handler.
+  /// plain arrows are gated by [_FocusedItemDirectionalAction] instead.
+  /// text fields are unaffected, they consume arrows earlier through [DefaultTextEditingShortcuts].
   static bool _isStrippedDefault(ShortcutActivator activator, Intent intent) {
     if (activator is! SingleActivator) return false;
 
@@ -386,7 +422,7 @@ class _ShortcutsManagerDesktop extends ShortcutsManager {
         trigger == LogicalKeyboardKey.arrowDown;
     if (!isArrow) return false;
 
-    return intent is DirectionalFocusIntent || (intent is ScrollIntent && activator.control);
+    return intent is ScrollIntent && (activator.control || activator.meta);
   }
 
   @override
@@ -395,6 +431,19 @@ class _ShortcutsManagerDesktop extends ShortcutsManager {
       (e) => !_isStrippedDefault(e.key, e.value),
     ),
   );
+
+  @override
+  late final Map<Type, Action<Intent>> appActions = <Type, Action<Intent>>{
+    ...WidgetsApp.defaultActions,
+    DirectionalFocusIntent: _FocusedItemDirectionalAction(),
+  };
+
+  /// scopes and nodes that skip traversal (ex: the navigator's own node) mean nothing is focused.
+  static FocusNode? _getFocusedItem() {
+    final focus = FocusManager.instance.primaryFocus;
+    if (focus == null || focus is FocusScopeNode || focus.skipTraversal) return null;
+    return focus;
+  }
 
   @override
   void init() {
@@ -410,7 +459,7 @@ class _ShortcutsManagerDesktop extends ShortcutsManager {
         for (int i = 0; i < candidates.length; i++) {
           final activator = candidates[i];
           if (activator.acceptsMatchedTrigger(event, keyboard)) {
-            if (activator.skipInTextFields && ShortcutsManager.isTextFieldFocused()) return KeyEventResult.ignored;
+            if (activator.yieldsToTyping(event)) return KeyEventResult.ignored;
             activator.callback();
             return KeyEventResult.handled;
           }
@@ -420,26 +469,60 @@ class _ShortcutsManagerDesktop extends ShortcutsManager {
     );
   }
 
+  final _globalHotkeys = <HotkeyAction, HotKey>{};
+
+  Future<HotKey> _createGlobalHotkey(HotkeyAction action, LogicalKeyboardKey key, ShortcutKeyData data) async {
+    final definition = HotKeyDefinition(
+      key: key,
+      control: data.ctrl,
+      shift: data.shift,
+      meta: data.meta,
+      alt: data.alt,
+    );
+    final hotkey = await HotKey.create(
+      definition: definition,
+      onPressed: action.toSimpleCallback(),
+    );
+    if (hotkey == null) throw UnsupportedError('${key.keyLabel} is not on the current keyboard layout');
+    return hotkey;
+  }
+
   @override
-  void initUserShortcutsFromSettings() async {
-    for (final s in settings.shortcuts.shortcuts.value.entries) {
-      final data = s.value;
-      data?.createHotkey(s.key.toSimpleCallback());
+  Future<void> initUserShortcutsFromSettings() async {
+    for (final MapEntry(key: action, value: data) in settings.shortcuts.shortcuts.value.entries) {
+      final key = data?.key;
+      if (data == null || key == null) continue;
+      try {
+        _globalHotkeys[action] = await _createGlobalHotkey(action, key, data);
+      } catch (e, st) {
+        logger.report(e, st);
+      }
     }
   }
 
   @override
-  void setUserShortcut({required HotkeyAction action, required ShortcutKeyData? data}) {
-    final oldShortcut = settings.shortcuts.shortcuts.value[action];
-    oldShortcut?.disposeHotkey();
+  Future<void> setUserShortcut({required HotkeyAction action, required ShortcutKeyData? data}) async {
+    final oldHotkey = _globalHotkeys[action];
+    final oldData = settings.shortcuts.shortcuts.value[action];
+    if (oldHotkey != null && data == oldData) return;
 
-    data?.createHotkey(action.toSimpleCallback());
+    // -- registered before disposing the old one, so a refused hotkey keeps the old one
+    final key = data?.key;
+    final newHotkey = data == null || key == null ? null : await _createGlobalHotkey(action, key, data);
+    if (newHotkey == null) {
+      _globalHotkeys.remove(action);
+    } else {
+      _globalHotkeys[action] = newHotkey;
+    }
     settings.shortcuts.shortcuts.update((shortcuts) => shortcuts[action] = data);
+    await oldHotkey?.dispose();
   }
 
   @override
-  void dispose() {
+  Future<void> dispose() async {
     _attachment?.detach();
+    await Future.wait(_globalHotkeys.values.map((e) => e.dispose()));
+    _globalHotkeys.clear();
   }
 
   @override
@@ -506,5 +589,14 @@ class _ShortcutsManagerDesktop extends ShortcutsManager {
     final currentRouteType = NamidaNavigator.inst.currentRoute?.route;
     final isInSettings = currentRouteType == RouteType.SETTINGS_page || currentRouteType == RouteType.SETTINGS_subpage;
     return isInSettings;
+  }
+}
+
+// by claude
+/// arrows move focus only while an item is focused (ex: after tab), otherwise they reach our root handler (seek).
+class _FocusedItemDirectionalAction extends DirectionalFocusAction {
+  @override
+  bool isEnabled(DirectionalFocusIntent intent) {
+    return _ShortcutsManagerDesktop._getFocusedItem() != null;
   }
 }

@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 
+import 'package:path/path.dart' as p;
 import 'package:playlist_manager/playlist_manager.dart';
 import 'package:rhttp/rhttp.dart';
 
@@ -33,6 +34,7 @@ import 'package:namida/core/extensions.dart';
 import 'package:namida/core/functions.dart';
 import 'package:namida/core/icon_fonts/broken_icons.dart';
 import 'package:namida/core/namida_converter_ext.dart';
+import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/themes.dart';
 import 'package:namida/core/translations/language.dart';
 import 'package:namida/core/utils.dart';
@@ -82,6 +84,7 @@ Future<void> showGeneralPopupDialog(
   String? heroTag,
   IconData? trailingIcon,
   bool comingFromPlaylistMenu = false,
+  List<Track>? openPlaylistFocusing,
   bool showPlayAllReverse = false,
   SmartPlaylistWrapper? smartPlaylistWrapper,
   Folder? folder,
@@ -138,7 +141,7 @@ Future<void> showGeneralPopupDialog(
   void onColorsObtained(Color color) {
     if (colorDelightened.value == color) return;
     colorDelightened.value = color;
-    iconColor.value = Color.alphaBlend(color.withAlpha(120), namida.textTheme.displayMedium!.color!);
+    iconColor.value = Color.alphaBlend(color.withOpacityExt(0.47), namida.textTheme.displayMedium!.color!);
   }
 
   onColorsObtained(CurrentColor.inst.color);
@@ -186,9 +189,10 @@ Future<void> showGeneralPopupDialog(
     customArtworkManager = CustomArtworkManager.playlist(playlistName);
   }
 
-  Widget bigIcon(IconData icon, String Function() tooltipMessage, void Function()? onTap, {String subtitle = '', Widget? iconWidget}) {
+  Widget bigIcon(IconData icon, String Function() tooltipMessage, void Function()? onTap, {String subtitle = '', Widget? iconWidget, void Function()? onLongPress}) {
     return NamidaInkWell(
       onTap: onTap,
+      onLongPress: onLongPress,
       borderRadius: 8.0,
       child: NamidaTooltip(
         message: tooltipMessage,
@@ -207,9 +211,9 @@ Future<void> showGeneralPopupDialog(
                   ),
               if (subtitle != '') ...[
                 const SizedBox(height: 2.0),
-                Text(
+                NamidaText(
                   subtitle,
-                  style: namida.textTheme.displaySmall?.copyWith(fontSize: 12.0),
+                  style: const NText(.small, size: .s12),
                   maxLines: 1,
                 ),
               ],
@@ -281,9 +285,9 @@ Future<void> showGeneralPopupDialog(
               labelText: lang.setMoods,
             ),
             const SizedBox(height: 8.0),
-            Text(
+            NamidaText(
               lang.setMoodsSubtitle,
-              style: theme.textTheme.displaySmall,
+              style: NText.small,
             ),
           ],
         ),
@@ -351,15 +355,17 @@ Future<void> showGeneralPopupDialog(
     final pl = PlaylistController.inst.getPlaylist(playlistName!);
     if (pl == null) return;
     final removed = pl.tracks.removeDuplicates((element) => element.track);
-    await PlaylistController.inst.updatePropertyInPlaylist(pl.name, modifiedDate: currentTimeMS);
-    await PlaylistController.inst.onPlaylistTracksChanged(pl); // to write m3u
+    if (removed > 0) {
+      await PlaylistController.inst.updatePropertyInPlaylist(pl.name, modifiedDate: currentTimeMS);
+      await PlaylistController.inst.onPlaylistTracksChanged(pl); // to write m3u
+    }
     snackyy(
       icon: Broken.filter_remove,
       message: "${lang.removed}: ${removed.displayTrackKeyword}",
     );
   }
 
-  Future<void> convertPlaylistToM3u() async {
+  Future<void> convertPlaylistToM3u({String? directoryPath}) async {
     // function button won't be visible if playlistName == null.
     if (!shoulShowPlaylistUtils()) return;
     cancelSkipTimer();
@@ -370,15 +376,35 @@ Future<void> showGeneralPopupDialog(
 
     if (!await requestManageStoragePermission()) return;
 
-    final savePath = PlaylistController.getUnusedM3uFilePathInStorage(pl.name);
-    await PlaylistController.inst.exportPlaylistToM3UFile(pl, savePath);
+    final savePath = await PlaylistController.inst.convertPlaylistToM3U(pl, directoryPath: directoryPath);
     snackyy(
       message: "${lang.savedIn}: $savePath",
       leftBarIndicatorColor: colorDelightened.value,
       altDesign: true,
       top: false,
     );
-    await PlaylistController.inst.updatePropertyInPlaylist(playlistName, m3uPath: savePath);
+  }
+
+  void pickDirectoryToConvertToM3u() {
+    if (!shoulShowPlaylistUtils()) return;
+    final pl = PlaylistController.inst.getPlaylist(playlistName!);
+    if (pl == null) return;
+    final tracksDirectoryPath = M3UFiles.getCommonTracksDirectory(pl.tracks, p.context);
+    openDialog(
+      (theme) => _ConvertToM3UDirectoryDialog(
+        tracksDirectoryPath: tracksDirectoryPath,
+        onDirectoryTap: (directoryPath) {
+          NamidaNavigator.inst.closeDialog();
+          convertPlaylistToM3u(directoryPath: directoryPath);
+        },
+        onPickFromStorageTap: () async {
+          NamidaNavigator.inst.closeDialog();
+          final directoryPath = await NamidaFileBrowser.getDirectory(note: lang.convertToM3UPlaylist);
+          if (directoryPath == null) return;
+          await convertPlaylistToM3u(directoryPath: directoryPath);
+        },
+      ),
+    );
   }
 
   Future<void> exportSmartPlaylist({required bool asM3u}) async {
@@ -468,9 +494,9 @@ Future<void> showGeneralPopupDialog(
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
+        NamidaText(
           lang.highMatches,
-          style: namida.textTheme.displayMedium,
+          style: NText.medium,
         ),
         const SizedBox(height: 8.0),
         ...highMatchesFiles.map(
@@ -723,7 +749,7 @@ Future<void> showGeneralPopupDialog(
                 )
               else
                 Expanded(
-                  child: bigIcon(Broken.directbox_send, () => lang.convertToM3UPlaylist, convertPlaylistToM3u),
+                  child: bigIcon(Broken.directbox_send, () => lang.convertToM3UPlaylist, convertPlaylistToM3u, onLongPress: pickDirectoryToConvertToM3u),
                 ),
               const SizedBox(width: 8.0),
 
@@ -824,7 +850,7 @@ Future<void> showGeneralPopupDialog(
       rx: colorDelightened,
       builder: (context, colorDelightened) {
         final theme = AppThemes.inst.getAppTheme(colorDelightened, null, false);
-        final iconColor = Color.alphaBlend(colorDelightened.withAlpha(120), theme.textTheme.displayMedium!.color!);
+        final iconColor = Color.alphaBlend(colorDelightened.withOpacityExt(0.47), NText.medium.of(context).color!);
         double horizontalMargin = Dimensions.calculateDialogHorizontalMargin(context, 34.0);
 
         final openInYtViewWidget = availableYoutubeIDs.isNotEmpty
@@ -889,29 +915,31 @@ Future<void> showGeneralPopupDialog(
               )
             : null;
 
-        return AnimatedThemeOrTheme(
+        return NTheme(
           data: theme,
-          child: Dialog(
-            backgroundColor: theme.dialogTheme.backgroundColor,
+          child: _ThemedDialog(
             insetPadding: EdgeInsets.symmetric(horizontal: horizontalMargin, vertical: 24.0),
-            clipBehavior: Clip.antiAlias,
             child: ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: kDialogMaxWidth),
+              constraints: const BoxConstraints(maxWidth: kDialogMaxWidth),
               child: SmoothSingleChildScrollView(
                 child: Column(
                   children: [
                     /// Top Widget
                     NamidaInkWell(
                       borderRadius: 0.0,
-                      onTap: () => isSingle
-                          ? showTrackInfoDialog(
-                              tracks.first,
-                              false,
-                              networkArtworkInfo: networkArtworkInfo,
-                              colorScheme: colorDelightened,
-                              heroTag: heroTag,
-                            )
-                          : null,
+                      onTap: () {
+                        if (openPlaylistFocusing != null && playlistName != null) {
+                          NamidaOnTaps.inst.onNormalPlaylistTap(playlistName, focusTracks: openPlaylistFocusing);
+                        } else if (isSingle) {
+                          showTrackInfoDialog(
+                            tracks.first,
+                            false,
+                            networkArtworkInfo: networkArtworkInfo,
+                            colorScheme: colorDelightened,
+                            heroTag: heroTag,
+                          );
+                        }
+                      },
                       child: Padding(
                         padding: const EdgeInsets.symmetric(vertical: 14.0),
                         child: Row(
@@ -955,33 +983,39 @@ Future<void> showGeneralPopupDialog(
                                       title,
                                       overflow: TextOverflow.ellipsis,
                                       maxLines: titleMaxLines,
-                                      style: theme.textTheme.displayLarge?.copyWith(
-                                        fontSize: 17.0,
-                                        height: 1.2,
-                                        color: Color.alphaBlend(colorDelightened.withAlpha(40), theme.textTheme.displayMedium!.color!),
-                                      ),
+                                      style: NText.large
+                                          .of(context)
+                                          .copyWith(
+                                            fontSize: 17.0,
+                                            height: 1.2,
+                                            color: Color.alphaBlend(colorDelightened.withOpacityExt(0.16), NText.medium.of(context).color!),
+                                          ),
                                     ),
                                   if (subtitle.isNotEmpty)
                                     Text(
                                       subtitle,
                                       overflow: TextOverflow.ellipsis,
                                       maxLines: 1,
-                                      style: theme.textTheme.displayMedium?.copyWith(
-                                        fontSize: 14.0,
-                                        height: 1.1,
-                                        color: Color.alphaBlend(colorDelightened.withAlpha(80), theme.textTheme.displayMedium!.color!),
-                                      ),
+                                      style: NText.medium
+                                          .of(context)
+                                          .copyWith(
+                                            fontSize: 14.0,
+                                            height: 1.1,
+                                            color: Color.alphaBlend(colorDelightened.withOpacityExt(0.31), NText.medium.of(context).color!),
+                                          ),
                                     ),
                                   if (thirdLineText.isNotEmpty) ...[
                                     Text(
                                       thirdLineText,
                                       overflow: TextOverflow.ellipsis,
                                       maxLines: 1,
-                                      style: theme.textTheme.displaySmall?.copyWith(
-                                        fontSize: 12.5,
-                                        height: 1.0,
-                                        color: Color.alphaBlend(colorDelightened.withAlpha(40), theme.textTheme.displayMedium!.color!),
-                                      ),
+                                      style: NText.small
+                                          .of(context)
+                                          .copyWith(
+                                            fontSize: 12.5,
+                                            height: 1.0,
+                                            color: Color.alphaBlend(colorDelightened.withOpacityExt(0.16), NText.medium.of(context).color!),
+                                          ),
                                     ),
                                   ],
                                 ],
@@ -1022,11 +1056,7 @@ Future<void> showGeneralPopupDialog(
                         ),
                       ),
                     ),
-                    Divider(
-                      color: theme.dividerColor,
-                      thickness: 0.5,
-                      height: 0,
-                    ),
+                    const _ThemedDivider(),
 
                     /// if the track doesnt exist
                     errorPlayingTrack != null || tracksExisting.isEmpty
@@ -1043,11 +1073,11 @@ Future<void> showGeneralPopupDialog(
                                   ),
                                   child: Padding(
                                     padding: const EdgeInsets.all(8.0),
-                                    child: Text(
+                                    child: NamidaText(
                                       tracksExisting.isEmpty
                                           ? "${lang.trackNotFound}.\n${lang.promptToChangeTrackPath}"
                                           : "${lang.errorPlayingTrack}.\n${errorPlayingTrack.toString()}",
-                                      style: theme.textTheme.displayMedium,
+                                      style: NText.medium,
                                     ),
                                   ),
                                 ),
@@ -1104,7 +1134,7 @@ Future<void> showGeneralPopupDialog(
                                           ? null
                                           : NamidaIconButton(
                                               icon: Broken.close_circle,
-                                              iconColor: namida.context?.defaultIconColor(colorDelightened, theme.textTheme.displayMedium?.color),
+                                              iconColor: NColors.fixed(Color.alphaBlend(colorDelightened.withOpacityExt(0.47), NText.medium.of(context).color!)),
                                               onPressed: cancelSkipTimer,
                                             ),
                                       onTap: () {
@@ -1200,7 +1230,6 @@ Future<void> showGeneralPopupDialog(
                                         ...availableAlbums.map(
                                           (e) => _SmallUnderlinedChip(
                                             text: e.displayAlbumName,
-                                            textTheme: theme.textTheme,
                                             onTap: () => NamidaOnTaps.inst.onAlbumTap(e),
                                             onLongPress: () => Player.inst.addToQueue(e.getAlbumTracks(), insertNext: true, insertionType: QueueInsertionType.moreAlbum),
                                           ),
@@ -1280,7 +1309,6 @@ Future<void> showGeneralPopupDialog(
                                         ...availableArtists.map(
                                           (e) => _SmallUnderlinedChip(
                                             text: e,
-                                            textTheme: theme.textTheme,
                                             onTap: () => NamidaOnTaps.inst.onArtistTap(e, MediaType.artist),
                                             onLongPress: () => Player.inst.addToQueue(e.getArtistTracks(), insertNext: true, insertionType: QueueInsertionType.moreArtist),
                                           ),
@@ -1355,7 +1383,7 @@ Future<void> showGeneralPopupDialog(
                                             secondaryIcon: Broken.arrow_swap,
                                             iconSize: 20.0,
                                             secondaryIconSize: 10.0,
-                                            baseIconColor: iconColor,
+                                            baseIconColor: NColors.fixed(iconColor),
                                           ),
                                           iconSize: 20.0,
                                           onPressed: () {
@@ -1452,8 +1480,8 @@ Future<void> showGeneralPopupDialog(
                                                     secondaryIcon: Broken.tick_circle,
                                                     iconSize: 20.0,
                                                     secondaryIconSize: 10.0,
-                                                    baseIconColor: iconColor,
-                                                    secondaryIconColor: iconColor,
+                                                    baseIconColor: NColors.fixed(iconColor),
+                                                    secondaryIconColor: NColors.fixed(iconColor),
                                                   )
                                                 : Icon(
                                                     Broken.document,
@@ -1516,7 +1544,7 @@ Future<void> showGeneralPopupDialog(
                                     },
                                     trailing: NumberOfRepeatsWidgetProvider(
                                       numberOfRepeatsRx: numberOfRepeats,
-                                      iconColor: iconColor,
+                                      iconColor: NColors.fixed(iconColor),
                                       iconSize: 20.0,
                                     ),
                                   ),
@@ -1599,8 +1627,8 @@ Future<void> showGeneralPopupDialog(
                                           iconWidget: StackedIcon(
                                             baseIcon: Broken.edit_2,
                                             secondaryIcon: Broken.video_square,
-                                            baseIconColor: iconColor,
-                                            secondaryIconColor: iconColor,
+                                            baseIconColor: NColors.fixed(iconColor),
+                                            secondaryIconColor: NColors.fixed(iconColor),
                                           ),
                                         ),
                                       ),
@@ -1623,11 +1651,7 @@ Future<void> showGeneralPopupDialog(
 
                               const SizedBox(height: 4.0),
 
-                              Divider(
-                                color: theme.dividerColor,
-                                thickness: 0.5,
-                                height: 0,
-                              ),
+                              const _ThemedDivider(),
 
                               /// bottom 2 tiles
                               Row(
@@ -1645,10 +1669,10 @@ Future<void> showGeneralPopupDialog(
                                       onLongPress: moveToNextInQueue,
                                     ),
                                   ),
-                                  Container(
+                                  const NContainer(
                                     width: 0.5,
                                     height: 30,
-                                    color: theme.dividerColor,
+                                    color: NColors.divider,
                                   ),
                                   Expanded(
                                     child: SmallListTile(
@@ -1682,30 +1706,35 @@ class _SmallUnderlinedChip extends StatelessWidget {
   final String text;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
-  final TextTheme textTheme;
 
   const _SmallUnderlinedChip({
     required this.text,
     required this.onTap,
     this.onLongPress,
-    required this.textTheme,
   });
+
+  static const _kLongPressDuration = Duration(seconds: 1);
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 1.0),
-      child: NamidaInkWell(
-        borderRadius: 6.0,
-        onTap: onTap,
+      child: LongPressDetector(
+        duration: _kLongPressDuration,
         onLongPress: onLongPress,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 3.0, horizontal: 3.0),
-          child: Text(
-            text,
-            style: textTheme.displaySmall?.copyWith(
-              decoration: TextDecoration.underline,
-              fontSize: 13.5,
+        child: NamidaInkWell(
+          borderRadius: 6.0,
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 3.0, horizontal: 3.0),
+            child: Text(
+              text,
+              style: NText.small
+                  .of(context)
+                  .copyWith(
+                    decoration: TextDecoration.underline,
+                    fontSize: 13.5,
+                  ),
             ),
           ),
         ),
@@ -1725,17 +1754,20 @@ class _AddMoreFromPicker extends StatelessWidget {
     required this.items,
   });
 
+  void _showPicker(BuildContext context) {
+    NamidaPopupWrapper(
+      childrenDefault: items,
+    ).showPopupMenu(context);
+  }
+
   @override
   Widget build(BuildContext context) {
-    return NamidaPopupWrapper(
-      openOnLongPress: false,
-      childrenDefault: items,
-      child: NamidaIconButton(
-        tooltip: () => tooltip,
-        icon: Broken.add,
-        iconSize: 20.0,
-        onLongPress: () => showQueueInsertionConfigDialog(insertionType, title: tooltip),
-      ),
+    return NamidaIconButton(
+      tooltip: () => tooltip,
+      icon: Broken.add,
+      iconSize: 20.0,
+      onPressed: () => _showPicker(context),
+      onLongPress: () => showQueueInsertionConfigDialog(insertionType, title: tooltip),
     );
   }
 }
@@ -1836,17 +1868,15 @@ extension CustomArtworkManagerDialog on CustomArtworkManager {
           child: ObxO(
             rx: possibleArtworks,
             builder: (context, urls) {
-              final theme = context.theme;
-              final textTheme = theme.textTheme;
               final extraCountText = fetchPossibleArtworksFn == null ? '' : " (${urls?.length ?? 0})";
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Padding(
                     padding: const EdgeInsets.all(12.0),
-                    child: Text(
+                    child: NamidaText(
                       lang.choose + extraCountText,
-                      style: textTheme.displayMedium,
+                      style: NText.medium,
                     ),
                   ),
                   ObxO(
@@ -1856,9 +1886,11 @@ extension CustomArtworkManagerDialog on CustomArtworkManager {
                       width: context.width,
                       child: loading
                           ? Center(
-                              child: ThreeArchedCircle(
-                                color: theme.colorScheme.onSurface.withOpacityExt(0.5),
-                                size: 32.0,
+                              child: NBuilder(
+                                builder: (context, colors) => ThreeArchedCircle(
+                                  color: colors.onSurface.withOpacityExt(0.5),
+                                  size: 32.0,
+                                ),
                               ),
                             )
                           : fetchPossibleArtworksFn == null
@@ -1870,7 +1902,7 @@ extension CustomArtworkManagerDialog on CustomArtworkManager {
                           : SmoothGridView.builder(
                               padding: EdgeInsets.zero,
                               shrinkWrap: true,
-                              scrollCacheExtent: ScrollCacheExtent.viewport(3),
+                              scrollCacheExtent: const ScrollCacheExtent.viewport(3),
                               itemCount: urls.length,
                               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                                 crossAxisCount: 3,
@@ -1897,8 +1929,8 @@ extension CustomArtworkManagerDialog on CustomArtworkManager {
                                         },
                                         duration: const Duration(milliseconds: 200),
                                         child: bytes == null
-                                            ? ColoredBox(
-                                                color: theme.cardColor,
+                                            ? const NColoredBox(
+                                                color: NColors.card,
                                               )
                                             : TapDetector(
                                                 onTap: () async {
@@ -1982,14 +2014,13 @@ class _MenuCountChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final contentColor = Color.alphaBlend(color.withAlpha(30), theme.textTheme.displaySmall!.color!);
+    final contentColor = Color.alphaBlend(color.withOpacityExt(0.12), NText.small.of(context).color!);
     return Padding(
       padding: const EdgeInsets.only(right: 10.0),
       child: NamidaInkWell(
         borderRadius: 8.0,
         padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 4.0),
-        bgColor: theme.colorScheme.onSurface.withAlpha(12),
+        bgColor: const NColors(.onSurface, opacity: 0.05),
         onTap: onTap,
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -2000,16 +2031,97 @@ class _MenuCountChip extends StatelessWidget {
               color: contentColor,
             ),
             const SizedBox(width: 4.0),
-            Text(
+            NamidaText(
               '$count',
-              style: theme.textTheme.displaySmall?.copyWith(
-                fontWeight: FontWeight.w700,
-                color: contentColor,
-              ),
+              style: const NText(.small, weight: FontWeight.w700),
+              color: NColors.fixed(contentColor),
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _ThemedDialog extends StatelessWidget {
+  final EdgeInsets insetPadding;
+  final Widget child;
+
+  const _ThemedDialog({
+    required this.insetPadding,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = NColorsData.of(context);
+    return Dialog(
+      backgroundColor: colors.dialogBackground,
+      insetPadding: insetPadding,
+      clipBehavior: Clip.antiAlias,
+      child: child,
+    );
+  }
+}
+
+class _ConvertToM3UDirectoryDialog extends StatelessWidget {
+  final String? tracksDirectoryPath;
+  final void Function(String? directoryPath) onDirectoryTap;
+  final void Function() onPickFromStorageTap;
+
+  const _ConvertToM3UDirectoryDialog({
+    required this.tracksDirectoryPath,
+    required this.onDirectoryTap,
+    required this.onPickFromStorageTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final tracksDirectoryPath = this.tracksDirectoryPath;
+    return CustomBlurryDialog(
+      title: lang.convertToM3UPlaylist,
+      normalTitleStyle: true,
+      icon: Broken.directbox_send,
+      actions: const [
+        CancelButton(),
+      ],
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          CustomListTile(
+            icon: Broken.folder,
+            title: lang.defaultLabel,
+            subtitle: AppDirs.M3UPlaylists,
+            onTap: () => onDirectoryTap(null),
+          ),
+          if (tracksDirectoryPath != null)
+            CustomListTile(
+              icon: Broken.music_library_2,
+              title: lang.tracks,
+              subtitle: tracksDirectoryPath,
+              onTap: () => onDirectoryTap(tracksDirectoryPath),
+            ),
+          CustomListTile(
+            icon: Broken.folder_add,
+            title: lang.pickFromStorage,
+            onTap: onPickFromStorageTap,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ThemedDivider extends StatelessWidget {
+  const _ThemedDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = NColorsData.of(context);
+    return Divider(
+      color: colors.divider,
+      thickness: 0.5,
+      height: 0,
     );
   }
 }

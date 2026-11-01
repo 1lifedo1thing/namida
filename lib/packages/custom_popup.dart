@@ -16,6 +16,7 @@ class CustomPopup extends StatefulWidget {
   final GlobalKey? anchorKey;
   final FutureOr<Widget> Function() content;
   final Widget child;
+  final Widget Function(VoidCallback openMenu)? childBuilder;
   final Listenable? refreshListenable;
   final void Function()? onTap;
   final bool openOnTap;
@@ -38,6 +39,7 @@ class CustomPopup extends StatefulWidget {
     this.controller,
     required this.content,
     required this.child,
+    this.childBuilder,
     this.refreshListenable,
     this.onTap,
     this.anchorKey,
@@ -60,19 +62,27 @@ class CustomPopup extends StatefulWidget {
   @override
   State<CustomPopup> createState() => CustomPopupState();
 
-  Future<void> show(BuildContext context) async {
+  static double _getAnchorDx(Rect targetRect, double? pointerDx) {
+    if (pointerDx != null && pointerDx >= targetRect.left && pointerDx <= targetRect.right) return pointerDx;
+    return targetRect.center.dx;
+  }
+
+  Future<void> show(BuildContext context, {double? pointerDx}) async {
     final anchor = anchorKey?.currentContext ?? context;
     final renderBox = anchor.findRenderObject() as RenderBox?;
 
     if (renderBox == null) return;
     final offset = renderBox.localToGlobal(renderBox.paintBounds.topLeft);
+    final targetRect = offset & renderBox.paintBounds.size;
+    final anchorDx = _getAnchorDx(targetRect, pointerDx);
 
     onBeforePopup?.call();
 
     await NamidaNavigator.inst.showMenu(
       route: _PopupRoute(
         menuController: controller,
-        targetRect: offset & renderBox.paintBounds.size,
+        targetRect: targetRect,
+        anchorDx: anchorDx,
         backgroundColor: backgroundColor,
         arrowColor: arrowColor,
         showArrow: showArrow,
@@ -86,7 +96,7 @@ class CustomPopup extends StatefulWidget {
         refreshListenable: refreshListenable,
         reOpenMenuCallback: () {
           NamidaNavigator.inst.popMenu();
-          show(context);
+          show(context, pointerDx: anchorDx);
         },
         child: await content(),
       ),
@@ -97,34 +107,66 @@ class CustomPopup extends StatefulWidget {
 }
 
 class CustomPopupState extends State<CustomPopup> {
-  void show() {
-    widget.show(context);
+  Offset? _childPointerDownPosition;
+
+  void _showAt(Offset globalPosition) {
+    widget.show(context, pointerDx: globalPosition.dx);
+  }
+
+  void _onTapUp(TapUpDetails details) {
+    widget.onTap?.call();
+    if (widget.openOnTap) _showAt(details.globalPosition);
+  }
+
+  void _onSecondaryTapUp(TapUpDetails details) => _showAt(details.globalPosition);
+
+  void _onLongPressStart(LongPressStartDetails details) => _showAt(details.globalPosition);
+
+  void _onChildPointerDown(PointerDownEvent event) => _childPointerDownPosition = event.position;
+
+  void _showAtChildPointer() {
+    widget.show(context, pointerDx: _childPointerDownPosition?.dx);
   }
 
   @override
   Widget build(BuildContext context) {
-    return TapDetector(
-      onTap: () {
-        if (widget.onTap != null) widget.onTap!();
-        if (widget.openOnTap) {
-          show();
-        }
-      },
-      child: LongPressDetector(
-        enableSecondaryTap: true,
-        onLongPress: widget.openOnLongPress ? () => show() : null,
-        child: isDesktop
-            ? Stack(
-                fit: StackFit.passthrough,
-                children: [
-                  widget.child,
-                  const Positioned.fill(
-                    child: NamidaMouseRegion(),
-                  ),
-                ],
-              )
-            : widget.child,
+    final childBuilder = widget.childBuilder;
+    final child = childBuilder == null
+        ? widget.child
+        : Listener(
+            onPointerDown: _onChildPointerDown,
+            child: childBuilder(_showAtChildPointer),
+          );
+    final openOnLongPress = widget.openOnLongPress;
+    final gestureSettings = MediaQuery.maybeGestureSettingsOf(context);
+    final gestures = <Type, GestureRecognizerFactory>{
+      TapGestureRecognizer: GestureRecognizerFactoryWithHandlers<TapGestureRecognizer>(
+        () => TapGestureRecognizer(debugOwner: this),
+        (instance) => instance
+          ..onTapUp = _onTapUp
+          ..onSecondaryTapUp = openOnLongPress ? _onSecondaryTapUp : null
+          ..gestureSettings = gestureSettings,
       ),
+      LongPressGestureRecognizer: GestureRecognizerFactoryWithHandlers<LongPressGestureRecognizer>(
+        () => LongPressGestureRecognizer(debugOwner: this),
+        (instance) => instance
+          ..onLongPressStart = openOnLongPress ? _onLongPressStart : null
+          ..gestureSettings = gestureSettings,
+      ),
+    };
+    return RawGestureDetector(
+      gestures: gestures,
+      child: isDesktop
+          ? Stack(
+              fit: StackFit.passthrough,
+              children: [
+                child,
+                const Positioned.fill(
+                  child: NamidaMouseRegion(),
+                ),
+              ],
+            )
+          : child,
     );
   }
 }
@@ -168,7 +210,7 @@ class _PopupContent extends StatelessWidget {
             key: arrowKey,
             quarterTurns: arrowDirection == _ArrowDirection.top ? 2 : 4,
             child: arrowDirection == null || !showArrow
-                ? SizedBox()
+                ? const SizedBox()
                 : CustomPaint(
                     size: const Size(16, 8),
                     painter: _TrianglePainter(color: arrowColor ?? Colors.white),
@@ -258,18 +300,13 @@ class PopupMenuController {
 class _PopupRoute extends PopupRoute<void> {
   final PopupMenuController? menuController;
   final Rect targetRect;
+  final double anchorDx;
   final PopupPosition position;
   final Widget child;
   final Duration animationDuration;
   final Curve animationCurve;
 
   static const double _margin = 10;
-  static Rect get _viewportRect => Rect.fromLTWH(
-    _margin,
-    Screen.statusBar + _margin,
-    Screen.width - _margin * 2,
-    Screen.height - Screen.statusBar - Screen.bottomBar - _margin * 2,
-  );
 
   final GlobalKey _childKey = GlobalKey();
   final GlobalKey _arrowKey = GlobalKey();
@@ -283,8 +320,12 @@ class _PopupRoute extends PopupRoute<void> {
   final Listenable? refreshListenable;
   final void Function() reOpenMenuCallback;
 
-  double _maxHeight = _viewportRect.height;
-  double _maxWidth = _viewportRect.width;
+  // -- overlay space, global positions are off by the desktop titlebar and the ui scale.
+  RenderBox? _overlayBox;
+  Rect _target = Rect.zero;
+  double _anchorX = 0;
+  Size _overlaySize = Size.zero;
+  Rect _viewportRect = Rect.zero;
   _ArrowDirection? _arrowDirection;
   double _arrowHorizontal = 0;
   double _scaleAlignDx = 0.5;
@@ -298,6 +339,7 @@ class _PopupRoute extends PopupRoute<void> {
     this.menuController,
     required this.child,
     required this.targetRect,
+    required this.anchorDx,
     this.backgroundColor,
     this.arrowColor,
     required this.showArrow,
@@ -325,6 +367,7 @@ class _PopupRoute extends PopupRoute<void> {
   TickerFuture didPush() {
     super.offstage = true;
     SchedulerBinding.instance.addPostFrameCallback((_) {
+      _measureOverlay();
       final childRect = _getRect(_childKey);
       final arrowRect = _getRect(_arrowKey);
       _calculateArrowOffset(arrowRect, childRect);
@@ -337,6 +380,7 @@ class _PopupRoute extends PopupRoute<void> {
   @override
   void install() {
     super.install();
+    _measureOverlay();
 
     menuController?._instance = this;
 
@@ -372,11 +416,26 @@ class _PopupRoute extends PopupRoute<void> {
     listenable.removeListener(reOpenMenuCallback);
   }
 
+  void _measureOverlay() {
+    final overlay = navigator?.overlay;
+    final overlayBox = overlay?.context.findRenderObject() as RenderBox?;
+    if (overlay == null || overlayBox == null || !overlayBox.hasSize) return;
+    _overlayBox = overlayBox;
+    final size = _overlaySize = overlayBox.size;
+    final padding = MediaQuery.paddingOf(overlay.context);
+    _viewportRect = Rect.fromLTRB(_margin, padding.top + _margin, size.width - _margin, size.height - padding.bottom - _margin);
+    final targetTopLeft = overlayBox.globalToLocal(targetRect.topLeft);
+    final targetBottomRight = overlayBox.globalToLocal(targetRect.bottomRight);
+    _target = Rect.fromPoints(targetTopLeft, targetBottomRight);
+    final anchorPoint = Offset(anchorDx, targetRect.top);
+    _anchorX = overlayBox.globalToLocal(anchorPoint).dx;
+  }
+
   Rect? _getRect(GlobalKey key) {
     final currentContext = key.currentContext;
     final renderBox = currentContext?.findRenderObject() as RenderBox?;
     if (renderBox == null || currentContext == null) return null;
-    final offset = renderBox.localToGlobal(renderBox.paintBounds.topLeft);
+    final offset = renderBox.localToGlobal(renderBox.paintBounds.topLeft, ancestor: _overlayBox);
     var rect = offset & renderBox.paintBounds.size;
 
     if (Directionality.of(currentContext) == TextDirection.rtl) {
@@ -390,14 +449,15 @@ class _PopupRoute extends PopupRoute<void> {
   void _calculateArrowOffset(Rect? arrowRect, Rect? childRect) {
     if (childRect == null || arrowRect == null) return;
     // Calculate the distance from the left side of the screen based on the middle position of the target and the popover layer
-    var leftEdge = targetRect.center.dx - childRect.center.dx;
+    var leftEdge = _anchorX - childRect.center.dx;
     final rightEdge = leftEdge + childRect.width;
     leftEdge = leftEdge < _viewportRect.left ? _viewportRect.left : leftEdge;
     // If it exceeds the screen, subtract the excess part
     if (rightEdge > _viewportRect.right) {
       leftEdge -= rightEdge - _viewportRect.right;
     }
-    final center = targetRect.center.dx - leftEdge - arrowRect.center.dx;
+    final targetCenterX = _target.center.dx;
+    final center = targetCenterX - leftEdge - arrowRect.center.dx;
 
     final leftSafeZone = (contentRadius ?? 0) + 15.0;
     final rightSafeZone = (contentRadius ?? 0) + 15.0;
@@ -414,26 +474,23 @@ class _PopupRoute extends PopupRoute<void> {
   void _calculateChildOffset(Rect? childRect) {
     if (childRect == null) return;
 
-    // final topHeight = targetRect.top - _viewportRect.top;
-    final bottomHeight = _viewportRect.bottom - targetRect.bottom;
+    // final topHeight = _target.top - _viewportRect.top;
+    final bottomHeight = _viewportRect.bottom - _target.bottom;
     // final maximum = max(topHeight, bottomHeight);
-    _maxHeight = childRect.height;
 
-    if (position == PopupPosition.top || (position == PopupPosition.auto && _maxHeight > bottomHeight)) {
-      _bottom = Screen.height - targetRect.top;
+    if (position == PopupPosition.top || (position == PopupPosition.auto && childRect.height > bottomHeight)) {
+      _bottom = _overlaySize.height - _target.top;
       _arrowDirection = _ArrowDirection.bottom;
       _scaleAlignDy = 1;
     } else {
-      // Simple check: if child would go below viewport, adjust _top upwards
-      _top = targetRect.bottom - Screen.bottomBar - 42.0;
-      _top = _top! + _viewportRect.top;
+      _top = _target.bottom;
 
       // Check if bottom of child would be outside viewport
       final childBottom = _top! + childRect.height;
       if (childBottom > _viewportRect.bottom) {
         // Move _top up by the overflow amount
         _scaleAlignDy = 2 * ((childBottom / _viewportRect.height) - 1.0);
-        _top = _top! - (childBottom - _viewportRect.bottom + 32.0);
+        _top = _top! - (childBottom - _viewportRect.bottom);
         _arrowDirection = null; // inaccurate arrow
       } else {
         _arrowDirection = _ArrowDirection.top;
@@ -442,7 +499,7 @@ class _PopupRoute extends PopupRoute<void> {
     }
 
     // Horizontal positioning
-    final left = targetRect.center.dx - childRect.center.dx;
+    final left = _anchorX - childRect.center.dx;
     final right = left + childRect.width;
 
     if (right > _viewportRect.right) {
@@ -470,8 +527,6 @@ class _PopupRoute extends PopupRoute<void> {
     Animation<double> secondaryAnimation,
     Widget child,
   ) {
-    _maxHeight = _viewportRect.height;
-    _maxWidth = _viewportRect.width;
     child = _PopupContent(
       childKey: _childKey,
       arrowKey: _arrowKey,
@@ -508,8 +563,8 @@ class _PopupRoute extends PopupRoute<void> {
           bottom: _bottom,
           child: ConstrainedBox(
             constraints: BoxConstraints(
-              maxWidth: _maxWidth,
-              maxHeight: _maxHeight,
+              maxWidth: _viewportRect.width,
+              maxHeight: _viewportRect.height,
             ),
             child: child,
           ),
@@ -520,25 +575,4 @@ class _PopupRoute extends PopupRoute<void> {
 
   @override
   Duration get transitionDuration => animationDuration;
-}
-
-abstract class Screen {
-  static MediaQueryData get mediaQuery => MediaQueryData.fromView(
-    PlatformDispatcher.instance.views.first,
-  ).scaledForUI(NamidaUIScale.value);
-
-  /// screen width
-  static double get width => mediaQuery.size.width;
-
-  // /screen height
-  static double get height => mediaQuery.size.height;
-
-  /// dp
-  static double get scale => mediaQuery.devicePixelRatio;
-
-  /// top
-  static double get statusBar => mediaQuery.padding.top;
-
-  /// bottom
-  static double get bottomBar => mediaQuery.padding.bottom;
 }

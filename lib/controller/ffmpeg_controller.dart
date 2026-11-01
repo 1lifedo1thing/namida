@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:ffmpeg_kit_flutter/ffmpeg_kit_config.dart';
 import 'package:path/path.dart' as p;
 
 import 'package:namida/class/faudiomodel.dart';
@@ -26,18 +25,21 @@ class NamidaFFMPEG {
   static final NamidaFFMPEG _instance = NamidaFFMPEG._internal();
   NamidaFFMPEG._internal();
 
+  /// loads ffmpeg early, so the first call doesn't pay for it.
   static Future<void> configure() async {
-    if (Platform.isAndroid || Platform.isIOS || Platform.isMacOS) {
-      await [
-        FFmpegKitConfig.disableLogs(),
-        FFmpegKitConfig.setSessionHistorySize(900),
-      ].executeAllAndSilentReportErrors();
-    }
+    await _instance._executer.init();
+    // -- obsolete, see _FFMPEGExecuterFFI
+    // if (Platform.isAndroid) {
+    //   await [
+    //     FFmpegKitConfig.disableLogs(),
+    //     FFmpegKitConfig.setSessionHistorySize(900),
+    //   ].executeAllAndSilentReportErrors();
+    // }
   }
 
   final _executer = FFMPEGExecuter.platform()..init();
 
-  Future<bool> supportsWebDAV() => _executer.supportsWebDAV();
+  Future<bool> supportsWebDAV({required bool isHttps}) => _executer.supportsWebDAV(isHttps: isHttps);
   Future<bool> supportsSMB() => _executer.supportsSMB();
 
   final currentOperations = <OperationType, Rx<OperationProgress>>{

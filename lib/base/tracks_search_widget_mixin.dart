@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:namico_db_wrapper/namico_db_wrapper.dart';
 
 import 'package:namida/base/tracks_search_wrapper.dart';
+import 'package:namida/class/route.dart';
 import 'package:namida/class/sort_chain.dart';
 import 'package:namida/class/track.dart';
 import 'package:namida/controller/history_controller.dart';
@@ -17,6 +18,7 @@ import 'package:namida/core/enums.dart';
 import 'package:namida/core/functions.dart';
 import 'package:namida/core/icon_fonts/broken_icons.dart';
 import 'package:namida/core/namida_converter_ext.dart';
+import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/translations/language.dart';
 import 'package:namida/core/utils.dart';
 import 'package:namida/ui/dialogs/create_smart_playlist_dialog.dart';
@@ -25,10 +27,26 @@ import 'package:namida/ui/widgets/custom_widgets.dart';
 import 'package:namida/ui/widgets/expandable_box.dart';
 
 mixin TracksSearchWidgetMixin<W extends StatefulWidget> on State<W>, PortsProvider<TracksSearchParams> {
-  Iterable<TrackExtended> getTracksExtended();
+  static final _ofRoute = Expando<TracksSearchWidgetMixin>();
+
+  static Iterable<Selectable>? filteredTracksOfRoute(NamidaRoute route) {
+    final state = _ofRoute[route];
+    if (state == null) return null;
+    final searchResults = state._searchResults;
+    if (searchResults == null) return null;
+    return state.getFilteredTracks(searchResults);
+  }
+
+  /// the list [searchResults] point into.
+  List<Selectable> getSearchableTracks();
+
+  Iterable<Selectable> getFilteredTracks(List<int> searchResults) {
+    final tracks = getSearchableTracks();
+    return searchResults.map((i) => tracks[i]);
+  }
 
   /// example: sort, sortReverse
-  List<RxBaseCore> _listChangesListenersInstantRx() => [settings.mediaItemsTrackSorting];
+  List<RxBaseCore> _listChangesListenersInstantRx() => [settings.mediaItemsTrackSorting, settings.trackSearchFilterDefault];
 
   /// example: main list or map that gets updated
   RxBaseCore? listChangesListenerRx();
@@ -64,6 +82,7 @@ mixin TracksSearchWidgetMixin<W extends StatefulWidget> on State<W>, PortsProvid
     _scrollController = providedScrollController ?? NamidaScrollController.create();
     _textEditingController = TextEditingController();
     _focusNode = FocusNode();
+    _ofRoute[widget] = this;
     for (final l in _listChangesListenersInstantRx()) {
       l.addListener(_restartSearchPortIfNecessary);
     }
@@ -74,6 +93,7 @@ mixin TracksSearchWidgetMixin<W extends StatefulWidget> on State<W>, PortsProvid
 
   @override
   void dispose() {
+    _ofRoute[widget] = null;
     for (final l in _listChangesListenersInstantRx()) {
       l.removeListener(_restartSearchPortIfNecessary);
     }
@@ -179,7 +199,8 @@ mixin TracksSearchWidgetMixin<W extends StatefulWidget> on State<W>, PortsProvid
   Future<IsolateFunctionReturnBuild<TracksSearchParams>> isolateFunction(SendPort port) async {
     await HistoryController.inst.waitForHistoryAndMostPlayedLoad;
     final topTracksMapListens = HistoryController.inst.topTracksMapListens.value;
-    final params = TracksSearchWrapper.generateParams(port, getTracksExtended(), topTracksMapListens);
+    final tracksExtended = getSearchableTracks().map((e) => e.track.toTrackExt());
+    final params = TracksSearchWrapper.generateParams(port, tracksExtended, topTracksMapListens, filters: settings.trackSearchFilterDefault.value);
     return IsolateFunctionReturnBuild(_searchTracksIsolate, params);
   }
 }
@@ -313,24 +334,28 @@ class _TracksSearchWidgetBoxState extends State<TracksSearchWidgetBox> {
       (context) {
         final sorting = settings.mediaItemsTrackSorting.valueR[type] ?? const SortChain<SortType>([]);
         final presetName = settings.mediaItemsTrackSortingPresets.valueR[type]?.activePreset?.name;
+        final boxSorting = widget.disableSort
+            ? null
+            : TracksSearchBoxSorting(
+                sort: sorting.firstType,
+                presetName: presetName,
+                reverse: sorting.reverse,
+                onSortTap: () => NamidaOnTaps.inst.onSubPageTracksSortIconTap(type),
+                onReverseIconTap: (newSortReverse) {
+                  final newSorting = sorting.copyWith(reverse: newSortReverse);
+                  settings.updateMediaItemsTrackSorting(type, newSorting);
+                  Indexer.inst.sortMediaTracksSubLists([type]);
+                },
+              );
         return TracksSearchWidgetBoxBase(
           state: widget.state,
           leftText: widget.leftText,
-          sort: sorting.firstType,
-          presetName: presetName,
-          sortReverse: sorting.reverse,
-          disableSort: widget.disableSort,
+          sorting: boxSorting,
           onFilterIconLongPress: () => _onFilterIconLongPress(
             type: type,
             sorting: sorting,
             pageTitle: widget.pageTitle,
           ),
-          onSortTap: () => NamidaOnTaps.inst.onSubPageTracksSortIconTap(type),
-          onReverseIconTap: (newSortReverse) {
-            final newSorting = sorting.copyWith(reverse: newSortReverse);
-            settings.updateMediaItemsTrackSorting(type, newSorting);
-            Indexer.inst.sortMediaTracksSubLists([type]);
-          },
         );
       },
     );
@@ -340,55 +365,40 @@ class _TracksSearchWidgetBoxState extends State<TracksSearchWidgetBox> {
 class TracksSearchWidgetBoxBase extends StatelessWidget {
   final TracksSearchWidgetMixin state;
   final String leftText;
-  final SortType? sort;
-  final String? presetName;
-  final bool sortReverse;
-  final bool disableSort;
-  final void Function() onSortTap;
-  final void Function(bool newSortReverse) onReverseIconTap;
+  final TracksSearchBoxSorting? sorting;
   final void Function()? onFilterIconLongPress;
 
   const TracksSearchWidgetBoxBase({
     super.key,
     required this.state,
     required this.leftText,
-    required this.sort,
-    this.presetName,
-    required this.sortReverse,
-    this.disableSort = false,
-    required this.onSortTap,
-    required this.onReverseIconTap,
+    required this.sorting,
     this.onFilterIconLongPress,
   });
 
   @override
   Widget build(BuildContext context) {
-    return ColoredBox(
-      color: context.theme.scaffoldBackgroundColor,
+    final sorting = this.sorting;
+    final sortByMenu = sorting == null
+        ? null
+        : SortByMenu(
+            title: sorting.presetName ?? sorting.sort?.toText() ?? lang.custom,
+            popupMenuChild: null,
+            onSortTap: sorting.onSortTap,
+            isCurrentlyReversed: sorting.reverse,
+            onReverseIconTap: () => sorting.onReverseIconTap(!sorting.reverse),
+          );
+    return NColoredBox(
+      color: NColors.scaffold,
       child: ExpandableBox(
         enableHero: false,
         isBarVisible: true,
         leftText: leftText,
+        leftTextIcon: Broken.musicnote,
         onSearchBoxVisibilityChange: state.onSearchBoxVisibilityChange,
         onCloseButtonPressed: state.clearSearch,
         onFilterIconLongPress: onFilterIconLongPress,
-        leftWidgets: [
-          const Icon(
-            Broken.musicnote,
-            size: 18.0,
-          ),
-          const SizedBox(width: 10.0),
-        ],
-        sortByMenuWidget: SortByMenu(
-          title: presetName ?? sort?.toText() ?? lang.custom,
-          popupMenuChild: null,
-          onSortTap: onSortTap,
-          isCurrentlyReversed: sortReverse,
-          onReverseIconTap: () {
-            onReverseIconTap(!sortReverse);
-          },
-        ),
-        disableSorting: disableSort,
+        sortByMenuWidget: sortByMenu,
         textField: CustomTextField(
           focusNode: state.focusNode,
           textFieldController: state._textEditingController,
@@ -398,4 +408,20 @@ class TracksSearchWidgetBoxBase extends StatelessWidget {
       ),
     );
   }
+}
+
+class TracksSearchBoxSorting {
+  final SortType? sort;
+  final String? presetName;
+  final bool reverse;
+  final void Function() onSortTap;
+  final void Function(bool newSortReverse) onReverseIconTap;
+
+  const TracksSearchBoxSorting({
+    required this.sort,
+    this.presetName,
+    required this.reverse,
+    required this.onSortTap,
+    required this.onReverseIconTap,
+  });
 }

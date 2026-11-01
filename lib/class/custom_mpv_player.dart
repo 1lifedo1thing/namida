@@ -3,12 +3,16 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:flutter/widgets.dart';
+
+import 'package:audio_session/audio_session.dart';
 import 'package:basic_audio_handler/basic_audio_handler.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:media_kit/media_kit.dart' as mk;
 import 'package:media_kit_video/media_kit_video.dart';
 
 import 'package:namida/controller/audio_output_controller.dart';
+import 'package:namida/controller/platform/namida_channel/namida_channel.dart';
 import 'package:namida/core/extensions.dart';
 import 'package:namida/core/utils.dart';
 
@@ -19,12 +23,21 @@ class CustomMPVPlayer implements AVPlayer {
   // by claude
   static const _enableExperimentalFeatures = true;
 
-  CustomMPVPlayer({bool disableVideo = false}) {
+  factory CustomMPVPlayer({bool disableVideo = false}) {
+    if (Platform.isIOS) return _CustomMPVPlayerIOS(disableVideo: disableVideo);
+    return CustomMPVPlayer._(disableVideo: disableVideo);
+  }
+
+  CustomMPVPlayer._({bool disableVideo = false}) {
     if (!disableVideo) _videoController;
     // -- subtitles are only ever selected through [setTextTrack]/[setExternalSubtitle],
     // -- sidecar files are discovered by us so mpv must not auto load them.
     _setMpvProperty('sid', 'no');
     _setMpvProperty('sub-auto', 'no');
+    // -- a busy device keeps the file loaded, mpv would otherwise fail it and jump to the queued next item.
+    _setMpvProperty('audio-fallback-to-null', 'yes');
+    final nativePlayer = _player.platform as mk.NativePlayer;
+    nativePlayer.observeProperty('current-ao', _onAudioDriverChanged).ignoreError();
     _playerHeightStreamSub = _player.stream.height.listen((event) {
       final resolved = _dimensionResolver(event, null);
       if (resolved != null) _videoControllerListener(height: resolved);
@@ -57,6 +70,8 @@ class CustomMPVPlayer implements AVPlayer {
       _updateProcessingState();
     });
 
+    _playerPlayingStreamSub = _player.stream.playing.listen((_) => _reportPlaybackEvent());
+
     _playerPositionStreamSub = _player.stream.position.listen((p) {
       if (_processingState != ProcessingState.completed) {
         if (p < Duration.zero) p = Duration.zero;
@@ -80,6 +95,11 @@ class CustomMPVPlayer implements AVPlayer {
     _playerAudioDevicesStreamSub = _player.stream.audioDevices.listen((devices) => outputDevices.value = devices);
 
     _playerPlaylistStreamSub = _player.stream.playlist.listen(_onPlaylistChanged);
+
+    _playerBufferStreamSub = _player.stream.buffer.listen((buffer) {
+      final isAdvancing = _player.state.playing && _processingState == ProcessingState.ready;
+      _liveWindowTracker.onBuffer(buffer, position, isAdvancing: isAdvancing);
+    });
   }
 
   /// mpv moving to this item is the only reliable sign of a gapless transition.
@@ -111,7 +131,8 @@ class CustomMPVPlayer implements AVPlayer {
 
   final _sincePositionReport = Stopwatch()..start();
 
-  final _player = mk.Player(configuration: mk.PlayerConfiguration(pitch: true, libass: true, bufferSize: 64 * 1024 * 1024));
+  // -- ios: namida owns the audio session, mpv would deactivate the shared one whenever any of its players closes (crossfade, temp players)
+  final _player = mk.Player(configuration: const mk.PlayerConfiguration(pitch: true, libass: true, bufferSize: 64 * 1024 * 1024, iosManageAudioSession: false));
   late final _audioFilters = _MPVAudioFilters(_player);
   VideoController? _videoControllerRaw;
   VideoController get _videoController {
@@ -134,11 +155,14 @@ class CustomMPVPlayer implements AVPlayer {
 
   StreamSubscription? _playerCompletedStreamSub;
   StreamSubscription? _playerBufferingStreamSub;
+  StreamSubscription? _playerPlayingStreamSub;
   StreamSubscription? _playerPositionStreamSub;
   StreamSubscription? _playerAudioTracksStreamSub;
   StreamSubscription? _playerLogStreamSub;
   StreamSubscription? _playerAudioDevicesStreamSub;
   StreamSubscription? _playerPlaylistStreamSub;
+  StreamSubscription? _playerBufferStreamSub;
+  late final _liveWindowTracker = _MPVLiveWindowTracker(_player);
   final _playbackEventStreamController = StreamController<PlaybackEvent>();
   final _playerProcessingStateStreamController = StreamController<ProcessingState>();
   final _playerPositionStreamController = StreamController<Duration>();
@@ -197,6 +221,13 @@ class CustomMPVPlayer implements AVPlayer {
 
   void _updateProcessingState() {
     _playerProcessingStateStreamController.add(_processingState);
+    _reportPlaybackEvent();
+  }
+
+  /// media sessions (now playing on apple) only refresh on these, like with just_audio's events.
+  void _reportPlaybackEvent() {
+    final event = PlaybackEvent(processingState: _processingState, updatePosition: position, bufferedPosition: bufferedPosition, duration: duration);
+    _playbackEventStreamController.add(event);
   }
 
   void _updatePosition() {
@@ -262,6 +293,8 @@ class CustomMPVPlayer implements AVPlayer {
   Stream<double> get pitchStream => _player.stream.pitch;
   @override
   Stream<bool> get playingStream => _player.stream.playing;
+  @override
+  Stream<LiveWindow?> get liveWindowStream => _liveWindowTracker.stream;
 
   @override
   int? get androidAudioSessionId => null;
@@ -287,6 +320,8 @@ class CustomMPVPlayer implements AVPlayer {
   double get pitch => _pitch;
   @override
   bool get playing => _player.state.playing;
+  @override
+  LiveWindow? get liveWindow => _liveWindowTracker.window;
 
   /// media_kit rebuilds the whole filter chain on every rate change.
   @override
@@ -310,6 +345,9 @@ class CustomMPVPlayer implements AVPlayer {
     _processingState = ProcessingState.loading;
     _updateProcessingState();
 
+    final isLive = _checkIsSourceLive(config.source) || _checkIsSourceLive(config.videoOptions?.source);
+    _liveWindowTracker.reset(isLive: isLive);
+
     await _prepareSubtitlesForNewSource();
 
     final durationCompleter = Completer<Duration?>();
@@ -332,6 +370,7 @@ class CustomMPVPlayer implements AVPlayer {
     try {
       final videoOptions = _videoOptions;
       _loopingVideoApplied = false;
+      await _applyVideoSelection(videoOptions);
 
       if (videoOptions == null) {
         await _tryOpen(
@@ -361,7 +400,7 @@ class CustomMPVPlayer implements AVPlayer {
       }
 
       // -- `open` always loads paused, undoing a play requested meanwhile (crossfade)
-      if (_playRequested) await _player.play();
+      if (_playRequested) await _startPlayback();
     } catch (_) {
       completeDuration(null);
       rethrow;
@@ -369,7 +408,7 @@ class CustomMPVPlayer implements AVPlayer {
 
     _restoreExternalSubtitle();
 
-    if (_checkIsSourceLive(config.source) || _checkIsSourceLive(config.videoOptions?.source)) {
+    if (isLive) {
       // -- not waiting for duration
       completeDuration(null);
       return null;
@@ -442,7 +481,8 @@ class CustomMPVPlayer implements AVPlayer {
 
   static const _kMaxLoopingVideoRepeats = 3000;
 
-  /// Returns the source to add as a video track, an `edl://` looping timeline when the animation asks for it.
+  /// Returns the source to add as a video track, an `edl://` looping timeline when the animation asks for it,
+  /// or an `edl://` segment starting at [VideoSourceOptions.startOffsetMS].
   Future<String> _resolveVideoTrackSource(VideoSourceOptions videoOptions, Future<Duration?> audioDurationFuture) async {
     final source = videoOptions.source as UriSource;
     final sourceDurationMS = videoOptions.durationMS;
@@ -453,7 +493,16 @@ class CustomMPVPlayer implements AVPlayer {
       if (audioDuration != null) loopingSource = _buildLoopingVideoSource(source, sourceDurationMS, audioDuration.inMilliseconds);
     }
     _loopingVideoApplied = loopingSource != null;
-    return loopingSource ?? source.uri.toString();
+    if (loopingSource != null) return loopingSource;
+
+    final startOffsetMS = videoOptions.startOffsetMS;
+    if (!videoOptions.loop && startOffsetMS != null && startOffsetMS > 0) {
+      final segmentPath = _edlSegmentPath(source);
+      final startSeconds = _edlSeconds(startOffsetMS);
+      return 'edl://$segmentPath,start=$startSeconds';
+    }
+
+    return source.uri.toString();
   }
 
   String? _buildLoopingVideoSource(UriSource source, int sourceDurationMS, int targetMS) {
@@ -464,10 +513,8 @@ class CustomMPVPlayer implements AVPlayer {
     final fullRepeats = isCapped ? _kMaxLoopingVideoRepeats : neededRepeats;
     final remainderMS = isCapped ? 0 : targetMS - fullRepeats * sourceDurationMS;
 
-    // -- byte length prefixed, that way the path needs no escaping at all.
     // -- explicit lengths keep the total exact even if the file's own duration differs slightly.
-    final path = source.uri.isScheme('file') ? source.uri.toFilePath() : source.uri.toString();
-    final segmentPath = '%${utf8.encode(path).length}%$path';
+    final segmentPath = _edlSegmentPath(source);
     final segmentSeconds = _edlSeconds(sourceDurationMS);
     final segment = '$segmentPath,length=$segmentSeconds;';
     final buffer = StringBuffer('edl://');
@@ -481,7 +528,29 @@ class CustomMPVPlayer implements AVPlayer {
     return buffer.toString();
   }
 
+  /// byte length prefixed, that way the path needs no escaping at all.
+  static String _edlSegmentPath(UriSource source) {
+    final path = source.uri.isScheme('file') ? source.uri.toFilePath() : source.uri.toString();
+    return '%${utf8.encode(path).length}%$path';
+  }
+
   static String _edlSeconds(int ms) => (ms / 1000).toStringAsFixed(3);
+
+  /// set before opening, mpv keeps it for every file after. a video played as audio only would otherwise still get decoded.
+  Future<void> _applyVideoSelection(VideoSourceOptions? videoOptions) async {
+    final player = _player.platform as mk.NativePlayer;
+    await player.waitForVideoControllerInitializationIfAttached; // -- attaching selects `auto` itself
+    final vid = _getVideoSelection(videoOptions);
+    await _setMpvProperty('vid', vid);
+  }
+
+  String _getVideoSelection(VideoSourceOptions? videoOptions) => videoOptions == null ? 'no' : 'auto';
+
+  /// `auto` adds the track without selecting it.
+  String get _videoTrackAddFlag => 'select';
+
+  /// the add only completes once the track is opened.
+  Future<void> _onVideoTrackAdded(String addFlag) async {}
 
   // modified version of setAudioTrack
   // source: package:media_kit/src/player/native/player/real.dart
@@ -495,15 +564,17 @@ class CustomMPVPlayer implements AVPlayer {
       await player.waitForPlayerInitialization;
       await player.waitForVideoControllerInitializationIfAttached;
 
+      final addFlag = _videoTrackAddFlag;
       await player.command(
         [
           'video-add',
           videoTrack.id,
-          'select',
+          addFlag,
           videoTrack.title ?? 'external',
           videoTrack.language ?? 'auto',
         ],
       );
+      await _onVideoTrackAdded(addFlag);
       player.state = player.state.copyWith(
         track: player.state.track.copyWith(
           video: videoTrack,
@@ -702,15 +773,20 @@ class CustomMPVPlayer implements AVPlayer {
   bool _playRequested = false;
 
   @override
-  Future<void> play() {
+  Future<void> play() async {
     _playRequested = true;
-    return _player.play();
+    await _syncAudioDeviceRelease();
+    await _retryUnavailableAudioDevice();
+    return _startPlayback();
   }
 
+  Future<void> _startPlayback() => _player.play();
+
   @override
-  Future<void> pause() {
+  Future<void> pause() async {
     _playRequested = false;
-    return _player.pause();
+    await _player.pause();
+    await _syncAudioDeviceRelease();
   }
 
   // -- when the video is a non-looped external track, seeking past its end leaves a frozen frame,
@@ -720,10 +796,12 @@ class CustomMPVPlayer implements AVPlayer {
   @override
   Future<void> seek(Duration? position) async {
     if (_kSkipSeekWhenLoopNotApplied && !_loopingVideoApplied && _videoOptions?.loop == true) return;
-    final target = position ?? Duration.zero;
+    if (position != null) _liveWindowTracker.onSeek();
+    final target = position ?? _liveWindowTracker.window?.edge ?? Duration.zero;
     _position = target;
     _sincePositionReport.reset();
-    return _player.seek(target);
+    await _player.seek(target);
+    _reportPlaybackEvent();
   }
 
   @override
@@ -747,11 +825,13 @@ class CustomMPVPlayer implements AVPlayer {
       _playerWidthStreamSub?.cancel(),
       _playerCompletedStreamSub?.cancel(),
       _playerBufferingStreamSub?.cancel(),
+      _playerPlayingStreamSub?.cancel(),
       _playerPositionStreamSub?.cancel(),
       _playerAudioTracksStreamSub?.cancel(),
       _playerLogStreamSub?.cancel(),
       _playerAudioDevicesStreamSub?.cancel(),
       _playerPlaylistStreamSub?.cancel(),
+      _playerBufferStreamSub?.cancel(),
     ].execute();
 
     // -- not awaited, closing a controller that was never listened to never completes (temp players).
@@ -761,6 +841,7 @@ class CustomMPVPlayer implements AVPlayer {
     _playerPositionStreamController.close();
     _audioTracksStreamController.close();
     _textTracksStreamController.close();
+    _liveWindowTracker.dispose();
 
     _videoControllerRaw?.id.removeListener(_videoControllerListener);
     _videoControllerRaw?.rect.removeListener(_videoControllerListener);
@@ -870,6 +951,7 @@ class CustomMPVPlayer implements AVPlayer {
     if (isExclusiveApplied != _exclusive) {
       _exclusive = isExclusiveApplied;
       await _setMpvProperty('audio-exclusive', isExclusiveApplied ? 'yes' : 'no');
+      await _syncAudioDeviceRelease();
     }
     if (bitPerfect == _bitPerfect) return;
     _bitPerfect = bitPerfect;
@@ -880,6 +962,41 @@ class CustomMPVPlayer implements AVPlayer {
       _applyVolume(),
     ].execute();
     if (!bitPerfect) _audioFilters.refresh();
+  }
+
+  static const _kNullAudioDriver = 'null';
+  static const _kAutoAudioDriver = '';
+
+  bool get _canReleaseAudioDevice => true;
+
+  bool _isAudioDeviceReleased = false;
+  bool _isAudioDeviceUnavailable = false;
+
+  /// async command, closing an exclusive stream blocks the caller for up to a few hundred ms.
+  Future<void> _syncAudioDeviceRelease() async {
+    final shouldRelease = _exclusive && !_playRequested && _canReleaseAudioDevice;
+    if (shouldRelease == _isAudioDeviceReleased) return;
+    _isAudioDeviceReleased = shouldRelease;
+    _isAudioDeviceUnavailable = false;
+    final driver = shouldRelease ? _kNullAudioDriver : _kAutoAudioDriver;
+    final player = _player.platform as mk.NativePlayer;
+    await player.command(['set', 'ao', driver]).catchError((_) {});
+  }
+
+  Future<void> _retryUnavailableAudioDevice() async {
+    if (!_isAudioDeviceUnavailable) return;
+    _isAudioDeviceUnavailable = false;
+    final player = _player.platform as mk.NativePlayer;
+    await player.command(['ao-reload']).catchError((_) {});
+  }
+
+  Future<void> _onAudioDriverChanged(String driver) async {
+    if (_disposed) return;
+    final isUnavailable = driver == _kNullAudioDriver && !_isAudioDeviceReleased;
+    _isAudioDeviceUnavailable = isUnavailable;
+    if (isUnavailable && _playRequested) {
+      _playbackEventStreamController.addError(const AudioOutputUnavailableException());
+    }
   }
 
   // -- the `volume` filter is absent from most mpv builds, mpv's own volume can go past 100% instead.
@@ -1008,6 +1125,142 @@ class CustomMPVPlayer implements AVPlayer {
     for (int i = length - 1; i >= removeFrom; i--) {
       await pl.remove(i);
     }
+  }
+}
+
+/// ios specifics: namida owns the audio session, the gpu is off limits in the background
+/// and the session's rate decides whether the output gets resampled.
+// by claude
+class _CustomMPVPlayerIOS extends CustomMPVPlayer {
+  _CustomMPVPlayerIOS({bool disableVideo = false}) : _isAppActive = WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed, super._(disableVideo: disableVideo) {
+    if (!disableVideo) {
+      _lifecycleListener = AppLifecycleListener(onStateChange: _onLifecycleStateChange);
+      if (!_isAppActive) _syncVideoSuspension();
+    }
+    _audioParamsSub = _player.stream.audioParams.listen(_onAudioParams);
+  }
+
+  AppLifecycleListener? _lifecycleListener;
+  late final StreamSubscription<mk.AudioParams> _audioParamsSub;
+  final _audioSessionFuture = AudioSession.instance;
+
+  /// set synchronously on every lifecycle change, [_syncVideoSuspension] catches up with it one step at a time.
+  bool _isAppActive;
+  bool _isVideoSuspended = false;
+  bool _isSyncingVideoSuspension = false;
+
+  int? _sourceSampleRate;
+
+  /// the audio unit is never exclusive, bit-perfect only matches the session rate.
+  @override
+  bool get _canReleaseAudioDevice => false;
+
+  /// a video added while away waits for the app to be active again to be selected.
+  @override
+  String get _videoTrackAddFlag => _isAppActive ? 'select' : 'auto';
+
+  @override
+  String _getVideoSelection(VideoSourceOptions? videoOptions) => _isAppActive ? super._getVideoSelection(videoOptions) : 'no';
+
+  /// the app left or came back while the track was opening, its selection follows where the app is now.
+  @override
+  Future<void> _onVideoTrackAdded(String addFlag) async {
+    final wasSelected = addFlag == 'select';
+    if (wasSelected == _isAppActive) return;
+    final vid = _isAppActive ? await _fetchExternalVideoTrackId() : 'no';
+    await _setMpvProperty('vid', vid);
+  }
+
+  /// activated on every play, an interruption, another app or a route change can leave it inactive without a reliable event.
+  /// a failed activation (ex: during a call) still plays, the state stays what the user asked for.
+  @override
+  Future<void> _startPlayback() async {
+    final session = await _audioSessionFuture;
+    await session.setActive(true).catchError((_) => false);
+    if (!_playRequested) return;
+    await _player.play();
+  }
+
+  /// inactive is the earliest sign of leaving, hidden only comes once ios already took the gpu away.
+  /// so a glance at control center reloads the video too, rendering it in the background gets the app killed.
+  void _onLifecycleStateChange(AppLifecycleState state) {
+    _isAppActive = state == AppLifecycleState.resumed;
+    if (!_isSyncingVideoSuspension) _syncVideoSuspension();
+  }
+
+  Future<void> _syncVideoSuspension() async {
+    _isSyncingVideoSuspension = true;
+    while (_isVideoSuspended == _isAppActive && !_disposed) {
+      if (_isAppActive) {
+        await _resumeVideo();
+      } else {
+        await _suspendVideo();
+      }
+    }
+    _isSyncingVideoSuspension = false;
+  }
+
+  /// mpv keeps playing the audio alone meanwhile.
+  Future<void> _suspendVideo() async {
+    await _setMpvProperty('vid', 'no');
+    _isVideoSuspended = true;
+  }
+
+  /// nothing to bring back without video options, selecting the video of a file played as audio only stalls the audio while it reloads.
+  Future<void> _resumeVideo() async {
+    final videoOptions = _videoOptions;
+    if (videoOptions != null) {
+      final vid = videoOptions.videoOnly ? 'auto' : await _fetchExternalVideoTrackId();
+      await _setMpvProperty('vid', vid);
+    }
+    _isVideoSuspended = false;
+  }
+
+  /// the external track namida adds is the last one, covers aren't videos. one still being added is selected once it's there.
+  /// read from mpv itself, the player state lags behind a track that was just added.
+  Future<String> _fetchExternalVideoTrackId() async {
+    final player = _player.platform as mk.NativePlayer;
+    final countText = await player.getProperty('track-list/count').catchError((_) => '0');
+    final count = int.tryParse(countText) ?? 0;
+    for (int i = count - 1; i >= 0; i--) {
+      final type = await player.getProperty('track-list/$i/type').catchError((_) => '');
+      if (type != 'video') continue;
+      final isAlbumArt = await player.getProperty('track-list/$i/albumart').catchError((_) => 'no');
+      final isImage = await player.getProperty('track-list/$i/image').catchError((_) => 'no');
+      if (isAlbumArt == 'yes' || isImage == 'yes') continue;
+      return player.getProperty('track-list/$i/id').catchError((_) => 'auto');
+    }
+    return 'auto';
+  }
+
+  void _onAudioParams(mk.AudioParams params) {
+    final sampleRate = params.sampleRate;
+    if (sampleRate == null || sampleRate <= 0 || sampleRate == _sourceSampleRate) return;
+    _sourceSampleRate = sampleRate;
+    if (_bitPerfect) _matchSessionSampleRate(sampleRate);
+  }
+
+  Future<void> _matchSessionSampleRate(int sampleRate) async {
+    await NamidaChannel.inst.setPreferredSampleRate(sampleRate);
+    // -- the audio unit keeps the rate it was opened at until reloaded
+    final player = _player.platform as mk.NativePlayer;
+    await player.command(['ao-reload']).catchError((_) {});
+  }
+
+  @override
+  Future<void> setAudioOutput(String? device, {required bool bitPerfect, required bool exclusive, required bool mono}) async {
+    final wasBitPerfect = _bitPerfect;
+    await super.setAudioOutput(device, bitPerfect: bitPerfect, exclusive: exclusive, mono: mono);
+    final sampleRate = _sourceSampleRate;
+    if (_bitPerfect && !wasBitPerfect && sampleRate != null) await _matchSessionSampleRate(sampleRate);
+  }
+
+  @override
+  Future<void> dispose() {
+    if (_disposed) return Future.value();
+    _lifecycleListener?.dispose();
+    _audioParamsSub.cancel();
+    return super.dispose();
   }
 }
 
@@ -1192,6 +1445,110 @@ class _MPVAudioFilters {
     try {
       await (_player.platform as mk.NativePlayer).setProperty(name, value);
     } catch (_) {}
+  }
+}
+
+// by claude
+/// ffmpeg can't seek live playlists, so the window is whatever mpv keeps in its demuxer cache.
+class _MPVLiveWindowTracker {
+  final mk.Player _player;
+  _MPVLiveWindowTracker(this._player);
+
+  static const _kSeekableStartRefreshIntervalMS = 5000;
+  static const _kJoinOffsetSamplingMS = 20000;
+
+  final _streamController = StreamController<LiveWindow?>();
+  Stream<LiveWindow?> get stream => _streamController.stream;
+
+  LiveWindow? _window;
+  LiveWindow? get window => _window;
+
+  bool _isLive = false;
+
+  /// how far behind the newest cached data playback settles after joining, the edge keeps that distance.
+  /// the distance shrinks between segments, so the largest one seen while sampling is kept.
+  Duration? _joinOffset;
+  bool _isSamplingJoinOffset = false;
+  final _sinceJoin = Stopwatch();
+  Duration? _seekableStart;
+  final _sinceSeekableStartRefresh = Stopwatch();
+  bool _isRefreshingSeekableStart = false;
+
+  void reset({required bool isLive}) {
+    _isLive = isLive;
+    _joinOffset = null;
+    _isSamplingJoinOffset = isLive;
+    _sinceJoin
+      ..stop()
+      ..reset();
+    _seekableStart = null;
+    _sinceSeekableStartRefresh
+      ..stop()
+      ..reset();
+    _setWindow(null);
+  }
+
+  void onBuffer(Duration buffer, Duration position, {required bool isAdvancing}) {
+    if (!_isLive || buffer <= Duration.zero) return;
+
+    if (_isSamplingJoinOffset && isAdvancing && position > Duration.zero) {
+      _sampleJoinOffset(buffer - position);
+    }
+    _refreshSeekableStartIfDue();
+
+    // -- whole seconds, so the window reports once a second at most while data keeps coming
+    final edgeExact = buffer - (_joinOffset ?? Duration.zero);
+    final edge = Duration(seconds: edgeExact.inSeconds);
+    final startRaw = _seekableStart ?? position;
+    final start = startRaw > edge ? edge : startRaw;
+    _setWindow(LiveWindow(start: start, edge: edge, offset: Duration.zero));
+  }
+
+  void _sampleJoinOffset(Duration ahead) {
+    if (!_sinceJoin.isRunning) _sinceJoin.start();
+    final joinOffset = _joinOffset;
+    if (joinOffset == null || ahead > joinOffset) _joinOffset = ahead > Duration.zero ? ahead : Duration.zero;
+    if (_sinceJoin.elapsedMilliseconds >= _kJoinOffsetSamplingMS) _isSamplingJoinOffset = false;
+  }
+
+  /// a seek away from the edge makes the distance to it say nothing about the join.
+  void onSeek() => _isSamplingJoinOffset = false;
+
+  void _refreshSeekableStartIfDue() {
+    if (_isRefreshingSeekableStart) return;
+    final isDue = !_sinceSeekableStartRefresh.isRunning || _sinceSeekableStartRefresh.elapsedMilliseconds >= _kSeekableStartRefreshIntervalMS;
+    if (!isDue) return;
+    _sinceSeekableStartRefresh
+      ..reset()
+      ..start();
+    _isRefreshingSeekableStart = true;
+    _readSeekableStart().then((start) {
+      _isRefreshingSeekableStart = false;
+      if (start != null && _isLive) _seekableStart = start;
+    });
+  }
+
+  Future<Duration?> _readSeekableStart() async {
+    try {
+      final stateText = await (_player.platform as mk.NativePlayer).getProperty('demuxer-cache-state');
+      final state = jsonDecode(stateText) as Map;
+      final ranges = state['seekable-ranges'] as List;
+      final firstRange = ranges.first as Map;
+      final startSeconds = firstRange['start'] as num;
+      return Duration(microseconds: (startSeconds * 1000000).round());
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _setWindow(LiveWindow? window) {
+    if (window == _window) return;
+    _window = window;
+    _streamController.add(window);
+  }
+
+  void dispose() {
+    _streamController.close();
   }
 }
 

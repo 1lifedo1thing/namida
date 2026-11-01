@@ -5,6 +5,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 // ignore: depend_on_referenced_packages
 import 'package:collection/collection.dart';
@@ -14,6 +15,7 @@ import 'package:lrc/lrc.dart';
 import 'package:namida/class/track.dart';
 import 'package:namida/controller/directory_index.dart';
 import 'package:namida/controller/history_controller.dart';
+import 'package:namida/controller/indexer_controller.dart';
 import 'package:namida/controller/logs_controller.dart';
 import 'package:namida/controller/navigator_controller.dart';
 import 'package:namida/controller/playlist_controller.dart';
@@ -23,8 +25,8 @@ import 'package:namida/core/constants.dart';
 import 'package:namida/core/enums.dart';
 import 'package:namida/core/icon_fonts/broken_icons.dart';
 import 'package:namida/core/namida_converter_ext.dart';
+import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/translations/language.dart';
-import 'package:namida/core/utils.dart';
 import 'package:namida/ui/widgets/custom_widgets.dart';
 import 'package:namida/youtube/class/youtube_id.dart';
 import 'package:namida/youtube/controller/youtube_playlist_controller.dart';
@@ -39,21 +41,38 @@ extension TracksSelectableUtils on Iterable<Selectable> {
     final collageStyle = settings.artworkCollageStyle.value;
     limit ??= collageStyle.maxImages;
     final scanLimit = limit * _kImageTracksScanMultiplier;
-    final l = <Track>[];
+    // -- album grouping shares one artwork between an album's tracks, so missing artworks aren't known there
+    final canResolveDisplayedArtwork = !settings.groupArtworksByAlbum.value && Indexer.inst.didListFolderCovers;
+    final uniqueTracks = <Track>[];
+    final tracksWithArtwork = <Track>[];
     final seenArtworks = <String>{};
     try {
       for (final Selectable p in take(scanLimit)) {
         final tr = p.track;
-        final isNewArtwork = seenArtworks.add(tr.pathToImage);
+        final artworkPath = canResolveDisplayedArtwork ? _displayedArtworkPathOf(tr) : tr.pathToImage;
+        if (artworkPath == null) continue;
+        if (tracksWithArtwork.length < limit) tracksWithArtwork.add(tr);
+        final isNewArtwork = seenArtworks.add(artworkPath);
         if (!isNewArtwork) continue;
-        l.add(tr);
-        if (l.length >= limit) break;
+        uniqueTracks.add(tr);
+        if (uniqueTracks.length >= limit) break;
       }
     } catch (_) {}
-    return l;
+    // -- fewer artworks than the collage holds looks like a shorter list, a single one is fine
+    final uniqueCount = uniqueTracks.length;
+    if (uniqueCount == limit || uniqueCount == 1) return uniqueTracks;
+    if (tracksWithArtwork.length == limit) return tracksWithArtwork;
+    return take(limit).map((e) => e.track).toFixedList();
   }
 
   static const _kImageTracksScanMultiplier = 6;
+
+  /// null when the track is known to show no artwork.
+  static String? _displayedArtworkPathOf(Track tr) {
+    final hasNoEmbeddedArtwork = tr.toTrackExtOrNull()?.hasNoEmbeddedArtwork == true;
+    if (!hasNoEmbeddedArtwork) return tr.pathToImage;
+    return Indexer.inst.getFallbackFolderArtworkPath(folder: tr.folder);
+  }
 
   List<String> toImagePaths([int? limit]) {
     return toImageTracks(limit).map((e) => e.pathToImage).toList();
@@ -534,7 +553,7 @@ extension ListiePrecomputedSortUtils<E> on List<E> {
 
 extension ListieEqualityUtils<T1> on List<T1>? {
   bool didChangeFrom<T2>(List<T2>? other, {bool ordered = false}) {
-    final equality = ordered ? DeepCollectionEquality() : DeepCollectionEquality.unordered();
+    final equality = ordered ? const DeepCollectionEquality() : const DeepCollectionEquality.unordered();
     final didChange = !equality.equals(this, other);
     return didChange;
   }
@@ -961,11 +980,6 @@ extension LRCParsingUtils on String {
   bool isValidLRC() => LyricsParser.isValid(this);
 }
 
-extension TagFieldsUtils on TagField {
-  bool get isNumeric =>
-      this == TagField.trackNumber || this == TagField.trackTotal || this == TagField.discNumber || this == TagField.discTotal || this == TagField.year || this == TagField.rating;
-}
-
 extension WidgetsUtils on Widget {
   Widget animateEntrance({
     required bool showWhen,
@@ -1187,6 +1201,17 @@ final _minimumFileDateMicro = DateTime(1980).microsecondsSinceEpoch + 1;
 final _minimumFileDateMilli = DateTime(1980).millisecondsSinceEpoch + 1;
 
 extension FileStatsUtils on FileStat {
+  /// modification times can be as coarse as 2 seconds (FAT), an entry modified this recently can change again without its time changing.
+  static const _kModifiedGranularityMS = 2000;
+  static const kNotReusableModifiedMS = -1;
+
+  /// call before listing the directory, changes made during the listing can keep the same time.
+  int getReusableModifiedMS() {
+    final modifiedMS = modified.millisecondsSinceEpoch;
+    final nowMS = DateTime.now().millisecondsSinceEpoch;
+    return nowMS - modifiedMS > _kModifiedGranularityMS ? modifiedMS : kNotReusableModifiedMS;
+  }
+
   DateTime get creationDate {
     int? finalDateMicro;
     void tryAssign(int micros) {
@@ -1219,7 +1244,7 @@ extension ScrollerPerf on ScrollController {
     double offset, {
     required Duration duration,
     required Curve curve,
-    final double jumpitator = 800.0,
+    double jumpitator = 800.0,
   }) async {
     try {
       await this.positions.last.animateToEff(
@@ -1240,7 +1265,7 @@ extension ScrollPositionPerf on ScrollPosition {
     double offset, {
     required Duration duration,
     required Curve curve,
-    final double jumpitator = 800.0,
+    double jumpitator = 800.0,
   }) async {
     try {
       final diff = offset - this.pixels;
@@ -1508,21 +1533,21 @@ extension DirectoryIndexServerUtils on DirectoryIndex {
                 mainAxisSize: .min,
                 crossAxisAlignment: .start,
                 children: [
-                  Text(
+                  NamidaText(
                     title ?? '',
-                    style: context.theme.textTheme.displayMedium,
+                    style: NText.medium,
                   ),
                   subtitleBuilder?.call(context) ??
-                      Text(
+                      NamidaText(
                         subtitle ?? e.toSourceInfo(),
-                        style: context.theme.textTheme.displaySmall,
+                        style: NText.small,
                       ),
                 ],
               ),
             ),
             if (!stillExists) ...[
               const SizedBox(width: 12.0),
-              Icon(
+              const Icon(
                 Broken.trash,
                 size: 20.0,
               ),
@@ -1532,4 +1557,14 @@ extension DirectoryIndexServerUtils on DirectoryIndex {
       },
     );
   }
+}
+
+extension HardwareKeyboardUtils on HardwareKeyboard {
+  /// apple keyboards (macos & ipad) use cmd where others use ctrl.
+  static final isPrimaryModifierMeta = Platform.isMacOS || Platform.isIOS;
+
+  bool get isPrimaryModifierPressed => isPrimaryModifierMeta ? isMetaPressed : isControlPressed;
+
+  /// [key] with the primary modifier.
+  static SingleActivator primarySingleActivator(LogicalKeyboardKey key) => SingleActivator(key, control: !isPrimaryModifierMeta, meta: isPrimaryModifierMeta);
 }

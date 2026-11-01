@@ -13,7 +13,7 @@ import 'package:namida/controller/indexer_controller.dart';
 import 'package:namida/controller/lyrics_search_utils/lrc_search_utils_selectable.dart';
 import 'package:namida/controller/navigator_controller.dart';
 import 'package:namida/controller/platform/namida_storage/namida_storage.dart';
-import 'package:namida/controller/player_controller.dart';
+import 'package:namida/controller/rhythm_controller.dart';
 import 'package:namida/controller/settings_controller.dart';
 import 'package:namida/controller/smart_playlists/smart_playlists_controller.dart';
 import 'package:namida/controller/tagger_controller.dart';
@@ -24,6 +24,7 @@ import 'package:namida/core/enums.dart';
 import 'package:namida/core/extensions.dart';
 import 'package:namida/core/icon_fonts/broken_icons.dart';
 import 'package:namida/core/namida_converter_ext.dart';
+import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/themes.dart';
 import 'package:namida/core/translations/language.dart';
 import 'package:namida/core/utils.dart';
@@ -34,6 +35,7 @@ import 'package:namida/ui/widgets/artwork.dart';
 import 'package:namida/ui/widgets/custom_widgets.dart';
 import 'package:namida/ui/widgets/library/multi_artwork_container.dart';
 import 'package:namida/ui/widgets/library/track_tile.dart';
+import 'package:namida/ui/widgets/reorderable_active_items_list.dart';
 import 'package:namida/ui/widgets/text_suggestions.dart';
 import 'package:namida/youtube/pages/yt_search_results_page.dart';
 
@@ -79,6 +81,8 @@ Future<void> showSetYTLinkCommentDialog(Track singleTrackPre, Color colorScheme,
   controller.text = ytlink;
 
   final canEditComment = false.obs;
+  final isDetectingOffset = false.obs;
+  bool isDialogOpen = true;
 
   Future<void> confirmEdit() async {
     if (formKey.currentState!.validate()) {
@@ -107,11 +111,30 @@ Future<void> showSetYTLinkCommentDialog(Track singleTrackPre, Color colorScheme,
 
       _editingInProgress[singleTrack.path] = false;
       NamidaNavigator.inst.closeDialog();
+    }
+  }
 
-      final currentItem = Player.inst.currentItem.value;
-      if (currentItem is Selectable && singleTrackPre == currentItem.track) {
-        VideoController.inst.updateCurrentVideo(singleTrackPre);
+  Future<void> detectOffset() async {
+    if (!formKey.currentState!.validate()) return;
+    final videoId = NamidaLinkUtils.extractYoutubeId(controller.text);
+    if (videoId == null) return;
+
+    isDetectingOffset.value = true;
+    try {
+      final offsetMS = await VideoController.inst.detectVideoStartOffsetMS(track: singleTrack, videoId: videoId);
+      if (!isDialogOpen) return;
+      if (offsetMS == null) {
+        snackyy(title: lang.failed, message: lang.noResults, top: false);
+      } else if (offsetMS < 0) {
+        snackyy(title: lang.failed, message: '${lang.offset}: ${offsetMS.milliSecondsLabelWithCentiSeconds} (${lang.minimum}: ${0.milliSecondsLabel})', top: false);
+      } else {
+        controller.text = NamidaLinkUtils.withYoutubeStartMS(controller.text, offsetMS);
+        canEditComment.value = true;
       }
+    } catch (e) {
+      snackyy(title: lang.error, message: e.toString(), isError: true, top: false);
+    } finally {
+      isDetectingOffset.value = false;
     }
   }
 
@@ -185,9 +208,11 @@ Future<void> showSetYTLinkCommentDialog(Track singleTrackPre, Color colorScheme,
 
   NamidaNavigator.inst.navigateDialog(
     onDisposing: () {
+      isDialogOpen = false;
       controller.dispose();
       ytSearchController.dispose();
       canEditComment.close();
+      isDetectingOffset.close();
     },
     colorScheme: colorScheme,
     dialogBuilder: (theme) => Form(
@@ -215,23 +240,34 @@ Future<void> showSetYTLinkCommentDialog(Track singleTrackPre, Color colorScheme,
             ),
           ),
         ],
-        child: CustomTagTextField(
-          controller: controller,
-          hintText: ytlink,
-          labelText: lang.link,
-          keyboardType: TextInputType.url,
-          onChanged: (value) {
-            canEditComment.value = true;
-          },
-          validator: (value) {
-            if (value!.isEmpty) {
-              return lang.pleaseEnterAName;
-            }
-            if ((NamidaLinkRegex.youtubeLinkRegex.firstMatch(value) ?? '') == '') {
-              return lang.pleaseEnterALinkSubtitle;
-            }
-            return null;
-          },
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CustomTagTextField(
+              controller: controller,
+              hintText: ytlink,
+              labelText: lang.link,
+              keyboardType: TextInputType.url,
+              onChanged: (value) {
+                canEditComment.value = true;
+              },
+              validator: (value) {
+                if (value!.isEmpty) {
+                  return lang.pleaseEnterAName;
+                }
+                if ((NamidaLinkRegex.youtubeLinkRegex.firstMatch(value) ?? '') == '') {
+                  return lang.pleaseEnterALinkSubtitle;
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: 12.0),
+            _YTLinkOffsetRow(
+              controller: controller,
+              isDetecting: isDetectingOffset,
+              onDetectTap: detectOffset,
+            ),
+          ],
         ),
       ),
     ),
@@ -299,6 +335,7 @@ Future<void> _editSingleTrackTagsDialog(PhysicalMedia track, Color? colorScheme,
   final canEditTags = false.obs;
   final didAutoExtractFromFilename = false.obs;
   final currentImagePath = ''.obs;
+  bool isDialogOpen = true;
 
   TextEditingController? fieldToController(FTags tags, TagField f) {
     return switch (f) {
@@ -324,6 +361,8 @@ Future<void> _editSingleTrackTagsDialog(PhysicalMedia track, Color? colorScheme,
       TagField.recordLabel => TextEditingController(text: tags.recordLabel ?? ''),
       TagField.releaseType => TextEditingController(text: tags.releaseType ?? ''),
       TagField.country => TextEditingController(text: tags.country ?? ''),
+      TagField.bpm => TextEditingController(text: tags.bpm?.toString().toIf('', '0')),
+      TagField.musicalKey => TextEditingController(text: tags.musicalKey ?? ''),
 
       // -- in tag editor we aint knowing local db shi
       TagField.mood => TextEditingController(text: tags.mood ?? ''),
@@ -348,15 +387,50 @@ Future<void> _editSingleTrackTagsDialog(PhysicalMedia track, Color? colorScheme,
     languageHintText: () => _buildLanguageHintText(tagsControllers, lrcUtils),
   );
 
+  void onTagChanged(TagField tag, String value) {
+    editedTags[tag] = value;
+    canEditTags.value = true;
+  }
+
+  void onBpmScale(double by) {
+    final controller = tagsControllers[TagField.bpm]!;
+    final scaledText = _BpmScaleRule.scaleText(controller.text, by);
+    if (scaledText == null) return;
+    controller.text = scaledText;
+    onTagChanged(TagField.bpm, scaledText);
+  }
+
+  Future<void> onRhythmAnalyze(TagField tag) async {
+    try {
+      final analysis = await RhythmController.inst.analyzeTrackNow(track);
+      if (!isDialogOpen) return;
+      final analyzedBpm = analysis?.bpm ?? 0;
+      final analyzedBpmText = analyzedBpm > 0 ? '$analyzedBpm' : '';
+      final analyzedKey = analysis?.key ?? '';
+      final analyzedText = tag == TagField.bpm ? analyzedBpmText : analyzedKey;
+      if (analyzedText.isEmpty) {
+        snackyy(title: lang.failed, message: lang.noResults, top: false);
+        return;
+      }
+      final controller = tagsControllers[tag]!;
+      if (controller.text == analyzedText) return;
+      controller.text = analyzedText;
+      onTagChanged(tag, analyzedText);
+    } catch (e) {
+      snackyy(title: lang.error, message: e.toString(), isError: true, top: false);
+    }
+  }
+
   Widget getTagTextField(TagField tag) {
+    final isBpm = tag == TagField.bpm;
+    final isRhythmAnalyzable = (isBpm || tag == TagField.musicalKey) && RhythmController.inst.isSupported;
     return _TagTextField(
       tag: tag,
       controller: tagsControllers[tag]!,
       suggestionsProvider: suggestionsProvider,
-      onChanged: (value) {
-        editedTags[tag] = value;
-        canEditTags.value = true;
-      },
+      onChanged: (value) => onTagChanged(tag, value),
+      onBpmScale: isBpm ? onBpmScale : null,
+      onRhythmAnalyze: isRhythmAnalyzable ? () => onRhythmAnalyze(tag) : null,
     );
   }
 
@@ -380,6 +454,7 @@ Future<void> _editSingleTrackTagsDialog(PhysicalMedia track, Color? colorScheme,
 
   await NamidaNavigator.inst.navigateDialog(
     onDisposing: () {
+      isDialogOpen = false;
       color.close();
       canEditTags.close();
       didAutoExtractFromFilename.close();
@@ -394,7 +469,7 @@ Future<void> _editSingleTrackTagsDialog(PhysicalMedia track, Color? colorScheme,
       rx: color,
       builder: (context, color) {
         final theme = AppThemes.inst.getAppTheme(color, null, false);
-        return AnimatedThemeOrTheme(
+        return NTheme(
           data: theme,
           child: Form(
             key: formKey,
@@ -405,38 +480,10 @@ Future<void> _editSingleTrackTagsDialog(PhysicalMedia track, Color? colorScheme,
               icon: Broken.edit,
               title: lang.editTags,
               trailingWidgets: [
-                _KeepDatesToggleWidget(
-                  colorScheme: theme.colorScheme.secondary,
-                ),
+                const _KeepDatesToggleWidget(),
                 NamidaIconButton(
                   icon: Broken.edit_2,
-                  onPressed: () => NamidaNavigator.inst.navigateDialog(
-                    scale: 1.0,
-                    dialog: Theme(
-                      data: theme,
-                      child: CustomBlurryDialog(
-                        theme: theme,
-                        title: "${lang.tagFields} (${lang.reorderable})",
-                        actions: const [
-                          DoneButton(),
-                        ],
-                        child: SizedBox(
-                          width: namida.width,
-                          height: namida.height * 0.6,
-                          child: NamidaReorderableActiveListView(
-                            enumValues: TagField.values,
-                            activeItems: settings.tagFieldsToEdit.value,
-                            toText: (item) => item.toText(),
-                            toIcon: (item) => item.toIcon(),
-                            minimumItems: 3,
-                            onSave: (activeItems) {
-                              settings.tagFieldsToEdit.replace(activeItems);
-                            },
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
+                  onPressed: () => _showTagFieldsToEditDialog(theme),
                 ),
               ],
               actions: [
@@ -555,16 +602,16 @@ Future<void> _editSingleTrackTagsDialog(PhysicalMedia track, Color? colorScheme,
                     const SizedBox(
                       height: 12.0,
                     ),
-                    Text(
+                    NamidaText(
                       track.path,
-                      style: namida.textTheme.displaySmall,
+                      style: NText.small,
                     ),
                     const SizedBox(
                       height: 4.0,
                     ),
-                    Text(
+                    NamidaText(
                       audioInfoFormatted,
-                      style: namida.textTheme.displaySmall,
+                      style: NText.small,
                     ),
                     const SizedBox(height: 4.0),
                     NamidaInkWell(
@@ -594,10 +641,12 @@ Future<void> _editSingleTrackTagsDialog(PhysicalMedia track, Color? colorScheme,
                             const SizedBox(width: 4.0),
                             Text(
                               "${lang.autoExtractTagsFromFilename} ${didAutoExtractFromFilenameValue ? '✓' : ''}",
-                              style: namida.textTheme.displaySmall?.copyWith(
-                                decoration: TextDecoration.underline,
-                                decorationStyle: TextDecorationStyle.dashed,
-                              ),
+                              style: NText.small
+                                  .of(context)
+                                  .copyWith(
+                                    decoration: TextDecoration.underline,
+                                    decorationStyle: TextDecorationStyle.dashed,
+                                  ),
                             ),
                           ],
                         ),
@@ -614,6 +663,40 @@ Future<void> _editSingleTrackTagsDialog(PhysicalMedia track, Color? colorScheme,
   );
 }
 
+void _showTagFieldsToEditDialog(ThemeData theme) {
+  final originalFields = settings.tagFieldsToEdit.value;
+  List<TagField> newFields = originalFields;
+  NamidaNavigator.inst.navigateDialog(
+    scale: 1.0,
+    onDisposing: () {
+      final didChange = newFields.didChangeFrom(originalFields, ordered: true);
+      if (didChange) settings.tagFieldsToEdit.replace(newFields);
+    },
+    dialog: NTheme(
+      data: theme,
+      child: CustomBlurryDialog(
+        theme: theme,
+        title: "${lang.tagFields} (${lang.reorderable})",
+        actions: const [
+          DoneButton(),
+        ],
+        child: SizedBox(
+          width: namida.width,
+          height: namida.height * 0.6,
+          child: NamidaReorderableActiveItemsList(
+            items: TagField.values,
+            activeItems: originalFields,
+            toText: (item) => item.toText(),
+            toIcon: (item) => item.toIcon(),
+            minimumItems: 3,
+            onChanged: (fields) => newFields = fields,
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
 Future<void> _editMultipleTracksTags(List<PhysicalMedia> tracksPre, {required bool instantEditArtwork, required bool isAlbum}) async {
   if (!await requestManageStoragePermission(directoryToCreate: AppDirs.INTERNAL_STORAGE)) return;
 
@@ -625,9 +708,9 @@ Future<void> _editMultipleTracksTags(List<PhysicalMedia> tracksPre, {required bo
       const SizedBox(height: 12.0),
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12.0),
-        child: Text(
+        child: NamidaText(
           lang.multipleTracksTagsEditNote,
-          style: namida.textTheme.displayMedium,
+          style: NText.medium,
         ),
       ),
       const SizedBox(height: 12.0),
@@ -654,7 +737,7 @@ Future<void> _editMultipleTracksTags(List<PhysicalMedia> tracksPre, {required bo
                     trackOrTwd: tr,
                     tracks: list,
                     onTap: () => tracksGoingToBeEditedRx[tr] = !isSelected,
-                    bgColor: isSelected ? null : Colors.black.withAlpha(0),
+                    bgColor: isSelected ? null : NColors.fixed(Colors.black.withOpacityExt(0.0)),
                     trailingWidget: IconButton(
                       icon: const Icon(Broken.close_circle),
                       visualDensity: VisualDensity.compact,
@@ -691,14 +774,14 @@ Future<void> _editMultipleTracksTags(List<PhysicalMedia> tracksPre, {required bo
 
   final tracksExtended = tracksPre.map((e) => e.toTrackExt()).toList();
   final fieldsToEdit = <TagField>{
-    ...settings.tagFieldsToEdit.value.where((f) => f.multiEditVisibility != _MultiEditFieldVisibility.hidden),
-    ...TagField.values.where((f) => f.multiEditVisibility != _MultiEditFieldVisibility.hidden),
+    ...settings.tagFieldsToEdit.value.where((f) => f.multiEdit != TagFieldMultiEdit.hidden),
+    ...TagField.values.where((f) => f.multiEdit != TagFieldMultiEdit.hidden),
   };
   final multiFields = fieldsToEdit.map((f) => _MultiTagField.compute(f, tracksExtended, onFieldEdit)).toList();
   final visibleFields = <_MultiTagField>[];
   final collapsedFields = <_MultiTagField>[];
   for (final f in multiFields) {
-    (f.isEmptyForAll && f.tag.multiEditVisibility == _MultiEditFieldVisibility.whenHasValues ? collapsedFields : visibleFields).add(f);
+    (f.isEmptyForAll && f.tag.multiEdit == TagFieldMultiEdit.whenHasValues ? collapsedFields : visibleFields).add(f);
   }
 
   final statsEditor = TrackStatsEditController(tracksPre);
@@ -755,8 +838,8 @@ Future<void> _editMultipleTracksTags(List<PhysicalMedia> tracksPre, {required bo
         scrollable: false,
         icon: Broken.edit,
         title: lang.editTags,
-        trailingWidgets: [
-          const _KeepDatesToggleWidget(),
+        trailingWidgets: const [
+          _KeepDatesToggleWidget(),
         ],
         actions: [
           Obx(
@@ -881,11 +964,13 @@ Future<void> _editMultipleTracksTags(List<PhysicalMedia> tracksPre, {required bo
                                                   onTap: showFailedTracksDialogs,
                                                   child: getText(
                                                     lang.checkList,
-                                                    style: namida.textTheme.displaySmall?.copyWith(
-                                                      color: namida.theme.colorScheme.secondary,
-                                                      decoration: TextDecoration.underline,
-                                                      decorationStyle: TextDecorationStyle.solid,
-                                                    ),
+                                                    style: NText.small
+                                                        .of(context)
+                                                        .copyWith(
+                                                          color: namida.theme.colorScheme.secondary,
+                                                          decoration: TextDecoration.underline,
+                                                          decorationStyle: TextDecorationStyle.solid,
+                                                        ),
                                                   ),
                                                 ),
                                             ],
@@ -1023,9 +1108,9 @@ Future<void> _editMultipleTracksTags(List<PhysicalMedia> tracksPre, {required bo
                                                             height: innerImageWidth,
                                                             borderRadius: BorderRadius.zero,
                                                             child: Center(
-                                                              child: Text(
+                                                              child: NamidaText(
                                                                 "+${tracksGoingToBeEdited.length - 3}",
-                                                                style: namida.textTheme.displayLarge,
+                                                                style: NText.large,
                                                               ),
                                                             ),
                                                           ),
@@ -1135,13 +1220,13 @@ Future<void> _editMultipleTracksTags(List<PhysicalMedia> tracksPre, {required bo
                       const SizedBox(
                         height: 12.0,
                       ),
-                      Text(
+                      NamidaText(
                         [
                           tracksGoingToBeEdited.displayTrackKeyword,
                           tracksGoingToBeEdited.totalSizeFormatted,
                           tracksGoingToBeEdited.totalDurationFormatted,
                         ].join(' • '),
-                        style: namida.textTheme.displaySmall,
+                        style: NText.small,
                       ),
                       const SizedBox(
                         height: 8.0,
@@ -1151,10 +1236,10 @@ Future<void> _editMultipleTracksTags(List<PhysicalMedia> tracksPre, {required bo
                             ? Text.rich(
                                 TextSpan(
                                   children: [
-                                    TextSpan(text: "${lang.warning}: ", style: namida.textTheme.displayMedium),
+                                    TextSpan(text: "${lang.warning}: ", style: NText.medium.of(context)),
                                     TextSpan(
                                       text: lang.emptyNonMeaningfulTagFields,
-                                      style: namida.textTheme.displaySmall,
+                                      style: NText.small.of(context),
                                     ),
                                   ],
                                 ),
@@ -1178,7 +1263,8 @@ class _MultiTagField {
   final void Function(TagField tag, String? value) _onEdit;
   final TextEditingController controller;
   final clearForAllRx = false.obs;
-  final replaceRuleRx = Rxn<_FindReplaceRule>();
+  final replaceRuleRx = Rxn<_ValuesRule>();
+  final fillEmptyOnlyRx = false.obs;
 
   _MultiTagField._(this.tag, this.commonValue, this.hasMultipleValues, this._tracks, this._onEdit) : controller = TextEditingController(text: commonValue);
 
@@ -1203,7 +1289,7 @@ class _MultiTagField {
 
   bool get isEmptyForAll => !hasMultipleValues && (commonValue?.isEmpty ?? true);
 
-  bool get isChanged => controller.text != (commonValue ?? '') || clearForAllRx.value || replaceRuleRx.value != null;
+  bool get isChanged => controller.text != (commonValue ?? '') || clearForAllRx.value || replaceRuleRx.value != null || fillEmptyOnlyRx.value;
 
   bool get isClearing => clearForAllRx.value || (controller.text.isEmpty && commonValue?.isNotEmpty == true);
 
@@ -1214,7 +1300,7 @@ class _MultiTagField {
     return value.isEmpty ? '<${lang.emptyValue}>' : value;
   }
 
-  String hintTextFor({required bool clearForAll, required _FindReplaceRule? replaceRule}) {
+  String hintTextFor({required bool clearForAll, required _ValuesRule? replaceRule}) {
     if (replaceRule != null) return replaceRule.description;
     if (clearForAll) return '<${lang.emptyValue}>';
     if (hasMultipleValues) return '<${lang.multipleValues}>';
@@ -1243,6 +1329,7 @@ class _MultiTagField {
   void onChanged(String text) {
     clearForAllRx.value = false;
     replaceRuleRx.value = null;
+    if (fillEmptyOnlyRx.value) return _onEdit(tag, null);
     final initialText = commonValue ?? '';
     _onEdit(tag, text == initialText ? null : text);
   }
@@ -1256,20 +1343,44 @@ class _MultiTagField {
     controller.clear();
     clearForAllRx.value = commonValue == null;
     replaceRuleRx.value = null;
+    fillEmptyOnlyRx.value = false;
     _onEdit(tag, commonValue == '' ? null : '');
   }
 
-  void setReplaceRule(_FindReplaceRule rule) {
+  void setReplaceRule(_ValuesRule rule) {
     controller.clear();
     clearForAllRx.value = false;
     replaceRuleRx.value = rule;
+    fillEmptyOnlyRx.value = false;
     _onEdit(tag, null);
+  }
+
+  void toggleFillEmptyOnly() {
+    fillEmptyOnlyRx.value = !fillEmptyOnlyRx.value;
+    onChanged(controller.text);
+  }
+
+  _ValuesRule? buildValuesRule() {
+    final text = controller.text;
+    if (fillEmptyOnlyRx.value && text.isNotEmpty) return _FillEmptyRule(text);
+    return replaceRuleRx.value;
+  }
+
+  void scaleBpm(double by) {
+    final scaledText = _BpmScaleRule.scaleText(controller.text, by);
+    if (scaledText != null) return apply(scaledText);
+    if (!hasMultipleValues) return;
+    final currentRule = replaceRuleRx.value;
+    final factor = currentRule is _BpmScaleRule ? currentRule.factor * by : by;
+    if (factor == 1.0) return undo();
+    setReplaceRule(_BpmScaleRule(factor));
   }
 
   void undo() {
     controller.text = commonValue ?? '';
     clearForAllRx.value = false;
     replaceRuleRx.value = null;
+    fillEmptyOnlyRx.value = false;
     _onEdit(tag, null);
   }
 
@@ -1277,6 +1388,7 @@ class _MultiTagField {
     controller.dispose();
     clearForAllRx.close();
     replaceRuleRx.close();
+    fillEmptyOnlyRx.close();
   }
 }
 
@@ -1318,7 +1430,7 @@ class _MultiTracksEditPlan {
         summary.add(_MultiTracksEditSummaryEntry(icon: tag.toIcon(), title: tag.toText(), subtitle: field.describeEdit(editedValue)));
         continue;
       }
-      final replaceRule = field.replaceRuleRx.value;
+      final replaceRule = field.buildValuesRule();
       if (replaceRule == null) continue;
       int changedCount = 0;
       for (int i = 0; i < selectedTracks.length; i++) {
@@ -1383,7 +1495,8 @@ class _MultiTracksEditPlan {
 }
 
 void _showFindReplaceDialog(_MultiTagField field) {
-  final currentRule = field.replaceRuleRx.value;
+  final replaceRule = field.replaceRuleRx.value;
+  final currentRule = replaceRule is _FindReplaceRule ? replaceRule : null;
   final filterRx = (currentRule?.filter ?? SmartPlaylistRuleFilterText.contains).obs;
   final findController = TextEditingController(text: currentRule?.find);
   final replaceController = TextEditingController(text: currentRule?.replaceWith);
@@ -1501,7 +1614,15 @@ void _showFindReplaceDialog(_MultiTagField field) {
   );
 }
 
-class _FindReplaceRule {
+sealed class _ValuesRule {
+  const _ValuesRule();
+
+  String apply(String value);
+
+  String get description;
+}
+
+class _FindReplaceRule extends _ValuesRule {
   final SmartPlaylistRuleFilterText filter;
   final String find;
   final String replaceWith;
@@ -1540,6 +1661,7 @@ class _FindReplaceRule {
     }
   }
 
+  @override
   String apply(String value) {
     final regex = _regex;
     return switch (filter) {
@@ -1583,7 +1705,39 @@ class _FindReplaceRule {
     },
   );
 
+  @override
   String get description => filter.requiresDataField ? '${filter.toText()} "$find" → "$replaceWith"' : '${filter.toText()} → "$replaceWith"';
+}
+
+class _BpmScaleRule extends _ValuesRule {
+  final double factor;
+
+  const _BpmScaleRule(this.factor);
+
+  static String? scaleText(String text, double by) {
+    final bpm = int.tryParse(text);
+    if (bpm == null || bpm <= 0) return null;
+    final scaled = (bpm * by).round();
+    return scaled.toString();
+  }
+
+  @override
+  String apply(String value) => scaleText(value, factor) ?? value;
+
+  @override
+  String get description => factor > 1.0 ? '× ${factor.round()}' : '÷ ${(1.0 / factor).round()}';
+}
+
+class _FillEmptyRule extends _ValuesRule {
+  final String fillValue;
+
+  const _FillEmptyRule(this.fillValue);
+
+  @override
+  String apply(String value) => value.isEmpty ? fillValue : value;
+
+  @override
+  String get description => '<${lang.emptyValue}> → $fillValue';
 }
 
 @visibleForTesting
@@ -1606,27 +1760,89 @@ class _MultiTracksEditSummaryEntry {
   });
 }
 
+class _YTLinkOffsetRow extends StatelessWidget {
+  final TextEditingController controller;
+  final RxBaseCore<bool> isDetecting;
+  final void Function() onDetectTap;
+
+  const _YTLinkOffsetRow({
+    required this.controller,
+    required this.isDetecting,
+    required this.onDetectTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12.0),
+      child: Row(
+        children: [
+          const Icon(
+            Broken.timer_1,
+            size: 18.0,
+          ),
+          const SizedBox(width: 8.0),
+          Expanded(
+            child: ValueListenableBuilder(
+              valueListenable: controller,
+              builder: (context, value, _) {
+                final startMS = NamidaLinkUtils.extractYoutubeStartMS(value.text) ?? 0;
+                return NamidaText(
+                  '${lang.offset}: +${startMS.milliSecondsLabelWithCentiSeconds}',
+                  style: NText.small,
+                );
+              },
+            ),
+          ),
+          ObxO(
+            rx: isDetecting,
+            builder: (context, isDetecting) => NamidaButton(
+              dense: true,
+              minHeight: NamidaButton.kDefaultMinHeight * 0.5,
+              iconSize: 16.0,
+              fontSizeMultiplier: 0.9,
+              enabled: !isDetecting,
+              icon: Broken.magic_star,
+              text: lang.auto,
+              isLoading: isDetecting,
+              onTap: onDetectTap,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _KeepDatesToggleWidget extends StatelessWidget {
-  final Color? colorScheme;
-  const _KeepDatesToggleWidget({this.colorScheme});
+  const _KeepDatesToggleWidget();
+
+  static IconData _iconOf(bool keepFileDates) => keepFileDates ? Broken.calendar_tick : Broken.calendar_edit;
+
+  void _onTap() {
+    final keepFileDates = !settings.editTagsKeepFileDates.value;
+    settings.editTagsKeepFileDates.save(keepFileDates);
+    NamidaToggleCard.showStateSnackbar(
+      icon: _iconOf(keepFileDates),
+      title: lang.keepFileDates,
+      value: keepFileDates,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return ObxO(
       rx: settings.editTagsKeepFileDates,
-      builder: (context, editTagsKeepFileDates) => NamidaIconButton(
-        tooltip: () => lang.keepFileDates,
-        icon: editTagsKeepFileDates ? Broken.document_code_2 : Broken.calendar_edit,
-        onPressed: () {
-          settings.editTagsKeepFileDates.save(!settings.editTagsKeepFileDates.value);
-        },
-        child: StackedIcon(
-          baseIcon: Broken.document_code_2,
-          secondaryIcon: editTagsKeepFileDates ? Broken.tick_circle : Broken.close_circle,
-          baseIconColor: colorScheme,
-          secondaryIconColor: colorScheme,
-        ),
-      ),
+      builder: (context, editTagsKeepFileDates) {
+        final title = NamidaToggleCard.toStateText(lang.keepFileDates, editTagsKeepFileDates);
+        return NamidaToggleCard(
+          icon: _iconOf(editTagsKeepFileDates),
+          title: title,
+          active: !editTagsKeepFileDates,
+          padding: const EdgeInsets.all(6.0),
+          onTap: _onTap,
+        );
+      },
     );
   }
 }
@@ -1639,6 +1855,8 @@ class _TagTextField extends StatelessWidget {
   final String? hintText;
   final Widget? suffixIcon;
   final bool markChanged;
+  final void Function(double by)? onBpmScale;
+  final Future<void> Function()? onRhythmAnalyze;
 
   const _TagTextField({
     required this.tag,
@@ -1648,9 +1866,25 @@ class _TagTextField extends StatelessWidget {
     this.hintText,
     this.suffixIcon,
     this.markChanged = false,
+    this.onBpmScale,
+    this.onRhythmAnalyze,
   });
 
   Widget _buildField(FocusNode? focusNode) {
+    final hasChipButtons = onBpmScale != null || onRhythmAnalyze != null;
+    final suffixIcon = hasChipButtons
+        ? _TagFieldChipButtons(
+            onBpmScale: onBpmScale,
+            onRhythmAnalyze: onRhythmAnalyze,
+            trailing: this.suffixIcon,
+            icon: tag.toIcon(),
+          )
+        : this.suffixIcon;
+    final validator = switch (tag) {
+      TagField.rating => _ratingsValidator,
+      TagField.bpm => _bpmValidator,
+      _ => null,
+    };
     return CustomTagTextField(
       controller: controller,
       focusNode: focusNode,
@@ -1660,7 +1894,7 @@ class _TagTextField extends StatelessWidget {
       suffixIcon: suffixIcon,
       markChanged: markChanged,
       onChanged: onChanged,
-      validator: tag == TagField.rating ? _ratingsValidator : null,
+      validator: validator,
       isNumeric: tag.isNumeric,
       maxLines: tag == TagField.comment || tag == TagField.description || tag == TagField.synopsis ? 4 : null,
     );
@@ -1708,6 +1942,7 @@ class _MultiTagTextField extends StatelessWidget {
             field: field,
           ),
           markChanged: clearForAll || replaceRule != null,
+          onBpmScale: field.tag == TagField.bpm ? field.scaleBpm : null,
         );
       },
     );
@@ -1748,9 +1983,9 @@ class _MultiTagMoreFields extends StatelessWidget {
                   width: 8.0,
                 ),
                 Expanded(
-                  child: Text(
+                  child: NamidaText(
                     '${lang.more} (${fields.length})',
-                    style: context.textTheme.displayMedium,
+                    style: NText.medium,
                   ),
                 ),
               ],
@@ -1787,7 +2022,6 @@ class _FindReplacePreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = context.textTheme;
     return ListenableBuilder(
       listenable: listenable,
       builder: (context, _) {
@@ -1796,9 +2030,9 @@ class _FindReplacePreview extends StatelessWidget {
           if (rule.find.isEmpty) return const SizedBox();
           return Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12.0),
-            child: Text(
+            child: NamidaText(
               '${lang.error}: Regex',
-              style: textTheme.displayMedium,
+              style: NText.medium,
             ),
           );
         }
@@ -1817,14 +2051,14 @@ class _FindReplacePreview extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
+              NamidaText(
                 changedCount.displayTrackKeyword,
-                style: textTheme.displayMedium,
+                style: NText.medium,
               ),
               ...examples.map(
-                (e) => Text(
+                (e) => NamidaText(
                   e,
-                  style: textTheme.displaySmall,
+                  style: NText.small,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -1855,7 +2089,7 @@ class _FindReplaceFilterItem extends StatelessWidget {
       child: NamidaInkWell(
         borderRadius: 8.0,
         padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 4.0),
-        bgColor: selected ? context.theme.colorScheme.secondary.withOpacityExt(0.1) : null,
+        bgColor: selected ? const NColors(.secondary, opacity: 0.1) : null,
         onTap: onTap,
         child: SmartPlaylistFilterInfoRow(
           filter: filter,
@@ -1908,8 +2142,11 @@ class _MultiTagFieldMenuButton extends StatelessWidget {
       openOnLongPress: false,
       childrenDefault: () {
         final currentText = field.controller.text;
-        final countStyle = context.textTheme.displaySmall;
+        final countStyle = NText.small.of(context);
         final values = field.hasMultipleValues ? field.nonEmptyValuesByCount : const <MapEntry<String, int>>[];
+        final emptyValuesCount = field.hasMultipleValues ? field.valuesCounts[''] : null;
+        final replaceRule = field.replaceRuleRx.value;
+        final findReplaceRule = replaceRule is _FindReplaceRule ? replaceRule : null;
         return [
           NamidaPopupItem(
             icon: Broken.undo,
@@ -1930,9 +2167,36 @@ class _MultiTagFieldMenuButton extends StatelessWidget {
             NamidaPopupItem(
               icon: Broken.convert,
               title: lang.findAndReplace,
-              subtitle: field.replaceRuleRx.value?.description ?? '',
-              selected: field.replaceRuleRx.value != null,
+              subtitle: findReplaceRule?.description ?? '',
+              selected: findReplaceRule != null,
               onTap: () => _showFindReplaceDialog(field),
+            ),
+          if (emptyValuesCount != null)
+            NamidaPopupItem(
+              icon: Broken.box_add,
+              title: lang.fillEmptyOnly,
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ObxO(
+                    rx: field.fillEmptyOnlyRx,
+                    builder: (context, fillEmptyOnly) => CustomSwitch(
+                      active: fillEmptyOnly,
+                      width: 30.0,
+                      height: 16.0,
+                    ),
+                  ),
+                  const SizedBox(
+                    width: 8.0,
+                  ),
+                  Text(
+                    '$emptyValuesCount',
+                    style: countStyle,
+                  ),
+                ],
+              ),
+              selected: field.fillEmptyOnlyRx.value,
+              onTap: field.toggleFillEmptyOnly,
             ),
           ...values
               .take(_maxValuesShown)
@@ -1988,6 +2252,116 @@ class _MultiTagFieldMenuButton extends StatelessWidget {
   }
 }
 
+class _TagFieldChipButtons extends StatelessWidget {
+  final void Function(double by)? onBpmScale;
+  final Future<void> Function()? onRhythmAnalyze;
+  final Widget? trailing;
+  final IconData icon;
+
+  const _TagFieldChipButtons({
+    required this.onBpmScale,
+    required this.onRhythmAnalyze,
+    required this.trailing,
+    required this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final onBpmScale = this.onBpmScale;
+    final onRhythmAnalyze = this.onRhythmAnalyze;
+    final trailing =
+        this.trailing ??
+        Padding(
+          padding: const EdgeInsets.only(left: 6.0, right: 14.0),
+          child: Icon(
+            icon,
+            size: 18.0,
+          ),
+        );
+    final chips = <Widget>[
+      if (onRhythmAnalyze != null)
+        _RhythmAnalyzeButton(
+          onAnalyze: onRhythmAnalyze,
+        ),
+      if (onBpmScale != null) ...[
+        _TagFieldChipButton(
+          onTap: () => onBpmScale(2.0),
+          child: const NamidaText(
+            '×2',
+            style: NText.small,
+          ),
+        ),
+        _TagFieldChipButton(
+          onTap: () => onBpmScale(0.5),
+          child: const NamidaText(
+            '÷2',
+            style: NText.small,
+          ),
+        ),
+      ],
+    ];
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ...chips.addSeparators(
+          separator: const SizedBox(
+            width: 4.0,
+          ),
+        ),
+        trailing,
+      ],
+    );
+  }
+}
+
+class _RhythmAnalyzeButton extends StatelessWidget {
+  final Future<void> Function() onAnalyze;
+
+  const _RhythmAnalyzeButton({
+    required this.onAnalyze,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return NamidaLoadingSwitcher(
+      builder: (loadingController) => _TagFieldChipButton(
+        onTap: () async {
+          if (loadingController.isLoading) return;
+          loadingController.startLoading();
+          await onAnalyze();
+          loadingController.stopLoading();
+        },
+        child: const NIcon(
+          Broken.magicpen,
+          size: 13.5,
+          color: NColors.textSmall,
+        ),
+      ),
+    );
+  }
+}
+
+class _TagFieldChipButton extends StatelessWidget {
+  final void Function() onTap;
+  final Widget child;
+
+  const _TagFieldChipButton({
+    required this.onTap,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return NamidaInkWell(
+      borderRadius: 6.0,
+      bgColor: NColors.card,
+      padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+      onTap: onTap,
+      child: child,
+    );
+  }
+}
+
 class CustomTagTextField extends StatefulWidget {
   final TextEditingController controller;
   final String hintText;
@@ -2009,6 +2383,7 @@ class CustomTagTextField extends StatefulWidget {
   final bool obscureText;
   final Widget? suffixIcon;
   final bool markChanged;
+  final double? height;
 
   const CustomTagTextField({
     super.key,
@@ -2017,6 +2392,7 @@ class CustomTagTextField extends StatefulWidget {
     this.icon,
     this.suffixIcon,
     this.markChanged = false,
+    this.height,
     this.hintMaxLines = 3,
     this.maxLines,
     this.maxLength,
@@ -2074,51 +2450,61 @@ class _CustomTagTextFieldState extends State<CustomTagTextField> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
     final borderR = widget.borderRadius.multipliedRadius;
     final borderRS = (widget.borderRadius - 2.0).withMinimum(0).multipliedRadius;
-    return TextFormField(
-      obscureText: widget.obscureText,
-      onTap: widget.onTap,
-      focusNode: widget.focusNode,
-      autofocus: widget.autofocus,
-      validator: widget.validator,
-      maxLength: widget.maxLength,
-      controller: widget.controller,
-      textAlign: TextAlign.left,
-      maxLines: widget.maxLines,
-      autovalidateMode: widget.validatorMode,
-      keyboardType: widget.keyboardType ?? (widget.isNumeric ? TextInputType.number : null),
-      style: textTheme.displaySmall?.copyWith(fontSize: 14.5, fontWeight: FontWeight.w600),
-      // onTapOutside: (event) => FocusScope.of(context).unfocus(), // inconvenient
-      onChanged: widget.onChanged,
-      onFieldSubmitted: widget.onFieldSubmitted,
-      decoration: InputDecoration(
-        label: widget.labelText != '' ? Text('${widget.labelText} ${didChange || widget.markChanged ? '(${lang.changed})' : ''}') : null,
-        floatingLabelBehavior: FloatingLabelBehavior.always,
-        hintMaxLines: widget.hintMaxLines,
-        contentPadding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
-        errorMaxLines: 3,
-        suffixIcon: widget.suffixIcon ?? Icon(widget.icon, size: 18.0),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(borderRS),
-          borderSide: BorderSide(color: theme.colorScheme.onSurface.withAlpha(100), width: 2.0),
+    final height = widget.height;
+    final isDense = height != null;
+    final fontSize = isDense ? 13.0 : 14.5;
+    final contentPadding = isDense ? const EdgeInsets.symmetric(vertical: 8.0, horizontal: 12.0) : const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0);
+    final suffixIconConstraints = isDense ? BoxConstraints(minWidth: 34.0, minHeight: height) : null;
+    final icon = widget.icon;
+    final hasIconSlot = icon != null || isDense; // -- dense fields take their height from the slot
+    final suffixIcon = widget.suffixIcon ?? (hasIconSlot ? Icon(icon, size: 18.0) : null);
+    return NBuilder(
+      builder: (context, colors) => TextFormField(
+        obscureText: widget.obscureText,
+        onTap: widget.onTap,
+        focusNode: widget.focusNode,
+        autofocus: widget.autofocus,
+        validator: widget.validator,
+        maxLength: widget.maxLength,
+        controller: widget.controller,
+        textAlign: TextAlign.left,
+        maxLines: widget.maxLines,
+        autovalidateMode: widget.validatorMode,
+        keyboardType: widget.keyboardType ?? (widget.isNumeric ? TextInputType.number : null),
+        style: NText.small.of(context).copyWith(fontSize: fontSize, fontWeight: FontWeight.w600),
+        // onTapOutside: (event) => FocusScope.of(context).unfocus(), // inconvenient
+        onChanged: widget.onChanged,
+        onFieldSubmitted: widget.onFieldSubmitted,
+        decoration: InputDecoration(
+          label: widget.labelText != '' ? Text('${widget.labelText} ${didChange || widget.markChanged ? '(${lang.changed})' : ''}') : null,
+          floatingLabelBehavior: FloatingLabelBehavior.always,
+          hintMaxLines: widget.hintMaxLines,
+          isDense: isDense,
+          contentPadding: contentPadding,
+          errorMaxLines: 3,
+          suffixIcon: suffixIcon,
+          suffixIconConstraints: suffixIconConstraints,
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(borderRS),
+            borderSide: BorderSide(color: colors.onSurface.withOpacityExt(0.39), width: 2.0),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(borderR),
+            borderSide: BorderSide(color: colors.onSurface.withOpacityExt(0.39), width: 1.0),
+          ),
+          focusedErrorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(borderR),
+            borderSide: BorderSide(color: Colors.brown.withOpacityExt(0.78), width: 2.0),
+          ),
+          errorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(borderR),
+            borderSide: BorderSide(color: Colors.brown.withOpacityExt(0.78), width: 2.0),
+          ),
+          hintText: widget.hintText,
+          hintStyle: NText.small.of(context).copyWith(fontSize: fontSize, color: NText.small.of(context).color?.withOpacityExt(0.47)),
         ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(borderR),
-          borderSide: BorderSide(color: theme.colorScheme.onSurface.withAlpha(100), width: 1.0),
-        ),
-        focusedErrorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(borderR),
-          borderSide: BorderSide(color: Colors.brown.withAlpha(200), width: 2.0),
-        ),
-        errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(borderR),
-          borderSide: BorderSide(color: Colors.brown.withAlpha(200), width: 2.0),
-        ),
-        hintText: widget.hintText,
-        hintStyle: textTheme.displaySmall?.copyWith(fontSize: 14.5, color: textTheme.displaySmall?.color?.withAlpha(120)),
       ),
     );
   }
@@ -2129,6 +2515,13 @@ String? _ratingsValidator(String? value) {
   final intval = int.tryParse(value);
   if (intval == null) return lang.nameContainsBadCharacter;
   if (intval < 0 || intval > 100) return '0-100';
+  return null;
+}
+
+String? _bpmValidator(String? value) {
+  if (value == null || value.isEmpty) return null;
+  final intval = int.tryParse(value);
+  if (intval == null || intval < 0) return lang.nameContainsBadCharacter;
   return null;
 }
 
@@ -2155,34 +2548,6 @@ String _buildLanguageHintText(Map<TagField, TextEditingController?> tagsControll
 }
 
 extension _TagFieldMultiEdit on TagField {
-  _MultiEditFieldVisibility get multiEditVisibility => switch (this) {
-    TagField.artist ||
-    TagField.album ||
-    TagField.albumArtist ||
-    TagField.composer ||
-    TagField.genre ||
-    TagField.style ||
-    TagField.year ||
-    TagField.discNumber ||
-    TagField.comment ||
-    TagField.description ||
-    TagField.synopsis ||
-    TagField.trackTotal ||
-    TagField.discTotal => _MultiEditFieldVisibility.always,
-    TagField.remixer ||
-    TagField.lyricist ||
-    TagField.language ||
-    TagField.recordLabel ||
-    TagField.releaseType ||
-    TagField.country ||
-    TagField.albumSort ||
-    TagField.albumArtistSort ||
-    TagField.artistSort ||
-    TagField.composerSort => _MultiEditFieldVisibility.whenHasValues,
-    TagField.title || TagField.trackNumber || TagField.lyrics || TagField.titleSort => _MultiEditFieldVisibility.hidden,
-    TagField.mood || TagField.tags || TagField.rating => _MultiEditFieldVisibility.hidden, // -- edited by TrackStatsEditSections
-  };
-
   String? libraryValueOf(TrackExtended trExt) => switch (this) {
     TagField.title => trExt.title,
     TagField.artist => _emptyIfUnknown(trExt.originalArtist, UnknownTags.ARTIST),
@@ -2204,6 +2569,8 @@ extension _TagFieldMultiEdit on TagField {
     TagField.language => trExt.language,
     TagField.recordLabel => trExt.label,
     TagField.releaseType => trExt.releaseType,
+    TagField.bpm => _emptyIfZero(trExt.bpm ?? 0),
+    TagField.musicalKey => trExt.musicalKey,
     TagField.rating => _emptyIfZero(trExt.effectiveRating),
     TagField.tags => trExt.originalTags ?? '',
     TagField.titleSort => trExt.sortInfo?.title ?? '',
@@ -2216,10 +2583,4 @@ extension _TagFieldMultiEdit on TagField {
 
   static String _emptyIfUnknown(String value, String unknown) => value == unknown ? '' : value;
   static String _emptyIfZero(int value) => value == 0 ? '' : value.toString();
-}
-
-enum _MultiEditFieldVisibility {
-  always,
-  whenHasValues,
-  hidden,
 }

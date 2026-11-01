@@ -23,6 +23,19 @@ abstract final class _DirFilesSyncUtils {
   /// prevents path traversal outside the target dir.
   static bool isSafeFileName(String name) => name.isNotEmpty && !name.contains('/') && !name.contains('\\') && !name.contains('..');
 
+  /// control characters are allowed in android/linux file names (ex: artist artworks), windows replaces them like [DownloadTaskFilename.cleanupFilenameRegex].
+  static final _windowsInvalidCharsRegex = RegExp(r'[\x00-\x1F]');
+
+  static String toLocalFileName(String name) => Platform.isWindows ? name.replaceAll(_windowsInvalidCharsRegex, '_') : name;
+
+  /// a windows receiver lists files under [toLocalFileName].
+  static Object? findInManifest(Map<String, dynamic> manifest, String name) {
+    final info = manifest[name];
+    if (info != null || !_windowsInvalidCharsRegex.hasMatch(name)) return info;
+    final windowsName = name.replaceAll(_windowsInvalidCharsRegex, '_');
+    return manifest[windowsName];
+  }
+
   /// `{fileName: [size, mtimeMS]}` for top-level files of the dir.
   static Future<Map<String, dynamic>> buildManifest(AppPathsBackupEnum subtype) async {
     final result = <String, dynamic>{};
@@ -72,7 +85,7 @@ class DirFilesManifestRequestMessage extends BaseMessage {
   };
 
   @override
-  FutureOr<void> executeOnReceived() async {
+  FutureOr<int> executeOnReceived() async {
     final manifest = _DirFilesSyncUtils.isAllowedSubtype(subtype) ? await _DirFilesSyncUtils.buildManifest(subtype) : const <String, dynamic>{};
     final msg = DirFilesManifestResponseMessage(
       subtype: subtype,
@@ -81,6 +94,7 @@ class DirFilesManifestRequestMessage extends BaseMessage {
       messageInfo: await SyncUtils.createMessageInfo(.manifest),
     );
     await SyncDiscovery.sendMessage(msg, messageInfo.senderDeviceId);
+    return 0;
   }
 }
 
@@ -119,7 +133,7 @@ class DirFilesManifestResponseMessage extends BaseMessage {
 
   /// we requested this manifest earlier, now send the files the other device needs.
   @override
-  FutureOr<void> executeOnReceived() async {
+  FutureOr<int> executeOnReceived() async {
     final batchRef = this.batchRef;
     batchRef?.markTransferring();
     try {
@@ -129,6 +143,7 @@ class DirFilesManifestResponseMessage extends BaseMessage {
       // -- would never complete & progress would hang forever.
       batchRef?.markDone();
     }
+    return 0;
   }
 
   Future<void> _sendRequiredFiles(SyncBatchRef? batchRef) async {
@@ -172,7 +187,7 @@ class DirFilesManifestResponseMessage extends BaseMessage {
       }
 
       final mtimeMS = stat.modified.millisecondsSinceEpoch;
-      final other = files[name];
+      final other = _DirFilesSyncUtils.findInManifest(files, name);
       if (other is List && other.length >= 2) {
         final otherSize = other[0] as int? ?? -1;
         final otherMtimeMS = other[1] as int? ?? 0;
@@ -283,14 +298,14 @@ class DbFileMessage extends BaseMessage with BinaryPayloadMessage {
   }
 
   @override
-  FutureOr<void> executeOnReceived() async {
+  FutureOr<int> executeOnReceived() async {
     final bytes = binaryPayload;
-    if (bytes == null) return; // -- binary payload frame never arrived
-    if (!isAllowedSubtype(subtype)) return;
+    if (bytes == null) return 0; // -- binary payload frame never arrived
+    if (!isAllowedSubtype(subtype)) return 0;
 
     if (!SyncUtils.kAllowModification) {
       snackyy(message: 'Importing db file ${subtype.name} (${bytes.length.fileSizeFormatted})');
-      return;
+      return 0;
     }
 
     final dbPath = subtype.resolve();
@@ -306,8 +321,10 @@ class DbFileMessage extends BaseMessage with BinaryPayloadMessage {
         _ => Future.value(0),
       };
       if (_kEnableSyncDebug) _debugNotify('==> db file merged[${subtype.name}]: $changed entries');
+      return changed;
     } catch (e, st) {
       logger.error('Error merging synced db file ${subtype.name}', e: e, st: st);
+      return 0;
     } finally {
       await tempDir.delete(recursive: true).ignoreError();
     }
@@ -354,7 +371,7 @@ class DbManifestRequestMessage extends BaseMessage {
   };
 
   @override
-  FutureOr<void> executeOnReceived() async {
+  FutureOr<int> executeOnReceived() async {
     // -- the response is sent back even for a rejected subtype, otherwise
     // -- the origin's batch item would stay pending until it times out.
     final manifest = await switch (subtype) {
@@ -369,6 +386,7 @@ class DbManifestRequestMessage extends BaseMessage {
       messageInfo: await SyncUtils.createMessageInfo(.manifest),
     );
     await SyncDiscovery.sendMessage(msg, messageInfo.senderDeviceId);
+    return 0;
   }
 }
 
@@ -411,7 +429,7 @@ class DbManifestResponseMessage extends BaseMessage {
 
   /// we requested this manifest earlier, now send the entries the other device needs.
   @override
-  FutureOr<void> executeOnReceived() async {
+  FutureOr<int> executeOnReceived() async {
     final batchRef = this.batchRef;
     batchRef?.markTransferring();
     try {
@@ -421,6 +439,7 @@ class DbManifestResponseMessage extends BaseMessage {
       // -- would never complete & progress would hang forever.
       batchRef?.markDone();
     }
+    return 0;
   }
 
   Future<void> _sendRequiredEntries(SyncBatchRef? batchRef) async {
@@ -495,12 +514,12 @@ class DbEntriesMessage extends BaseMessage {
   String toRawInfo() => 'DbEntries(${subtype.name}: ${entries.length} entries)';
 
   @override
-  FutureOr<void> executeOnReceived() async {
-    if (!DbFileMessage.isAllowedSubtype(subtype)) return;
+  FutureOr<int> executeOnReceived() async {
+    if (!DbFileMessage.isAllowedSubtype(subtype)) return 0;
 
     if (!SyncUtils.kAllowModification) {
       snackyy(message: 'Importing ${entries.length} db entries [${subtype.name}]');
-      return;
+      return 0;
     }
 
     final changed = await switch (subtype) {
@@ -509,6 +528,7 @@ class DbEntriesMessage extends BaseMessage {
       _ => Future.value(0),
     };
     if (_kEnableSyncDebug) _debugNotify('==> db entries merged[${subtype.name}]: $changed/${entries.length}');
+    return changed;
   }
 }
 
@@ -544,6 +564,10 @@ class DirFileMessage extends BaseMessage with BinaryPayloadMessage {
   }) : super(MessageType.dirFile) {
     binaryPayload = bytes;
   }
+
+  /// queue files list the sender's track paths.
+  @override
+  bool get carriesSenderPaths => subtype == AppPathsBackupEnum.QUEUES;
 
   /// filesystems keep mtimes at different precisions (fat: 2s), a copy written with the sender's mtime can read back slightly off.
   static const _kMtimeToleranceMS = 2000;
@@ -600,20 +624,21 @@ class DirFileMessage extends BaseMessage with BinaryPayloadMessage {
   }
 
   @override
-  FutureOr<void> executeOnReceived() async {
+  FutureOr<int> executeOnReceived() async {
     final bytes = binaryPayload;
-    if (bytes == null) return; // -- binary payload frame never arrived
+    if (bytes == null) return 0; // -- binary payload frame never arrived
 
-    if (!_DirFilesSyncUtils.isAllowedSubtype(subtype)) return;
-    if (!_DirFilesSyncUtils.isSafeFileName(fileName)) return;
+    if (!_DirFilesSyncUtils.isAllowedSubtype(subtype)) return 0;
+    if (!_DirFilesSyncUtils.isSafeFileName(fileName)) return 0;
 
     if (!SyncUtils.kAllowModification) {
       // snackyy(message: 'Importing file ${subtype.name}/$fileName (${bytes.length.fileSizeFormatted})');
-      return;
+      return 0;
     }
 
     try {
-      final file = FileParts.join(subtype.resolve(), fileName);
+      final localFileName = _DirFilesSyncUtils.toLocalFileName(fileName);
+      final file = FileParts.join(subtype.resolve(), localFileName);
       final stat = await file.stat();
       if (stat.type != FileSystemEntityType.notFound) {
         final existingMtimeMS = stat.modified.millisecondsSinceEpoch;
@@ -625,20 +650,25 @@ class DirFileMessage extends BaseMessage with BinaryPayloadMessage {
           incomingSize: bytes.length,
           incomingMtimeMS: mtime,
         );
-        if (!isTheirsNewer) return;
+        if (!isTheirsNewer) return 0;
       }
+      final isQueue = subtype == AppPathsBackupEnum.QUEUES;
+      final senderDeviceId = messageInfo.senderDeviceId;
+      final bytesToWrite = isQueue ? QueueController.resolveQueueFileBytes(bytes, (track) => SyncPathResolver.resolveTrack(senderDeviceId, track)) : bytes;
       await file.create(recursive: true);
-      await file.writeAsBytes(bytes);
+      await file.writeAsBytes(bytesToWrite);
       // -- keep the sender's mtime so future manifests compare correctly
       await file.setLastModified(DateTime.fromMillisecondsSinceEpoch(mtime));
 
       if (subtype == AppPathsBackupEnum.AUDIOS_CACHE) AudioCacheController.inst.addFileToCacheMap(file);
-      if (subtype == AppPathsBackupEnum.QUEUES) _reloadQueuesSoon();
+      if (isQueue) _reloadQueuesSoon();
 
       final info = this.info;
       if (info != null && subtype == AppPathsBackupEnum.VIDEOS_CACHE) VideoController.inst.importSyncedCacheVideoInfo(fileName, info);
+      return 1;
     } catch (e, st) {
       logger.error('Error writing synced file ${subtype.name}/$fileName', e: e, st: st);
+      return 0;
     }
   }
 }

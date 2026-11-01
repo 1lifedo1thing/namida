@@ -22,6 +22,7 @@ import 'package:namida/core/extensions.dart';
 import 'package:namida/core/functions.dart';
 import 'package:namida/core/icon_fonts/broken_icons.dart';
 import 'package:namida/core/namida_converter_ext.dart';
+import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/translations/language.dart';
 import 'package:namida/core/utils.dart';
 import 'package:namida/ui/dialogs/common_dialogs.dart';
@@ -247,8 +248,6 @@ class _SearchFiltersHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final secondaryColor = theme.colorScheme.secondary;
     return Row(
       children: [
         Expanded(
@@ -273,28 +272,75 @@ class _SearchFiltersHeader extends StatelessWidget {
         ),
         const SizedBox(width: 4.0),
         ObxO(
+          rx: settings.trackSearchFilterPresets,
+          builder: (context, presets) => _SearchHeaderButton(
+            isActive: presets.activeIndex != null,
+            icon: Broken.filter_search,
+            tooltip: () => lang.filterTracksBy,
+            onTap: NamidaOnTaps.inst.onTrackSearchFilterTap,
+          ),
+        ),
+        const SizedBox(width: 4.0),
+        ObxO(
           rx: isTracksFromSmartSearch,
-          builder: (context, isFromSmartSearch) => NamidaInkWell(
-            animationDurationMS: 200,
-            borderRadius: 8.0,
-            bgColor: secondaryColor.withOpacityExt(isFromSmartSearch ? 0.3 : 0.08),
-            decoration: BoxDecoration(
-              border: Border.all(
-                color: secondaryColor.withOpacityExt(isFromSmartSearch ? 0.8 : 0.4),
-                width: isFromSmartSearch ? 1.5 : 1.0,
-              ),
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 6.0),
+          builder: (context, isFromSmartSearch) => _SearchHeaderButton(
+            isActive: isFromSmartSearch,
+            icon: Broken.magicpen,
+            tooltip: () => lang.smartSearch,
             onTap: onSmartSearchTap,
             onLongPress: onSmartSearchLongPress,
-            child: Icon(
-              isFromSmartSearch ? Broken.magicpen : Broken.filter_search,
-              size: 20.0,
-            ),
           ),
         ),
         const SizedBox(width: 4.0),
       ],
+    );
+  }
+}
+
+class _SearchHeaderButton extends StatelessWidget {
+  final bool isActive;
+  final IconData icon;
+  final String Function() tooltip;
+  final VoidCallback onTap;
+  final VoidCallback? onLongPress;
+
+  const _SearchHeaderButton({
+    required this.isActive,
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+    this.onLongPress,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final button = NBuilder(
+      selfAnimated: true,
+      builder: (context, colors) {
+        final secondaryColor = colors.secondary;
+        return NamidaInkWell(
+          animationDurationMS: 200,
+          borderRadius: 8.0,
+          bgColor: NColors.fixed(secondaryColor.withOpacityExt(isActive ? 0.3 : 0.08)),
+          decoration: BoxDecoration(
+            border: Border.all(
+              color: secondaryColor.withOpacityExt(isActive ? 0.8 : 0.4),
+              width: isActive ? 1.5 : 1.0,
+            ),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 6.0),
+          onTap: onTap,
+          onLongPress: onLongPress,
+          child: Icon(
+            icon,
+            size: 20.0,
+          ),
+        );
+      },
+    );
+    return NamidaTooltip(
+      message: tooltip,
+      child: button,
     );
   }
 }
@@ -320,17 +366,17 @@ class _FilterChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final secondaryColor = theme.colorScheme.secondary;
-    final textStyle = theme.textTheme.displayMedium;
+    final colors = NColorsData.targetOf(context);
+    final secondaryColor = colors.secondary;
+    final textStyle = NText.medium.of(context);
     final resultsRx = SearchSortController.inst.getTempResultsRx(type);
     return Obx(
       (context) {
         final isActive = settings.activeSearchMediaTypes.valueR.contains(type);
-        final style = textStyle?.copyWith(color: secondaryColor.filterChipText(isActive));
+        final style = textStyle.copyWith(color: secondaryColor.filterChipText(isActive));
         return NamidaInkWell(
           animationDurationMS: 200,
-          bgColor: secondaryColor.filterChipBg(isActive),
+          bgColor: NColors.fixed(secondaryColor.filterChipBg(isActive)),
           borderRadius: 8.0,
           onTap: () => SearchSortController.inst.toggleSearchMediaType(type),
           onLongPress: () => onJump(type),
@@ -369,8 +415,8 @@ class _TrackTypesChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final secondaryColor = theme.colorScheme.secondary;
+    final colors = NColorsData.targetOf(context);
+    final secondaryColor = colors.secondary;
     final radius = Radius.circular(8.0.multipliedRadius);
     return Obx(
       (context) {
@@ -384,7 +430,7 @@ class _TrackTypesChip extends StatelessWidget {
           colorForce: secondaryColor.filterChipBorder(false),
         );
         return AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
+          duration: NColorsData.targetDurationOf(context, const Duration(milliseconds: 200)),
           margin: _kFilterChipMargin,
           decoration: BoxDecoration(
             color: secondaryColor.filterChipBg(bothActive),
@@ -414,7 +460,7 @@ class _TrackTypesChip extends StatelessWidget {
                 if (bothActive)
                   _FilterChipCount(
                     rx: SearchSortController.inst.trackSearchTemp,
-                    style: theme.textTheme.displayMedium?.copyWith(color: secondaryColor.filterChipText(true)),
+                    style: NText.medium.of(context).copyWith(color: secondaryColor.filterChipText(true)),
                     padding: EdgeInsets.zero,
                     emptyChild: divider,
                   )
@@ -462,12 +508,12 @@ class _TrackTypeSegment extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final secondaryColor = theme.colorScheme.secondary;
-    final style = theme.textTheme.displayMedium?.copyWith(color: secondaryColor.filterChipText(isActive));
+    final colors = NColorsData.targetOf(context);
+    final secondaryColor = colors.secondary;
+    final style = NText.medium.of(context).copyWith(color: secondaryColor.filterChipText(isActive));
     return NamidaInkWell(
       animationDurationMS: 200,
-      bgColor: secondaryColor.filterChipBg(isFilled),
+      bgColor: NColors.fixed(secondaryColor.filterChipBg(isFilled)),
       decoration: BoxDecoration(
         borderRadius: borderRadius,
       ),
@@ -554,9 +600,8 @@ class _RecentSearchesView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (settings.extra.recentSearchesEnabled.value != true) return const SizedBox.expand();
-    final theme = context.theme;
-    final chipBgColor = theme.colorScheme.secondary.withOpacityExt(0.12);
-    final chipTextStyle = theme.textTheme.displayMedium?.copyWith(fontSize: 13.0);
+    const chipBgColor = NColors(.secondary, opacity: 0.12);
+    final chipTextStyle = NText.medium.of(context).copyWith(fontSize: 13.0);
     return ObxO(
       rx: settings.extra.recentSearches,
       builder: (context, recentSearches) {
@@ -627,7 +672,12 @@ class _NoResultsView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final iconColor = context.theme.colorScheme.secondary.withOpacityExt(0.6);
+    final noResultsWidget = NBuilder(
+      builder: (context, colors) => NoResultsWidget(
+        icon: Broken.search_status,
+        iconColor: colors.secondary.withOpacityExt(0.6),
+      ),
+    );
     return Align(
       alignment: const Alignment(0.0, -0.4),
       child: ObxO(
@@ -635,10 +685,7 @@ class _NoResultsView extends StatelessWidget {
         builder: (context, runningSearchesCount) => AnimatedOpacity(
           duration: const Duration(milliseconds: 200),
           opacity: runningSearchesCount > 0 ? 0.0 : 1.0,
-          child: NoResultsWidget(
-            icon: Broken.search_status,
-            iconColor: iconColor,
-          ),
+          child: noResultsWidget,
         ),
       ),
     );
@@ -730,7 +777,7 @@ class _SearchResultsView extends StatelessWidget {
                   text: lang.viewAll,
                   onTap: const AlbumSearchResultsPage().navigate,
                 ),
-                height: 138.0,
+                height: 142.0,
                 itemExtent: 108.0,
                 itemBuilder: (albumId) => Padding(
                   padding: const EdgeInsets.only(left: 2.0),
@@ -739,7 +786,7 @@ class _SearchResultsView extends StatelessWidget {
                     album: albumId.getAlbumTracks(),
                     staggered: false,
                     width: 106.0,
-                    height: 138.0,
+                    height: 142.0,
                   ),
                 ),
               ),
@@ -838,6 +885,7 @@ class _SearchResultsView extends StatelessWidget {
                       heroTag: 'playlist_$playlistName',
                       showMenuFunction: () => NamidaDialogs.inst.showPlaylistDialog(playlistName),
                       onTap: () => NamidaOnTaps.inst.onNormalPlaylistTap(playlistName),
+                      artworkFile: PlaylistController.inst.getArtworkFileForPlaylist(playlistName),
                       width: 106.0,
                       height: 138.0,
                     ),
@@ -997,8 +1045,6 @@ class _TracksSectionTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
     return Obx(
       (context) {
         final tracksCount = SearchSortController.inst.trackSearchTemp.valueR.length;
@@ -1027,14 +1073,13 @@ class _TracksSectionTitle extends StatelessWidget {
                         (context) {
                           final isAuto = settings.tracksSortSearchIsAuto.valueR;
                           final activeType = isAuto ? null : settings.tracksSortSearch.valueR;
-                          return Text(
+                          return NamidaText(
                             [
                               ?activeType?.toText(),
                               if (isAuto) lang.auto,
                             ].join(' '),
-                            style: textTheme.displaySmall?.copyWith(
-                              color: isAuto ? null : theme.colorScheme.secondary,
-                            ),
+                            style: NText.small,
+                            color: isAuto ? null : NColors.secondary,
                           );
                         },
                       ),
@@ -1050,10 +1095,10 @@ class _TracksSectionTitle extends StatelessWidget {
                       (context) {
                         final isAuto = settings.tracksSortSearchIsAuto.valueR;
                         final activeReverse = isAuto ? false : settings.tracksSortSearchReversed.valueR;
-                        return Icon(
+                        return NIcon(
                           activeReverse ? Broken.arrow_up_3 : Broken.arrow_down_2,
                           size: 16.0,
-                          color: isAuto ? null : theme.colorScheme.secondary,
+                          color: isAuto ? null : NColors.secondary,
                         );
                       },
                     ),
@@ -1163,8 +1208,6 @@ class _FolderSmallCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final folderName = folder.folderNameTryFormatNetwork();
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
     return ConstrainedBox(
       constraints: BoxConstraints(maxWidth: context.width * 0.75),
       child: NamidaInkWell(
@@ -1178,7 +1221,7 @@ class _FolderSmallCard extends StatelessWidget {
           isTracksRecursive: false,
         ),
         borderRadius: 8.0,
-        bgColor: theme.colorScheme.secondary.withOpacityExt(0.12),
+        bgColor: const NColors(.secondary, opacity: 0.12),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -1196,22 +1239,18 @@ class _FolderSmallCard extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
+                  NamidaText(
                     folderName,
                     softWrap: false,
                     overflow: TextOverflow.fade,
-                    style: textTheme.displayMedium?.copyWith(
-                      fontSize: 13.0,
-                    ),
+                    style: const NText(.medium, size: .s13),
                   ),
                   const SizedBox(height: 1.0),
-                  Text(
+                  NamidaText(
                     tracks.length.displayTrackKeyword,
                     softWrap: false,
                     overflow: TextOverflow.fade,
-                    style: textTheme.displaySmall?.copyWith(
-                      fontSize: 12.0,
-                    ),
+                    style: const NText(.small, size: .s12),
                   ),
                 ],
               ),
@@ -1239,8 +1278,6 @@ class _MoodTagSmallCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
     return ConstrainedBox(
       constraints: BoxConstraints(maxWidth: context.width * 0.75),
       child: NamidaInkWell(
@@ -1249,7 +1286,7 @@ class _MoodTagSmallCard extends StatelessWidget {
         onTap: onTap,
         onLongPress: onLongPress,
         borderRadius: 8.0,
-        bgColor: theme.colorScheme.secondary.withOpacityExt(0.12),
+        bgColor: const NColors(.secondary, opacity: 0.12),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -1260,13 +1297,11 @@ class _MoodTagSmallCard extends StatelessWidget {
             ),
             const SizedBox(width: 6.0),
             Flexible(
-              child: Text(
+              child: NamidaText(
                 name,
                 softWrap: false,
                 overflow: TextOverflow.fade,
-                style: textTheme.displayMedium?.copyWith(
-                  fontSize: 13.0,
-                ),
+                style: const NText(.medium, size: .s13),
               ),
             ),
             const SizedBox(width: 8.0),

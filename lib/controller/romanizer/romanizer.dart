@@ -18,7 +18,10 @@ import 'package:namida/core/utils.dart';
 // by claude
 class Romanizer {
   static final inst = Romanizer._();
-  Romanizer._();
+  Romanizer._() {
+    _engine.setDisabledScripts(settings.romanizationDisabledScripts.value);
+    settings.romanizationDisabledScripts.addListener(_onDisabledScriptsChanged);
+  }
 
   // hosted bundle (`ipadic/` + `pinyin.bin`, see scripts/gen_pinyin_table.dart).
   static const _bundleUrl = 'https://files.namida.app/romanization_v1.zip';
@@ -62,16 +65,21 @@ class Romanizer {
         break;
       }
     }
-    final groupedLinesRomanized = _romanizeLinesGroupedWithLatin(lines, chinese);
-    if (groupedLinesRomanized == null) return (index, text) => _engine.romanize(text, chinese: chinese);
-    return (index, text) => groupedLinesRomanized[index] ?? _engine.romanize(text, chinese: chinese);
+    final shipped = _findShippedRomanization(lines, chinese);
+    if (shipped.isMostlyRomanized) return null;
+    final romanizedLines = shipped.romanizedLines;
+    if (romanizedLines == null) return (index, text) => _engine.romanize(text, chinese: chinese);
+    return (index, text) => romanizedLines[index] ?? _engine.romanize(text, chinese: chinese);
   }
 
-  /// the line itself where a latin line sharing its timestamp already romanizes it.
-  List<String?>? _romanizeLinesGroupedWithLatin(List<LrcLine> lines, bool chinese) {
+  /// [_ShippedRomanization.romanizedLines] holds the line itself where a latin line sharing its timestamp, or its own latin part, already romanizes it.
+  _ShippedRomanization _findShippedRomanization(List<LrcLine> lines, bool chinese) {
     List<String?>? romanizedLines;
     final normalizedLatinLines = <String>[];
+    final normalizedLatinParts = <String>[];
     final romanizableIndices = <int>[];
+    var romanizableCount = 0;
+    var matchedCount = 0;
     final length = lines.length;
     var groupEnd = 0;
     for (var groupStart = 0; groupStart < length; groupStart = groupEnd) {
@@ -80,30 +88,51 @@ class Romanizer {
       while (groupEnd < length && lines[groupEnd].timestamp == timestamp) {
         groupEnd++;
       }
-      if (groupEnd - groupStart == 1) continue;
+      final isGroup = groupEnd - groupStart > 1;
 
       normalizedLatinLines.clear();
+      normalizedLatinParts.clear();
       romanizableIndices.clear();
       for (var i = groupStart; i < groupEnd; i++) {
         final text = lines[i].readableText;
         if (RomanizerEngine.needsRomanization(text)) {
           romanizableIndices.add(i);
-        } else {
-          final normalized = _RomanizationMatcher.normalize(text);
+          final latinPart = _RomanizationMatcher.normalize(text, scriptsAsWildcards: false);
+          if (latinPart.isNotEmpty) normalizedLatinParts.add(latinPart);
+        } else if (isGroup) {
+          final normalized = _RomanizationMatcher.normalize(text, scriptsAsWildcards: false);
           if (normalized.isNotEmpty) normalizedLatinLines.add(normalized);
         }
       }
-      if (normalizedLatinLines.isEmpty || romanizableIndices.isEmpty) continue;
+      romanizableCount += romanizableIndices.length;
+      if (romanizableIndices.isEmpty || (normalizedLatinLines.isEmpty && normalizedLatinParts.isEmpty)) continue;
 
       romanizedLines ??= List<String?>.filled(length, null);
       for (final i in romanizableIndices) {
         final text = lines[i].readableText;
         final romanized = _engine.romanize(text, chinese: chinese);
-        final isAlreadyRomanized = _RomanizationMatcher.matchesAny(romanized, normalizedLatinLines);
+        var isAlreadyRomanized = _RomanizationMatcher.matchesAny(romanized, normalizedLatinLines);
+        if (!isAlreadyRomanized) isAlreadyRomanized = _isRomanizedByLatinPart(text, romanized, chinese, normalizedLatinLines, normalizedLatinParts);
+        if (isAlreadyRomanized) matchedCount++;
         romanizedLines[i] = isAlreadyRomanized ? text : romanized;
       }
     }
-    return romanizedLines;
+
+    // -- the rest ship it too, the generated one just misread them (unknown kanji, other readings)
+    final isMostlyRomanized = matchedCount * 2 > romanizableCount;
+    return (romanizedLines: romanizedLines, isMostlyRomanized: isMostlyRomanized);
+  }
+
+  static final _latinLettersRegex = RegExp(r'[A-Za-z]+');
+
+  /// only the non-latin text is compared, a latin part can't romanize itself (`oh yeah 僕は`).
+  /// latin words of the line (`緋色に染まって (of destiny)`) are often left out of its romanized sibling.
+  bool _isRomanizedByLatinPart(String text, String romanized, bool chinese, List<String> normalizedLatinLines, List<String> normalizedLatinParts) {
+    final textWithoutLatin = text.replaceAll(_latinLettersRegex, '');
+    final hasOwnLatin = textWithoutLatin.length != text.length;
+    if (!hasOwnLatin) return _RomanizationMatcher.matchesAny(romanized, normalizedLatinParts);
+    final romanizedWithoutLatin = _engine.romanize(textWithoutLatin, chinese: chinese);
+    return _RomanizationMatcher.matchesAny(romanizedWithoutLatin, normalizedLatinLines) || _RomanizationMatcher.matchesAny(romanizedWithoutLatin, normalizedLatinParts);
   }
 
   void setLyricsEnabled(bool enabled) {
@@ -123,6 +152,15 @@ class Romanizer {
     settings.romanizeSorting.save(enabled);
     if (enabled && !isDictionaryInstalled.value && sortingNeedsDictionary) downloadDictionary();
     Indexer.inst.resortAllAfterSortKeysChange();
+  }
+
+  void _onDisabledScriptsChanged() {
+    final changedScripts = _engine.setDisabledScripts(settings.romanizationDisabledScripts.value);
+    if (changedScripts == 0) return;
+    _sortingCache.removeWhere((text, _) => RomanizerEngine.hasAnyScript(text, changedScripts));
+    _refreshLyrics();
+    final isLibraryAffected = SortKey.seenScripts & changedScripts != 0;
+    if (isLibraryAffected) _resortIfSortingEnabled();
   }
 
   void _resortIfSortingEnabled() {
@@ -208,13 +246,18 @@ class Romanizer {
 // by claude
 class _RomanizationMatcher {
   static const _minSimilarity = 0.6;
+  static const _minContainedSimilarity = 0.7;
+  static const _minContainedLetters = 8;
+  static const _wildcard = 0x100;
+  static const _wildcardLettersPerChar = 6;
 
   static var _normalizeBuffer = Uint16List(128);
   static var _previousRow = Int32List(128);
   static var _currentRow = Int32List(128);
 
   /// lower case a-z only, long vowels collapsed (`ou`, `oo` & `ō` => `o`).
-  static String normalize(String text) {
+  /// each run of characters left unromanized becomes one wildcard, [_wildcard] + the letters it can stand for.
+  static String normalize(String text, {required bool scriptsAsWildcards}) {
     final length = text.length;
     if (_normalizeBuffer.length < length) _normalizeBuffer = Uint16List(length * 2);
     final buffer = _normalizeBuffer;
@@ -222,6 +265,17 @@ class _RomanizationMatcher {
     var previous = 0;
     for (var i = 0; i < length; i++) {
       final codeUnit = text.codeUnitAt(i);
+      if (RomanizerEngine.scriptOf(codeUnit) != 0) {
+        if (!scriptsAsWildcards) continue;
+        if (previous >= _wildcard) {
+          previous += _wildcardLettersPerChar;
+          buffer[outputLength - 1] = previous;
+        } else {
+          previous = _wildcard + _wildcardLettersPerChar;
+          buffer[outputLength++] = previous;
+        }
+        continue;
+      }
       var c = SortKey.baseLetterOf(codeUnit);
       if (c >= 0x41 && c <= 0x5A) c += 0x20;
       if (c < 0x61 || c > 0x7A) continue;
@@ -236,51 +290,94 @@ class _RomanizationMatcher {
   static bool _isVowel(int c) => c == 0x61 || c == 0x65 || c == 0x69 || c == 0x6F || c == 0x75;
 
   static bool matchesAny(String romanized, List<String> normalizedLines) {
-    final normalized = normalize(romanized);
-    if (normalized.isEmpty) return false;
+    final pattern = normalize(romanized, scriptsAsWildcards: true);
+    var letters = 0;
+    var wildcardLetters = 0;
+    for (var i = 0; i < pattern.length; i++) {
+      final c = pattern.codeUnitAt(i);
+      if (c >= _wildcard) {
+        wildcardLetters += c - _wildcard;
+      } else {
+        letters++;
+      }
+    }
+    if (letters == 0) return false;
+    final canBeContained = letters >= _minContainedLetters;
     for (final line in normalizedLines) {
-      if (_isSimilar(normalized, line)) return true;
+      if (_isSimilar(pattern, letters, wildcardLetters, line)) return true;
+      if (canBeContained && _isContainedIn(pattern, letters, line)) return true;
     }
     return false;
   }
 
-  static bool _isSimilar(String a, String b) {
-    final aLength = a.length;
-    final bLength = b.length;
-    final maxLength = aLength > bLength ? aLength : bLength;
+  static bool _isSimilar(String pattern, int letters, int wildcardLetters, String line) {
+    final lineLength = line.length;
+    final lineLengthOutsideWildcards = lineLength - wildcardLetters;
+    final maxLength = letters > lineLengthOutsideWildcards ? letters : lineLengthOutsideWildcards;
     final maxDistance = (maxLength * (1 - _minSimilarity)).floor();
-    final lengthDifference = (aLength - bLength).abs();
-    if (lengthDifference > maxDistance) return false;
+    final extraPatternLetters = letters - lineLength;
+    final extraLineLetters = lineLengthOutsideWildcards - letters;
+    if (extraPatternLetters > maxDistance || extraLineLetters > maxDistance) return false;
+    return _distance(pattern, line, maxDistance, isContained: false) <= maxDistance;
+  }
 
-    if (_previousRow.length <= bLength) {
-      _previousRow = Int32List(bLength * 2 + 1);
-      _currentRow = Int32List(bLength * 2 + 1);
+  /// the line can hold more than the romanization, `Akaku tokekonda jouzai (Tu-ru-ru)` or one line romanizing 2 lines.
+  static bool _isContainedIn(String pattern, int letters, String line) {
+    final maxDistance = (letters * (1 - _minContainedSimilarity)).floor();
+    final extraPatternLetters = letters - line.length;
+    if (extraPatternLetters > maxDistance) return false;
+    return _distance(pattern, line, maxDistance, isContained: true) <= maxDistance;
+  }
+
+  /// levenshtein where a wildcard matches up to its letters for free, [isContained] lets [pattern] start and end anywhere in [line].
+  /// returns early with a distance above [maxDistance].
+  static int _distance(String pattern, String line, int maxDistance, {required bool isContained}) {
+    final patternLength = pattern.length;
+    final lineLength = line.length;
+    if (_previousRow.length <= lineLength) {
+      _previousRow = Int32List(lineLength * 2 + 1);
+      _currentRow = Int32List(lineLength * 2 + 1);
     }
     var previousRow = _previousRow;
     var currentRow = _currentRow;
-    for (var j = 0; j <= bLength; j++) {
-      previousRow[j] = j;
+    for (var j = 0; j <= lineLength; j++) {
+      previousRow[j] = isContained ? 0 : j;
     }
-    for (var i = 1; i <= aLength; i++) {
-      final ac = a.codeUnitAt(i - 1);
-      currentRow[0] = i;
-      var rowMin = i;
-      for (var j = 1; j <= bLength; j++) {
-        final bc = b.codeUnitAt(j - 1);
-        final substitutionCost = ac == bc ? 0 : 1;
-        final substitution = previousRow[j - 1] + substitutionCost;
-        final deletion = previousRow[j] + 1;
-        final insertion = currentRow[j - 1] + 1;
-        var distance = substitution < deletion ? substitution : deletion;
-        if (insertion < distance) distance = insertion;
+    for (var i = 0; i < patternLength; i++) {
+      final pc = pattern.codeUnitAt(i);
+      final isWildcard = pc >= _wildcard;
+      final wildcardLetters = pc - _wildcard;
+      currentRow[0] = isWildcard ? previousRow[0] : previousRow[0] + 1;
+      var rowMin = currentRow[0];
+      for (var j = 1; j <= lineLength; j++) {
+        var distance = currentRow[j - 1] + 1;
+        if (isWildcard) {
+          final windowStart = j > wildcardLetters ? j - wildcardLetters : 0;
+          for (var k = windowStart; k <= j; k++) {
+            if (previousRow[k] < distance) distance = previousRow[k];
+          }
+        } else {
+          final substitutionCost = pc == line.codeUnitAt(j - 1) ? 0 : 1;
+          final substitution = previousRow[j - 1] + substitutionCost;
+          final deletion = previousRow[j] + 1;
+          if (substitution < distance) distance = substitution;
+          if (deletion < distance) distance = deletion;
+        }
         currentRow[j] = distance;
         if (distance < rowMin) rowMin = distance;
       }
-      if (rowMin > maxDistance) return false;
+      if (rowMin > maxDistance) return rowMin;
       final swap = previousRow;
       previousRow = currentRow;
       currentRow = swap;
     }
-    return previousRow[bLength] <= maxDistance;
+    if (!isContained) return previousRow[lineLength];
+    var minDistance = previousRow[0];
+    for (var j = 1; j <= lineLength; j++) {
+      if (previousRow[j] < minDistance) minDistance = previousRow[j];
+    }
+    return minDistance;
   }
 }
+
+typedef _ShippedRomanization = ({List<String?>? romanizedLines, bool isMostlyRomanized});

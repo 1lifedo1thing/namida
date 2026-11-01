@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:collection';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui';
@@ -27,19 +26,17 @@ import 'package:namida/base/audio_handler.dart';
 import 'package:namida/base/pull_to_refresh.dart';
 import 'package:namida/class/faudiomodel.dart';
 import 'package:namida/class/route.dart';
-import 'package:namida/class/shortcut_data.dart';
 import 'package:namida/class/track.dart';
 import 'package:namida/class/version_wrapper.dart';
 import 'package:namida/controller/connectivity.dart';
 import 'package:namida/controller/current_color.dart';
+import 'package:namida/controller/file_browser.dart';
 import 'package:namida/controller/miniplayer_controller.dart';
 import 'package:namida/controller/navigator_controller.dart';
 import 'package:namida/controller/platform/namida_channel/namida_channel.dart';
-import 'package:namida/controller/platform/shortcuts_manager/shortcuts_manager.dart';
 import 'package:namida/controller/player_controller.dart';
 import 'package:namida/controller/playlist_controller.dart';
 import 'package:namida/controller/settings_controller.dart';
-import 'package:namida/controller/shortcuts_controller.dart';
 import 'package:namida/controller/time_ago_controller.dart';
 import 'package:namida/controller/version_controller.dart';
 import 'package:namida/controller/video_controller.dart';
@@ -52,9 +49,11 @@ import 'package:namida/core/extensions.dart';
 import 'package:namida/core/functions.dart';
 import 'package:namida/core/icon_fonts/broken_icons.dart';
 import 'package:namida/core/namida_converter_ext.dart';
+import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/translations/language.dart';
 import 'package:namida/core/ui_scale.dart';
 import 'package:namida/core/utils.dart';
+import 'package:namida/main.dart';
 import 'package:namida/packages/scroll_physics_modified.dart';
 import 'package:namida/packages/smooth_scroll_controller.dart';
 import 'package:namida/ui/dialogs/edit_tags_dialog.dart';
@@ -130,9 +129,9 @@ class CustomSwitch extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final finalColor = passedColor ?? CurrentColor.inst.color;
-    final theme = context.theme;
+    final colors = NColorsData.targetOf(context);
     final duration = Duration(milliseconds: durationInMillisecond);
-    final curve = Curves.fastEaseInToSlowEaseOut;
+    const curve = Curves.fastEaseInToSlowEaseOut;
     return SizedBox(
       width: width,
       height: height,
@@ -141,16 +140,16 @@ class CustomSwitch extends StatelessWidget {
         curve: curve,
         decoration: BoxDecoration(
           color: (active
-              ? bgColor ?? Color.alphaBlend(finalColor.withAlpha(180), theme.colorScheme.surface).withAlpha(140)
-              // : theme.scaffoldBackgroundColor.withAlpha(34)
-              : Color.alphaBlend(theme.scaffoldBackgroundColor.withAlpha(60), theme.disabledColor)),
+              ? bgColor ?? Color.alphaBlend(finalColor.withOpacityExt(0.71), colors.surface).withOpacityExt(0.55)
+              // : theme.scaffoldBackgroundColor.withOpacityExt(0.13)
+              : Color.alphaBlend(colors.scaffold.withOpacityExt(0.24), colors.disabled)),
           borderRadius: BorderRadius.circular(30.0.multipliedRadius),
           boxShadow: [
             BoxShadow(
               offset: const Offset(0, 2),
               blurRadius: active ? 8 : 2,
               spreadRadius: 0,
-              color: (shadowColor ?? Color.alphaBlend(finalColor.withAlpha(180), theme.colorScheme.surface)).withOpacityExt(active ? 0.8 : 0.3),
+              color: (shadowColor ?? Color.alphaBlend(finalColor.withOpacityExt(0.71), colors.surface)).withOpacityExt(active ? 0.8 : 0.3),
             ),
           ],
         ),
@@ -165,10 +164,10 @@ class CustomSwitch extends StatelessWidget {
               height: height / 1.5,
               child: DecoratedBox(
                 decoration: BoxDecoration(
-                  color: circleColor ?? Colors.white.withAlpha(222),
+                  color: circleColor ?? Colors.white.withOpacityExt(0.87),
                   borderRadius: BorderRadius.circular(30.0.multipliedRadius),
                   // boxShadow: [
-                  //   BoxShadow(color: Colors.black.withAlpha(100), spreadRadius: 1, blurRadius: 4, offset: Offset(0, 2)),
+                  //   BoxShadow(color: Colors.black.withOpacityExt(0.39), spreadRadius: 1, blurRadius: 4, offset: Offset(0, 2)),
                   // ],
                 ),
               ),
@@ -303,13 +302,9 @@ class CustomListTile extends StatelessWidget {
     this.extraDense = false,
   });
 
-  static TextStyle? getTrailingTextStyle(ThemeData theme) => theme.textTheme.displayMedium?.copyWith(color: theme.colorScheme.onSurface.withAlpha(200));
-
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
-    final iconColor = context.defaultIconColor(passedColor);
+    final iconColor = NColors.defaultIcon(mainColor: passedColor);
     final subtitle = this.subtitle;
     final subtitleWidget = this.subtitleWidget;
     final hasSubtitleText = subtitle != null && subtitle.isNotEmpty;
@@ -332,9 +327,9 @@ class CustomListTile extends StatelessWidget {
     final subtitleText =
         subtitleWidget ??
         (hasSubtitleText
-            ? Text(
+            ? NamidaText(
                 subtitle,
-                style: theme.textTheme.displaySmall,
+                style: NText.small,
                 maxLines: maxSubtitleLines,
                 overflow: TextOverflow.ellipsis,
               )
@@ -362,13 +357,13 @@ class CustomListTile extends StatelessWidget {
                     rotateIcon != null
                         ? RotatedBox(
                             quarterTurns: rotateIcon!,
-                            child: Icon(
+                            child: NIcon(
                               icon,
                               color: iconColor,
                               size: iconSize,
                             ),
                           )
-                        : Icon(
+                        : NIcon(
                             icon,
                             color: iconColor,
                             size: iconSize,
@@ -398,11 +393,11 @@ class CustomListTile extends StatelessWidget {
                                   : [
                                       TextSpan(
                                         text: titleSuffix,
-                                        style: textTheme.displaySmall?.copyWith(fontSize: 11.0),
+                                        style: NText.small.of(context).copyWith(fontSize: 11.0),
                                       ),
                                     ],
                             ),
-                            style: titleStyle ?? (largeTitle ? theme.textTheme.displayLarge : theme.textTheme.displayMedium),
+                            style: titleStyle ?? (largeTitle ? NText.large.of(context) : NText.medium.of(context)),
                             maxLines: maxTitleLines ?? (subtitle != null ? 4 : 5),
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -431,9 +426,10 @@ class CustomListTile extends StatelessWidget {
                       child: FittedBox(
                         fit: BoxFit.scaleDown,
                         child: trailingText != null
-                            ? Text(
+                            ? NamidaText(
                                 trailingText!,
-                                style: getTrailingTextStyle(theme),
+                                style: NText.medium,
+                                color: const NColors(.onSurface, opacity: 0.78),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 textAlign: TextAlign.center,
@@ -660,6 +656,7 @@ class CustomBlurryDialog extends StatelessWidget {
   final bool scrollable;
   final double horizontalInset;
   final double verticalInset;
+  final double maxWidth;
   final EdgeInsetsGeometry contentPadding;
   final ThemeData? theme;
   final Widget? frame;
@@ -678,6 +675,7 @@ class CustomBlurryDialog extends StatelessWidget {
     this.isWarning = false,
     this.horizontalInset = 42.0,
     this.verticalInset = 32.0,
+    this.maxWidth = kDialogMaxWidth,
     this.scrollable = true,
     this.contentPadding = const EdgeInsets.all(14.0),
     this.leftAction,
@@ -685,11 +683,17 @@ class CustomBlurryDialog extends StatelessWidget {
     this.frame,
   });
 
+  static const _kContentToActionsGap = 16.0;
+  static const _kActionsTopPaddingWithoutContentPadding = 12.0;
+
   @override
   Widget build(BuildContext context) {
     final ctxth = theme ?? context.theme;
     final vInsets = verticalInset;
     final double horizontalMargin = Dimensions.calculateDialogHorizontalMargin(context, horizontalInset);
+    final contentBottomPadding = contentPadding.resolve(Directionality.of(context)).bottom;
+    final actionsTopPaddingAfterContent = (_kContentToActionsGap - contentBottomPadding).withMinimum(0.0);
+    final actionsTopPadding = contentBottomPadding == 0.0 ? _kActionsTopPaddingWithoutContentPadding : actionsTopPaddingAfterContent;
     return Center(
       child: SmoothSingleChildScrollView(
         child: Dialog(
@@ -697,142 +701,144 @@ class CustomBlurryDialog extends StatelessWidget {
           surfaceTintColor: Colors.transparent,
           insetPadding: EdgeInsets.symmetric(horizontal: horizontalMargin, vertical: vInsets),
           clipBehavior: Clip.antiAlias,
-          child: ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: kDialogMaxWidth),
-            child: TapDetector(
-              onTap: () {},
-              child: _DialogFrame(
-                frame: frame,
-                child: Container(
-                  color: Colors.transparent,
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      /// Title.
-                      ?titleWidget,
-                      if (titleWidgetInPadding != null)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 28.0, left: 28.0, right: 24.0),
-                          child: Align(
-                            alignment: Alignment.centerLeft,
-                            child: titleWidgetInPadding,
+          child: _DialogContentNoSystemPadding(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: maxWidth),
+              child: TapDetector(
+                onTap: () {},
+                child: _DialogFrame(
+                  frame: frame,
+                  child: Container(
+                    color: Colors.transparent,
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        /// Title.
+                        ?titleWidget,
+                        if (titleWidgetInPadding != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 28.0, left: 28.0, right: 24.0),
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: titleWidgetInPadding,
+                            ),
                           ),
-                        ),
-                      if (titleWidget == null && titleWidgetInPadding == null)
-                        normalTitleStyle
-                            ? Padding(
-                                padding: const EdgeInsets.only(top: 28.0, left: 28.0, right: 24.0),
-                                child: Row(
-                                  children: [
-                                    if (icon != null || isWarning) ...[
-                                      Icon(
-                                        isWarning ? Broken.warning_2 : icon,
-                                      ),
-                                      const SizedBox(
-                                        width: 10.0,
-                                      ),
-                                    ],
-                                    Expanded(
-                                      child: Text(
-                                        isWarning ? lang.warning : title ?? '',
-                                        style: ctxth.textTheme.displayLarge,
-                                      ),
-                                    ),
-                                    ...?trailingWidgets,
-                                  ],
-                                ),
-                              )
-                            : Container(
-                                color: Color.alphaBlend(ctxth.colorScheme.primary.withOpacityExt(0.02), ctxth.cardTheme.color!),
-                                padding: const EdgeInsets.all(16),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    if (icon != null) ...[
-                                      Icon(
-                                        icon,
-                                      ),
-                                      const SizedBox(
-                                        width: 10.0,
-                                      ),
-                                    ],
-                                    Expanded(
-                                      child: Text(
-                                        title ?? '',
-                                        style: ctxth.textTheme.displayMedium,
-                                        textAlign: TextAlign.center,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-
-                      /// Body.
-                      Padding(
-                        padding: contentPadding,
-                        child: SizedBox(
-                          width: context.width,
-                          child: bodyText != null
+                        if (titleWidget == null && titleWidgetInPadding == null)
+                          normalTitleStyle
                               ? Padding(
-                                  padding: const EdgeInsets.all(12.0),
-                                  child: Text(
-                                    bodyText!,
-                                    style: ctxth.textTheme.displayMedium,
-                                  ),
-                                )
-                              : child,
-                        ),
-                      ),
-
-                      /// Actions.
-                      if (actions != null)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-                          child: LayoutWidthProvider(
-                            builder: (context, maxWidth) {
-                              final leftActionMaxWidth = leftAction == null ? 0.0 : maxWidth * 0.35;
-                              final actionsMaxWidth = (maxWidth - leftActionMaxWidth);
-                              return SizedBox(
-                                width: maxWidth,
-                                child: Row(
-                                  mainAxisSize: .max,
-                                  children: [
-                                    if (leftAction != null) ...[
-                                      ConstrainedBox(
-                                        constraints: BoxConstraints(maxWidth: leftActionMaxWidth),
-                                        child: FittedBox(
-                                          alignment: AlignmentDirectional.centerStart,
-                                          fit: BoxFit.scaleDown,
-                                          child: leftAction!,
+                                  padding: const EdgeInsets.only(top: 28.0, left: 28.0, right: 24.0),
+                                  child: Row(
+                                    children: [
+                                      if (icon != null || isWarning) ...[
+                                        Icon(
+                                          isWarning ? Broken.warning_2 : icon,
+                                        ),
+                                        const SizedBox(
+                                          width: 10.0,
+                                        ),
+                                      ],
+                                      Expanded(
+                                        child: NamidaText(
+                                          isWarning ? lang.warning : title ?? '',
+                                          style: NText.large,
                                         ),
                                       ),
-                                      const SizedBox(width: 6.0),
+                                      ...?trailingWidgets,
                                     ],
+                                  ),
+                                )
+                              : Container(
+                                  color: Color.alphaBlend(ctxth.colorScheme.primary.withOpacityExt(0.02), ctxth.cardTheme.color!),
+                                  padding: const EdgeInsets.all(16),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      if (icon != null) ...[
+                                        Icon(
+                                          icon,
+                                        ),
+                                        const SizedBox(
+                                          width: 10.0,
+                                        ),
+                                      ],
+                                      Expanded(
+                                        child: NamidaText(
+                                          title ?? '',
+                                          style: NText.medium,
+                                          textAlign: TextAlign.center,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
 
-                                    Expanded(
-                                      child: ConstrainedBox(
-                                        constraints: BoxConstraints(maxWidth: actionsMaxWidth),
-                                        child: FittedBox(
-                                          alignment: AlignmentDirectional.centerEnd,
-                                          fit: BoxFit.scaleDown,
-                                          child: Row(
-                                            mainAxisSize: .max,
-                                            mainAxisAlignment: .end,
-                                            children: [
-                                              ...actions!.addSeparators(separator: const SizedBox(width: 6.0)),
-                                            ],
+                        /// Body.
+                        Padding(
+                          padding: contentPadding,
+                          child: SizedBox(
+                            width: context.width,
+                            child: bodyText != null
+                                ? Padding(
+                                    padding: const EdgeInsets.all(12.0),
+                                    child: NamidaText(
+                                      bodyText!,
+                                      style: NText.medium,
+                                    ),
+                                  )
+                                : child,
+                          ),
+                        ),
+
+                        /// Actions.
+                        if (actions != null)
+                          Padding(
+                            padding: EdgeInsets.only(left: 16.0, right: 16.0, top: actionsTopPadding, bottom: 12.0),
+                            child: LayoutWidthProvider(
+                              builder: (context, maxWidth) {
+                                final leftActionMaxWidth = leftAction == null ? 0.0 : maxWidth * 0.35;
+                                final actionsMaxWidth = (maxWidth - leftActionMaxWidth);
+                                return SizedBox(
+                                  width: maxWidth,
+                                  child: Row(
+                                    mainAxisSize: .max,
+                                    children: [
+                                      if (leftAction != null) ...[
+                                        ConstrainedBox(
+                                          constraints: BoxConstraints(maxWidth: leftActionMaxWidth),
+                                          child: FittedBox(
+                                            alignment: AlignmentDirectional.centerStart,
+                                            fit: BoxFit.scaleDown,
+                                            child: leftAction!,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 6.0),
+                                      ],
+
+                                      Expanded(
+                                        child: ConstrainedBox(
+                                          constraints: BoxConstraints(maxWidth: actionsMaxWidth),
+                                          child: FittedBox(
+                                            alignment: AlignmentDirectional.centerEnd,
+                                            fit: BoxFit.scaleDown,
+                                            child: Row(
+                                              mainAxisSize: .max,
+                                              mainAxisAlignment: .end,
+                                              children: [
+                                                ...actions!.addSeparators(separator: const SizedBox(width: 6.0)),
+                                              ],
+                                            ),
                                           ),
                                         ),
                                       ),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            },
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
                           ),
-                        ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -840,6 +846,24 @@ class CustomBlurryDialog extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _DialogContentNoSystemPadding extends StatelessWidget {
+  final Widget child;
+
+  const _DialogContentNoSystemPadding({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return MediaQuery.removePadding(
+      context: context,
+      removeLeft: true,
+      removeTop: true,
+      removeRight: true,
+      removeBottom: true,
+      child: child,
     );
   }
 }
@@ -999,6 +1023,7 @@ class NamidaButton extends StatelessWidget {
   final bool? tooltipPreferBelow;
   final bool isCentered;
   final Axis direction;
+  final CustomPainter Function(Color foregroundColor, double borderRadius)? foregroundPainterBuilder;
 
   const NamidaButton({
     super.key,
@@ -1028,12 +1053,12 @@ class NamidaButton extends StatelessWidget {
     this.tooltipPreferBelow,
     this.isCentered = true,
     this.direction = Axis.horizontal,
+    this.foregroundPainterBuilder,
   });
 
   static const double kDefaultMinHeight = 36.0;
 
-  @override
-  Widget build(BuildContext context) {
+  static NamidaButtonPalette resolvePalette(NColorsData nColors, {required NamidaButtonColors colors, Color? colorScheme, bool opaqueBG = false}) {
     final (double colorSchemeOpacity, double bgOpacity, double borderOpacity, double foregroundOpacity) = switch (colors) {
       NamidaButtonColors.selected => (0.8, 0.8, 0.8, 0.8),
       NamidaButtonColors.fab => (0.5, 0.2, 0.6, 0.85),
@@ -1043,17 +1068,30 @@ class NamidaButton extends StatelessWidget {
       NamidaButtonColors.dimmed => (0.1, 0.2, 0.6, 0.85),
     };
 
-    final colorScheme = (this.colorScheme ?? context.theme.colorScheme.primary).withOpacityExt(colorSchemeOpacity);
+    final colorSchemeBase = colorScheme ?? nColors.primary;
+    final colorSchemeFinal = colorSchemeBase.withOpacityExt(colorSchemeOpacity);
 
     bool whiteForeground = switch (colors) {
       .selected => true,
       _ => false,
     };
 
-    var bgColor = colorScheme.withOpacityExt(colorScheme.a * bgOpacity);
-    if (opaqueBG) bgColor = Color.alphaBlend(bgColor, context.theme.scaffoldBackgroundColor);
-    final borderColor = colorScheme.withOpacityExt(colorScheme.a * borderOpacity);
-    final foregroundColor = (whiteForeground ? Colors.white : context.defaultIconColor(colorScheme)).withOpacityExt(foregroundOpacity);
+    var bgColor = colorSchemeFinal.withOpacityExt(colorSchemeFinal.a * bgOpacity);
+    if (opaqueBG) bgColor = Color.alphaBlend(bgColor, nColors.scaffold);
+    final borderColor = colorSchemeFinal.withOpacityExt(colorSchemeFinal.a * borderOpacity);
+    final foregroundBase = whiteForeground ? Colors.white : NColors.defaultIcon(mainColor: colorSchemeFinal).resolve(nColors);
+    final foregroundColor = foregroundBase.withOpacityExt(foregroundOpacity);
+    return (colorScheme: colorSchemeFinal, bg: bgColor, border: borderColor, foreground: foregroundColor);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final nColors = NColorsData.targetOf(context);
+    final palette = resolvePalette(nColors, colors: colors, colorScheme: this.colorScheme, opaqueBG: opaqueBG);
+    final colorScheme = palette.colorScheme;
+    final bgColor = palette.bg;
+    final borderColor = palette.border;
+    final foregroundColor = palette.foreground;
 
     final text = this.text;
     final icon = this.icon;
@@ -1070,8 +1108,8 @@ class NamidaButton extends StatelessWidget {
             disableColor: true,
             baseIcon: icon,
             iconSize: iconSize,
-            baseIconColor: foregroundColor,
-            secondaryIconColor: foregroundColor,
+            baseIconColor: NColors.fixed(foregroundColor),
+            secondaryIconColor: NColors.fixed(foregroundColor),
             secondaryIcon: secondaryIcon,
             secondaryIconSize: 13.0,
           )
@@ -1082,10 +1120,12 @@ class NamidaButton extends StatelessWidget {
           ));
     final iconChild = iconWidget ?? iconOfData;
 
-    final textStyle = context.textTheme.displayMedium?.copyWith(
-      color: foregroundColor,
-      fontSize: fontSizeMultiplier * (dense ? 15.0 : 15.5),
-    );
+    final textStyle = NText.medium
+        .of(context)
+        .copyWith(
+          color: foregroundColor,
+          fontSize: fontSizeMultiplier * (dense ? 15.0 : 15.5),
+        );
 
     final textChild = (animateText || text == null || text.isEmpty
         ? null
@@ -1100,7 +1140,7 @@ class NamidaButton extends StatelessWidget {
     double minHeight = this.minHeight ?? kDefaultMinHeight;
 
     if (isCircle || isMinimumSquared) {
-      padding = EdgeInsets.symmetric(
+      padding = const EdgeInsets.symmetric(
         horizontal: 12.0,
         vertical: 12.0,
       );
@@ -1133,52 +1173,62 @@ class NamidaButton extends StatelessWidget {
     }
 
     final brRaw = borderRadius ?? (isCircle ? 99.0 : 20.0);
+    Widget inkWell = NamidaInkWell(
+      animationDurationMS: animatedDecoration ? 300 : 0,
+      borderRadius: brRaw,
+      onTap: onTap,
+      onLongPress: onLongPress,
+      decoration: BoxDecoration(
+        color: bgColor,
+        border: Border.all(
+          width: 0.5,
+          color: borderColor,
+        ),
+        boxShadow: boxShadow,
+      ),
+      padding: padding,
+      child: Flex(
+        direction: direction,
+        mainAxisAlignment: isCentered ? MainAxisAlignment.center : MainAxisAlignment.start,
+        mainAxisSize: .min,
+        children: [
+          ?iconChild,
+          if (animateText)
+            Flexible(
+              child: _NamidaButtonAnimatedText(
+                text: text,
+                style: textStyle,
+                direction: direction,
+                hasIcon: iconChild != null,
+              ),
+            ),
+          if (iconChild != null && textChild != null)
+            switch (direction) {
+              Axis.horizontal => const SizedBox(width: 8.0),
+              Axis.vertical => const SizedBox(height: 2.0),
+            },
+          if (textChild != null)
+            Flexible(
+              child: textChild,
+            ),
+        ],
+      ),
+    );
+
+    final foregroundPainter = foregroundPainterBuilder?.call(foregroundColor, brRaw.multipliedRadius);
+    if (foregroundPainter != null) {
+      inkWell = CustomPaint(
+        foregroundPainter: foregroundPainter,
+        child: inkWell,
+      );
+    }
+
     Widget box = NamidaTooltip(
       message: tooltip,
       preferBelow: tooltipPreferBelow,
       child: ConstrainedBox(
         constraints: BoxConstraints(minHeight: minHeight, minWidth: isCircle || isMinimumSquared ? minHeight : 0.0),
-        child: NamidaInkWell(
-          animationDurationMS: animatedDecoration ? 300 : 0,
-          borderRadius: brRaw,
-          onTap: onTap,
-          onLongPress: onLongPress,
-          decoration: BoxDecoration(
-            color: bgColor,
-            border: Border.all(
-              width: 0.5,
-              color: borderColor,
-            ),
-            boxShadow: boxShadow,
-          ),
-          padding: padding,
-          child: Flex(
-            direction: direction,
-            mainAxisAlignment: isCentered ? MainAxisAlignment.center : MainAxisAlignment.start,
-            mainAxisSize: .min,
-            children: [
-              ?iconChild,
-              if (animateText)
-                Flexible(
-                  child: _NamidaButtonAnimatedText(
-                    text: text,
-                    style: textStyle,
-                    direction: direction,
-                    hasIcon: iconChild != null,
-                  ),
-                ),
-              if (iconChild != null && textChild != null)
-                switch (direction) {
-                  Axis.horizontal => const SizedBox(width: 8.0),
-                  Axis.vertical => const SizedBox(height: 2.0),
-                },
-              if (textChild != null)
-                Flexible(
-                  child: textChild,
-                ),
-            ],
-          ),
-        ),
+        child: inkWell,
       ),
     );
 
@@ -1316,12 +1366,11 @@ class StatsContainer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    return Container(
-      constraints: BoxConstraints(minHeight: 42.0),
+    return NContainer(
+      constraints: const BoxConstraints(minHeight: 42.0),
       padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
-      decoration: BoxDecoration(
-        color: theme.cardTheme.color?.withAlpha(200),
+      decoration: (colors) => BoxDecoration(
+        color: colors.cardTheme.withOpacityExt(0.78),
         borderRadius: BorderRadius.circular(18.0.multipliedRadius),
       ),
       margin: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 5.0),
@@ -1331,9 +1380,9 @@ class StatsContainer extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               leading ??
-                  Icon(
+                  NIcon(
                     icon,
-                    color: context.defaultIconColor(),
+                    color: NColors.defaultIcon(),
                     size: 22.0,
                   ),
               const SizedBox(width: 8.0),
@@ -1344,7 +1393,7 @@ class StatsContainer extends StatelessWidget {
               else
                 Text(
                   '$value ${lang.ofLabel} $total',
-                  style: TextStyle(fontSize: 13.0),
+                  style: const TextStyle(fontSize: 13.0),
                 ),
             ],
           ),
@@ -1392,9 +1441,7 @@ class SmallListTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
-    final iconColor = color != null ? context.defaultIconColor(color, textTheme.displayMedium?.color) : null;
+    final iconColor = color != null ? Color.alphaBlend(color!.withOpacityExt(0.47), NText.medium.of(context).color!) : null;
     final padding = this.padding ?? (icon != null ? const EdgeInsets.only(left: 16.0, right: 12.0) : const EdgeInsets.only(left: 12.0, right: 12.0));
     return ListTile(
       contentPadding: padding,
@@ -1435,25 +1482,27 @@ class SmallListTile extends StatelessWidget {
                   ),
           ),
       visualDensity: visualDensity ?? (compact ? const VisualDensity(horizontal: -2.2, vertical: -2.2) : const VisualDensity(horizontal: -1.2, vertical: -1.2)),
-      title: Text(
+      title: NamidaText(
         title,
-        style: textTheme.displayMedium?.copyWith(
-          color: color != null
+        style: NText.medium,
+        color: NColors.fixed(
+          color != null
               ? Color.alphaBlend(
-                  color!.withAlpha(40),
-                  textTheme.displayMedium!.color!,
+                  color!.withOpacityExt(0.16),
+                  NText.medium.of(context).color!,
                 )
               : null,
         ),
       ),
       subtitle: subtitle != null
-          ? Text(
+          ? NamidaText(
               subtitle!,
-              style: textTheme.displaySmall?.copyWith(
-                color: color != null
+              style: NText.small,
+              color: NColors.fixed(
+                color != null
                     ? Color.alphaBlend(
-                        color!.withAlpha(40),
-                        textTheme.displayMedium!.color!,
+                        color!.withOpacityExt(0.16),
+                        NText.medium.of(context).color!,
                       )
                     : null,
               ),
@@ -1474,6 +1523,9 @@ class SmallListTile extends StatelessWidget {
 
 // rewritten by claude, header is a [CustomListTile], one animation drives size, fade, slide, arrow and tint, children sit on a rail.
 class NamidaExpansionTile extends StatefulWidget {
+  static const kBottomGap = 18.0;
+  static const kNestedBottomGap = 8.0;
+
   final IconData? icon;
   final Color? iconColor;
   final Widget? leading;
@@ -1487,6 +1539,8 @@ class NamidaExpansionTile extends StatefulWidget {
 
   /// inside the rail.
   final EdgeInsetsGeometry childrenPadding;
+
+  final double bottomGap;
   final bool showRail;
   final bool initiallyExpanded;
   final Widget Function(Widget arrow)? trailingBuilder;
@@ -1510,6 +1564,7 @@ class NamidaExpansionTile extends StatefulWidget {
     this.textColorScheme,
     this.children = const <Widget>[],
     this.childrenPadding = EdgeInsets.zero,
+    this.bottomGap = kBottomGap,
     this.showRail = true,
     this.initiallyExpanded = false,
     this.trailingBuilder,
@@ -1605,12 +1660,12 @@ class _NamidaExpansionTileState extends State<NamidaExpansionTile> with SingleTi
   @override
   Widget build(BuildContext context) {
     final theme = context.theme;
-    final textTheme = theme.textTheme;
+    final colors = NColorsData.of(context);
     final textColorScheme = widget.textColorScheme;
-    final titleStyle = textTheme.displayMedium!;
+    final titleStyle = NText.medium.of(context);
     final normalTitleColor = titleStyle.color!;
-    final brightTitleColor = textTheme.displayLarge!.color!;
-    final schemeTint = textColorScheme?.withAlpha(40);
+    final brightTitleColor = NText.large.of(context).color!;
+    final schemeTint = textColorScheme?.withOpacityExt(0.16);
     final collapsedTitleColor = schemeTint == null ? normalTitleColor : Color.alphaBlend(schemeTint, normalTitleColor);
     final expandedTitleColor = widget.textColor ?? (schemeTint == null ? brightTitleColor : Color.alphaBlend(schemeTint, brightTitleColor));
     final arrow = Padding(
@@ -1653,15 +1708,15 @@ class _NamidaExpansionTileState extends State<NamidaExpansionTile> with SingleTi
       children: [
         header,
         if (_isBodyBuilt)
-          SizeTransition(
-            sizeFactor: _sizeAnimation,
-            alignment: AlignmentDirectional.topStart,
+          _ExpansionSizeReveal(
+            animation: _sizeAnimation,
             child: FadeTransition(
               opacity: _fadeAnimation,
               child: _ExpansionSlideIn(
                 animation: _sizeAnimation,
                 child: _ExpansionChildrenRail(
                   padding: widget.childrenPadding,
+                  bottomGap: widget.bottomGap,
                   showRail: widget.showRail,
                   children: widget.children,
                 ),
@@ -1683,7 +1738,7 @@ class _NamidaExpansionTileState extends State<NamidaExpansionTile> with SingleTi
     final isDark = theme.brightness == Brightness.dark;
     return _ExpansionTint(
       animation: _sizeAnimation,
-      color: theme.cardColor,
+      color: colors.card,
       maxOpacity: isDark ? 0.3 : 0.18,
       borderRadius: borderRadius,
       child: content,
@@ -1764,6 +1819,27 @@ class _ExpansionTint extends AnimatedWidget {
   }
 }
 
+// -- unlike [SizeTransition], no clip once fully expanded, it would cut children shadows/glows.
+class _ExpansionSizeReveal extends AnimatedWidget {
+  final Animation<double> animation;
+  final Widget child;
+
+  const _ExpansionSizeReveal({required this.animation, required this.child}) : super(listenable: animation);
+
+  @override
+  Widget build(BuildContext context) {
+    final sizeFactor = animation.value.withMinimum(0.0);
+    return ClipRect(
+      clipBehavior: sizeFactor < 1.0 ? Clip.hardEdge : Clip.none,
+      child: Align(
+        alignment: AlignmentDirectional.topStart,
+        heightFactor: sizeFactor,
+        child: child,
+      ),
+    );
+  }
+}
+
 class _ExpansionSlideIn extends AnimatedWidget {
   final Animation<double> animation;
   final Widget child;
@@ -1784,16 +1860,18 @@ class _ExpansionSlideIn extends AnimatedWidget {
 
 class _ExpansionChildrenRail extends StatelessWidget {
   final EdgeInsetsGeometry padding;
+  final double bottomGap;
   final bool showRail;
   final List<Widget> children;
 
-  const _ExpansionChildrenRail({required this.padding, required this.showRail, required this.children});
+  const _ExpansionChildrenRail({required this.padding, required this.bottomGap, required this.showRail, required this.children});
 
   static const _kRailLeft = 20.0;
   static const _kChildrenIndent = 12.0;
 
   @override
   Widget build(BuildContext context) {
+    final colors = NColorsData.of(context);
     final content = Padding(
       padding: const EdgeInsetsDirectional.only(start: _kChildrenIndent),
       child: Padding(
@@ -1806,7 +1884,7 @@ class _ExpansionChildrenRail extends StatelessWidget {
     );
     Widget body = content;
     if (showRail) {
-      final railColor = context.theme.dividerColor.withAlpha(namida.isDarkMode ? 100 : 40);
+      final railColor = colors.divider.withOpacityExt(namida.isDarkMode ? 0.39 : 0.16);
       body = Stack(
         children: [
           PositionedDirectional(
@@ -1822,8 +1900,9 @@ class _ExpansionChildrenRail extends StatelessWidget {
         ],
       );
     }
+    if (bottomGap == 0.0) return body;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 18.0),
+      padding: EdgeInsets.only(bottom: bottomGap),
       child: body,
     );
   }
@@ -1835,12 +1914,21 @@ class CreatePlaylistButton extends StatelessWidget {
   Future<void> promptCreate() async {
     final controller = TextEditingController();
     final exportAsM3uRx = false.obs;
+    final m3uDirectoryRx = AppDirs.M3UPlaylists.obs;
     final formKey = GlobalKey<FormState>();
+
+    Future<void> pickM3UDirectory() async {
+      final directoryPath = await NamidaFileBrowser.getDirectory(note: lang.convertToM3UPlaylist);
+      if (directoryPath == null) return;
+      m3uDirectoryRx.value = directoryPath;
+      exportAsM3uRx.value = true;
+    }
 
     await NamidaNavigator.inst.navigateDialog(
       onDisposing: () {
         controller.dispose();
         exportAsM3uRx.close();
+        m3uDirectoryRx.close();
       },
       dialog: Form(
         key: formKey,
@@ -1853,7 +1941,9 @@ class CreatePlaylistButton extends StatelessWidget {
               onTap: () async {
                 if (formKey.currentState!.validate()) {
                   final name = controller.text;
-                  final m3uPath = exportAsM3uRx.value ? PlaylistController.getUnusedM3uFilePathInStorage(name) : null;
+                  final exportAsM3u = exportAsM3uRx.value;
+                  if (exportAsM3u && !await requestManageStoragePermission()) return;
+                  final m3uPath = exportAsM3u ? PlaylistController.getUnusedM3uFilePath(name, m3uDirectoryRx.value) : null;
 
                   final pl = await PlaylistController.inst.addNewPlaylist(name, m3uPath: m3uPath);
                   if (pl != null && m3uPath != null) {
@@ -1874,14 +1964,18 @@ class CreatePlaylistButton extends StatelessWidget {
           child: Column(
             mainAxisSize: .min,
             children: [
-              ObxO(
-                rx: exportAsM3uRx,
-                builder: (context, exportAsM3u) => CustomSwitchListTile(
+              Obx(
+                (context) => CustomSwitchListTile(
                   icon: Broken.direct_send,
                   title: lang.convertToM3UPlaylist,
-                  subtitle: AppDirs.M3UPlaylists,
-                  value: exportAsM3u,
+                  subtitle: m3uDirectoryRx.valueR,
+                  value: exportAsM3uRx.valueR,
                   onChanged: (_) => exportAsM3uRx.toggle(),
+                  trailingBeforeSwitch: NamidaIconButton(
+                    icon: Broken.folder_add,
+                    tooltip: () => lang.pickFromStorage,
+                    onPressed: pickM3UDirectory,
+                  ),
                 ),
               ),
               const SizedBox(height: 12.0),
@@ -1952,8 +2046,8 @@ class StackedIcon extends StatelessWidget {
   final IconData baseIcon;
   final IconData? secondaryIcon;
   final String? secondaryText;
-  final Color? baseIconColor;
-  final Color? secondaryIconColor;
+  final NColors? baseIconColor;
+  final NColors? secondaryIconColor;
   final Color? shadowColor;
   final double? iconSize;
   final double? secondaryIconSize;
@@ -1980,35 +2074,32 @@ class StackedIcon extends StatelessWidget {
     this.margin = -2.0,
   });
 
-  Color? _getColory(BuildContext context, Color? c) {
-    return disableColor
-        ? null
-        : delightenColors && c != null
-        ? context.defaultIconColor(c)
-        : c ?? context.defaultIconColor();
+  NColors? _iconColorOf(NColors? color) {
+    if (disableColor) return null;
+    if (color == null) return NColors.defaultIcon();
+    if (!delightenColors) return color;
+    return NColors.custom((colors) => NColors.defaultIcon(mainColor: color.resolve(colors)).resolve(colors));
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
     return Stack(
       clipBehavior: Clip.none,
       children: [
-        Icon(
+        NIcon(
           baseIcon,
-          color: _getColory(context, baseIconColor),
+          color: _iconColorOf(baseIconColor),
           size: iconSize,
         ),
         Positioned(
           bottom: margin,
           right: margin,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
+          child: NDecoratedBox(
+            decoration: (colors) => BoxDecoration(
               borderRadius: BorderRadius.circular(6),
               boxShadow: [
                 BoxShadow(
-                  color: shadowColor ?? theme.scaffoldBackgroundColor,
+                  color: shadowColor ?? colors.scaffold,
                   spreadRadius: 0,
                   blurRadius: blurRadius,
                 ),
@@ -2017,14 +2108,15 @@ class StackedIcon extends StatelessWidget {
             child:
                 smallChild ??
                 (secondaryText != null
-                    ? Text(
+                    ? NamidaText(
                         secondaryText!,
-                        style: textTheme.displaySmall?.copyWith(color: _getColory(context, secondaryIconColor)),
+                        style: NText.small,
+                        color: _iconColorOf(secondaryIconColor),
                       )
-                    : Icon(
+                    : NIcon(
                         secondaryIcon,
                         size: secondaryIconSize,
-                        color: _getColory(context, secondaryIconColor),
+                        color: _iconColorOf(secondaryIconColor),
                       )),
           ),
         ),
@@ -2200,12 +2292,11 @@ class NamidaBlurryContainer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final blurredAlphaLight = context.isDarkMode ? 60 : 140;
+    final blurredOpacityLight = context.isDarkMode ? 0.24 : 0.55;
     final blurEnabled = settings.enableBlurEffect.value;
 
-    Widget? finalChild = ColoredBox(
-      color: theme.cardColor.withAlpha(blurEnabled ? blurredAlphaLight : 220),
+    Widget? finalChild = NColoredBox(
+      color: NColors(.card, opacity: blurEnabled ? blurredOpacityLight : 0.86),
       child: SizedBox(
         width: width,
         height: height,
@@ -2253,21 +2344,20 @@ class ContainerWithBorder extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    return DecoratedBox(
-      decoration: BoxDecoration(
+    return NDecoratedBox(
+      decoration: (colors) => BoxDecoration(
         shape: BoxShape.circle,
-        color: borderColor ?? theme.cardColor.withAlpha(160),
+        color: borderColor ?? colors.card.withOpacityExt(0.63),
         boxShadow: [
           BoxShadow(
-            color: theme.shadowColor.withAlpha(60),
+            color: colors.shadow.withOpacityExt(0.24),
             blurRadius: 4,
             offset: const Offset(0, 2.0),
           ),
         ],
       ),
       child: Padding(
-        padding: EdgeInsetsGeometry.all(3.0),
+        padding: const EdgeInsetsGeometry.all(3.0),
         child: child,
       ),
     );
@@ -2342,8 +2432,7 @@ class _NamidaWheelSliderState extends State<NamidaWheelSlider> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
+    final colors = NColorsData.of(context);
     final totalCount = ((widget.max - widget.min) / widget.stepper).round() + (widget.extraValue ? 1 : 0);
 
     return SizedBox(
@@ -2351,9 +2440,9 @@ class _NamidaWheelSliderState extends State<NamidaWheelSlider> {
       child: Column(
         children: [
           if (widget.topText != null) ...[
-            Text(
+            NamidaText(
               widget.topText!,
-              style: textTheme.displaySmall?.copyWith(fontWeight: FontWeight.w600),
+              style: const NText(.small, weight: FontWeight.w600),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
@@ -2382,8 +2471,8 @@ class _NamidaWheelSliderState extends State<NamidaWheelSlider> {
                             child: SizedBox(
                               width: multipleOfFive ? 35.0 : 20.0,
                               height: 1.5,
-                              child: ColoredBox(
-                                color: theme.iconTheme.color!,
+                              child: const NColoredBox(
+                                color: NColors.icon,
                               ),
                             ),
                           ),
@@ -2412,7 +2501,7 @@ class _NamidaWheelSliderState extends State<NamidaWheelSlider> {
                   child: DecoratedBox(
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(4.0.multipliedRadius),
-                      color: theme.listTileTheme.textColor!,
+                      color: colors.listTileText,
                     ),
                   ),
                 ),
@@ -2427,7 +2516,7 @@ class _NamidaWheelSliderState extends State<NamidaWheelSlider> {
               child: Text(
                 widget.text!,
                 style: TextStyle(
-                  color: textTheme.displaySmall?.color,
+                  color: NText.small.of(context).color,
                 ),
               ),
             ),
@@ -2584,6 +2673,9 @@ class NamidaRawLikeButton extends StatelessWidget {
   final IconData normalIcon;
   final bool enableGradient;
 
+  /// lets a bigger tap target run the like animation through [LikeButtonState.onTap].
+  final GlobalKey<LikeButtonState>? likeButtonKey;
+
   const NamidaRawLikeButton({
     super.key,
     this.size = 24.0,
@@ -2596,6 +2688,7 @@ class NamidaRawLikeButton extends StatelessWidget {
     this.likedIcon = Broken.heart_filled,
     this.normalIcon = Broken.heart,
     this.enableGradient = false,
+    this.likeButtonKey,
   });
 
   Future<bool> _confirmRemoval(String action) async {
@@ -2623,33 +2716,34 @@ class NamidaRawLikeButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
+    final nColors = NColorsData.of(context);
 
-    late final enabledIconWidget = Icon(
+    late final enabledIconWidget = NIcon(
       key: const ValueKey('like_switcher_on'),
       likedIcon,
-      color: enabledColor ?? theme.colorScheme.primary,
+      color: NColors.custom((colors) => enabledColor ?? colors.primary),
       size: size,
     );
-    late final normalIconWidget = Icon(
+    late final normalIconWidget = NIcon(
       key: const ValueKey('like_switcher_off'),
       normalIcon,
-      color: disabledColor ?? theme.colorScheme.secondary,
+      color: NColors.custom((colors) => disabledColor ?? colors.secondary),
       size: size,
     );
     return NamidaMouseRegion(
       enabled: onTap != null,
       child: LikeButton(
+        key: likeButtonKey,
         size: size,
         padding: padding,
         likeCountPadding: EdgeInsets.zero,
         bubblesColor: BubblesColor(
-          dotPrimaryColor: theme.colorScheme.primary,
-          dotSecondaryColor: theme.colorScheme.primaryContainer,
+          dotPrimaryColor: nColors.primary,
+          dotSecondaryColor: nColors.primaryContainer,
         ),
         circleColor: CircleColor(
-          start: theme.colorScheme.secondary,
-          end: theme.colorScheme.secondaryContainer,
+          start: nColors.secondary,
+          end: nColors.secondaryContainer,
         ),
         isLiked: isLiked,
         onTap: (isLiked) async {
@@ -2671,13 +2765,13 @@ class NamidaRawLikeButton extends StatelessWidget {
                       shaderCallback: (Rect bounds) => LinearGradient(
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
-                        stops: [
+                        stops: const [
                           0.2,
                           0.9,
                         ],
                         colors: [
-                          theme.colorScheme.primary.withOpacityExt(0.75),
-                          Color.alphaBlend(theme.colorScheme.primary.withOpacityExt(0.25), CurrentColor.inst.color).withOpacityExt(0.75),
+                          nColors.primary.withOpacityExt(0.75),
+                          Color.alphaBlend(nColors.primary.withOpacityExt(0.25), CurrentColor.inst.color).withOpacityExt(0.75),
                         ],
                       ).createShader(bounds),
                       child: enabledIconWidget,
@@ -2731,7 +2825,7 @@ class NamidaIconButton extends StatefulWidget {
   final double verticalPadding;
   final double? iconSize;
   final IconData? icon;
-  final Color? iconColor;
+  final NColors? iconColor;
   final void Function()? onPressed;
   final void Function(LongPressStartDetails details)? onLongPressStart;
   final void Function()? onLongPressFinish;
@@ -2764,18 +2858,24 @@ class NamidaIconButton extends StatefulWidget {
 class _NamidaIconButtonState extends State<NamidaIconButton> {
   bool isPressed = false;
 
+  void _onTapDown(TapDownDetails details) => setState(() => isPressed = true);
+  void _onTapUp(TapUpDetails details) => setState(() => isPressed = false);
+  void _onTapCancel() => setState(() => isPressed = false);
+
   @override
   Widget build(BuildContext context) {
+    final onPressed = widget.onPressed;
+    final isTappable = onPressed != null;
     return NamidaTooltip(
       message: widget.tooltip,
       child: NamidaMouseRegion(
-        enabled: widget.onPressed != null || widget.onLongPress != null,
+        enabled: isTappable || widget.onLongPress != null,
         child: GestureDetector(
           behavior: HitTestBehavior.translucent,
-          onTapDown: (value) => setState(() => isPressed = true),
-          onTapUp: (value) => setState(() => isPressed = false),
-          onTapCancel: () => setState(() => isPressed = false),
-          onTap: widget.onPressed,
+          onTapDown: isTappable ? _onTapDown : null,
+          onTapUp: isTappable ? _onTapUp : null,
+          onTapCancel: isTappable ? _onTapCancel : null,
+          onTap: onPressed,
           onLongPressStart: widget.onLongPressStart,
           onLongPressEnd: widget.onLongPressFinish == null ? null : (details) => widget.onLongPressFinish!(),
           onLongPressCancel: widget.onLongPressFinish,
@@ -2788,10 +2888,10 @@ class _NamidaIconButtonState extends State<NamidaIconButton> {
               padding: widget.padding ?? EdgeInsets.symmetric(horizontal: widget.horizontalPadding, vertical: widget.verticalPadding),
               child:
                   widget.child ??
-                  Icon(
+                  NIcon(
                     widget.icon,
                     size: widget.iconSize,
-                    color: widget.disableColor ? null : (widget.iconColor ?? context.theme.colorScheme.secondary),
+                    color: widget.disableColor ? null : widget.iconColor ?? NColors.secondary,
                   ),
             ),
           ),
@@ -2873,7 +2973,7 @@ class _NamidaPartyContainerState extends State<NamidaPartyContainer> {
             decoration: BoxDecoration(
               boxShadow: [
                 BoxShadow(
-                  color: CurrentColor.inst.miniplayerColor.withAlpha(150),
+                  color: CurrentColor.inst.miniplayerColor.withOpacityExt(0.59),
                   spreadRadius: 150 * finalScale * spreadRadiusMultiplier,
                   blurRadius: 10 + (200 * finalScale),
                 ),
@@ -2958,7 +3058,7 @@ class _PartyPaletteBox extends StatelessWidget {
               decoration: BoxDecoration(
                 boxShadow: [
                   BoxShadow(
-                    color: color.withAlpha(150),
+                    color: color.withOpacityExt(0.59),
                     spreadRadius: spreadRadius * finalScale,
                     blurRadius: 10 + (200 * finalScale),
                   ),
@@ -3020,8 +3120,6 @@ class SubpageInfoContainer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
     const textHeroEnabled = false;
     const pauseHero = 'kururing';
     final showSubpageInfoAtSide = Dimensions.inst.showSubpageInfoAtSideContext(context);
@@ -3113,7 +3211,7 @@ class SubpageInfoContainer extends StatelessWidget {
                       child: Text(
                         title,
                         textAlign: textAlign,
-                        style: textTheme.displayLarge?.copyWith(fontSize: titleFontSize),
+                        style: NText.large.of(context).copyWith(fontSize: titleFontSize),
                         maxLines: titleMaxLines,
                         softWrap: titleMaxLines != 1,
                         overflow: titleMaxLines == null ? null : TextOverflow.ellipsis,
@@ -3132,7 +3230,7 @@ class SubpageInfoContainer extends StatelessWidget {
                           textAlign: textAlign,
                           overflow: TextOverflow.ellipsis,
                           maxLines: 2,
-                          style: textTheme.displayMedium?.copyWith(fontSize: getFontSize(0.28, 10.0, 24.0)),
+                          style: NText.medium.of(context).copyWith(fontSize: getFontSize(0.28, 10.0, 24.0)),
                         ),
                       ),
                     ),
@@ -3149,7 +3247,7 @@ class SubpageInfoContainer extends StatelessWidget {
                           textAlign: textAlign,
                           overflow: TextOverflow.ellipsis,
                           maxLines: 1,
-                          style: textTheme.displaySmall?.copyWith(fontSize: getFontSize(0.25, 10.0, 22.0)),
+                          style: NText.small.of(context).copyWith(fontSize: getFontSize(0.25, 10.0, 22.0)),
                         ),
                       ),
                     ),
@@ -3163,7 +3261,7 @@ class SubpageInfoContainer extends StatelessWidget {
                         textAlign: textAlign,
                         overflow: TextOverflow.ellipsis,
                         maxLines: 3,
-                        style: textTheme.displaySmall?.copyWith(fontSize: getFontSize(0.22, 10.0, 18.0)),
+                        style: NText.small.of(context).copyWith(fontSize: getFontSize(0.22, 10.0, 18.0)),
                       ),
                     ),
                   ],
@@ -3352,8 +3450,6 @@ class SubpageInfoContainer extends StatelessWidget {
                     ],
                   );
                 }
-                final bgColor = theme.scaffoldBackgroundColor;
-                final fadeMidColor = bgColor.withOpacityExt(0.8);
                 final textOverlayWidget = Stack(
                   alignment: Alignment.bottomLeft,
                   clipBehavior: Clip.none,
@@ -3364,15 +3460,15 @@ class SubpageInfoContainer extends StatelessWidget {
                       right: 0.0,
                       bottom: -_kFeatherOverdraw,
                       child: IgnorePointer(
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
+                        child: NDecoratedBox(
+                          decoration: (colors) => BoxDecoration(
                             gradient: LinearGradient(
                               begin: const Alignment(0.0, -0.4),
                               end: Alignment.bottomCenter,
                               colors: [
                                 Colors.transparent,
-                                fadeMidColor,
-                                bgColor,
+                                colors.scaffold.withOpacityExt(0.8),
+                                colors.scaffold,
                               ],
                               stops: const [0.0, 0.55, 1.0],
                             ),
@@ -3411,23 +3507,21 @@ class SubpageInfoContainer extends StatelessWidget {
               }
 
               if (isOverlay && !showSubpageInfoAtSide) {
-                final bgColor = theme.scaffoldBackgroundColor;
-                final overlayMidColor = bgColor.withOpacityExt(0.8);
                 final overlayWidget = Stack(
                   alignment: Alignment.bottomLeft,
                   children: [
                     Positioned.fill(
                       child: IgnorePointer(
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
+                        child: NDecoratedBox(
+                          decoration: (colors) => BoxDecoration(
                             borderRadius: BorderRadius.circular(18.0.multipliedRadius),
                             gradient: LinearGradient(
                               begin: const Alignment(0.0, -0.3),
                               end: Alignment.bottomCenter,
                               colors: [
                                 Colors.transparent,
-                                overlayMidColor,
-                                bgColor,
+                                colors.scaffold.withOpacityExt(0.8),
+                                colors.scaffold,
                               ],
                               stops: const [0.0, 0.55, 1.0],
                             ),
@@ -3626,7 +3720,8 @@ class _BottomFeathered extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bgColor = context.theme.scaffoldBackgroundColor;
+    final nColors = NColorsData.of(context);
+    final bgColor = nColors.scaffold;
     const overdraw = SubpageInfoContainer._kFeatherOverdraw;
     final overdrawnHeight = featherHeight + overdraw;
     final solidFromStop = featherHeight / overdrawnHeight;
@@ -3645,7 +3740,7 @@ class _BottomFeathered extends StatelessWidget {
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
-                  colors: [bgColor.withAlpha(0), bgColor],
+                  colors: [bgColor.withOpacityExt(0.0), bgColor],
                   stops: [0.0, solidFromStop],
                 ),
               ),
@@ -3669,8 +3764,8 @@ class _SubpageInfoBackdrop extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final bgColor = theme.scaffoldBackgroundColor;
+    final nColors = NColorsData.of(context);
+    final bgColor = nColors.scaffold;
     final dimColorTop = bgColor.withOpacityExt(0.5);
     return IgnorePointer(
       child: HeroMode(
@@ -3948,20 +4043,19 @@ class NamidaDrawerListTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = CurrentColor.inst.color;
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
+    final colors = NColorsData.targetOf(context);
     return NamidaInkWell(
       animationDurationMS: 200,
       alignment: Alignment.center,
       width: width,
       height: height,
       decoration: BoxDecoration(
-        color: enabled ? colorScheme : theme.cardColor,
+        color: enabled ? colorScheme : colors.card,
         borderRadius: BorderRadius.circular(8.0.multipliedRadius),
         boxShadow: enabled
             ? [
                 BoxShadow(
-                  color: colorScheme.withAlpha(100),
+                  color: colorScheme.withOpacityExt(0.39),
                   spreadRadius: 0.2,
                   blurRadius: 8.0,
                   offset: const Offset(0.0, 3.0),
@@ -3978,18 +4072,16 @@ class NamidaDrawerListTile extends StatelessWidget {
         children: [
           Icon(
             icon,
-            color: enabled ? Colors.white.withAlpha(200) : null,
+            color: enabled ? Colors.white.withOpacityExt(0.78) : null,
             size: iconSize,
           ),
           if (title != '') const SizedBox(width: 10.0),
           if (title != '')
             Expanded(
-              child: Text(
+              child: NamidaText(
                 title,
-                style: textTheme.displayMedium?.copyWith(
-                  color: enabled ? Colors.white.withAlpha(200) : null,
-                  fontSize: 15.0,
-                ),
+                style: const NText(.medium, size: .s15),
+                color: NColors.fixed(enabled ? Colors.white.withOpacityExt(0.78) : null),
                 overflow: TextOverflow.fade,
                 softWrap: false,
               ),
@@ -4021,7 +4113,6 @@ class SearchPageTitleRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = context.textTheme;
     return Row(
       children: [
         const SizedBox(width: 16.0),
@@ -4034,15 +4125,15 @@ class SearchPageTitleRow extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
+                    NamidaText(
                       title,
-                      style: textTheme.displayLarge?.copyWith(fontSize: 15.5),
+                      style: const NText(.large, size: .s15p5),
                     ),
                     ?subtitleWidget,
                     if (subtitle != '')
-                      Text(
+                      NamidaText(
                         subtitle,
-                        style: textTheme.displaySmall,
+                        style: NText.small,
                       ),
                   ],
                 ),
@@ -4076,7 +4167,8 @@ class NamidaEndEdgeFeather extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bgColor = color ?? context.theme.scaffoldBackgroundColor;
+    final nColors = NColorsData.of(context);
+    final bgColor = color ?? nColors.scaffold;
     final overdrawnWidth = width + _kEdgeOverdraw;
     final solidFromStop = width / overdrawnWidth;
     return Stack(
@@ -4093,7 +4185,7 @@ class NamidaEndEdgeFeather extends StatelessWidget {
                 gradient: LinearGradient(
                   begin: AlignmentDirectional.centerStart,
                   end: AlignmentDirectional.centerEnd,
-                  colors: [bgColor.withAlpha(0), bgColor],
+                  colors: [bgColor.withOpacityExt(0.0), bgColor],
                   stops: [0.0, solidFromStop],
                 ),
               ),
@@ -4126,9 +4218,9 @@ class NoResultsWidget extends StatelessWidget {
           color: iconColor,
         ),
         const SizedBox(height: 8.0),
-        Text(
+        NamidaText(
           lang.noResults,
-          style: context.textTheme.displayLarge,
+          style: NText.large,
         ),
       ],
     );
@@ -4158,13 +4250,12 @@ class NamidaLogoContainer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
+    final nColors = NColorsData.targetOf(context);
     final isDarkMode = context.isDarkMode;
     final colorScheme = CurrentColor.inst.color;
-    final scaffoldBgColor = Color.alphaBlend(theme.scaffoldBackgroundColor.withOpacityExt(0.5), isDarkMode ? Colors.black : Colors.white);
+    final scaffoldBgColor = Color.alphaBlend(nColors.scaffold.withOpacityExt(0.5), isDarkMode ? Colors.black : Colors.white);
     const foregroundColorOpacity = 0.8;
-    final foregroundColor = Color.alphaBlend(colorScheme.withOpacityExt(0.1), theme.colorScheme.onSurface).withOpacityExt(foregroundColorOpacity);
+    final foregroundColor = Color.alphaBlend(colorScheme.withOpacityExt(0.1), nColors.onSurface).withOpacityExt(foregroundColorOpacity);
     return NamidaInkWell(
       onTap: () {
         if (NamidaNavigator.inst.currentRoute?.route != RouteType.PAGE_about) {
@@ -4194,13 +4285,13 @@ class NamidaLogoContainer extends StatelessWidget {
         boxShadow: [
           lighterShadow
               ? BoxShadow(
-                  color: colorScheme.withAlpha(isDarkMode ? 20 : 60),
+                  color: colorScheme.withOpacityExt(isDarkMode ? 0.08 : 0.24),
                   spreadRadius: 0.1,
                   blurRadius: 6.0,
                   offset: const Offset(0.0, 2.0),
                 )
               : BoxShadow(
-                  color: colorScheme.withAlpha(isDarkMode ? 30 : 80),
+                  color: colorScheme.withOpacityExt(isDarkMode ? 0.12 : 0.31),
                   spreadRadius: 0.2,
                   blurRadius: 8.0,
                   offset: const Offset(0.0, 4.0),
@@ -4224,12 +4315,10 @@ class NamidaLogoContainer extends StatelessWidget {
           if (displayText) ...[
             const SizedBox(width: 10.0),
             Expanded(
-              child: Text(
+              child: NamidaText(
                 'Namida',
-                style: textTheme.displayLarge?.copyWith(
-                  color: foregroundColor.withOpacityExt(foregroundColorOpacity * 0.9),
-                  fontSize: 17.5,
-                ),
+                style: const NText(.large, size: .s17p5),
+                color: NColors.fixed(foregroundColor.withOpacityExt(foregroundColorOpacity * 0.9)),
                 overflow: TextOverflow.fade,
                 softWrap: false,
               ),
@@ -4259,12 +4348,12 @@ class NamidaContainerDivider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return NContainer(
       height: height,
       width: width,
       margin: margin,
-      decoration: BoxDecoration(
-        color: colorForce ?? (color ?? context.theme.dividerColor).withAlpha(namida.isDarkMode ? 100 : 20),
+      decoration: (colors) => BoxDecoration(
+        color: colorForce ?? (color ?? colors.divider).withOpacityExt(namida.isDarkMode ? 0.39 : 0.08),
         borderRadius: BorderRadius.circular(18.0.multipliedRadius),
       ),
     );
@@ -4345,12 +4434,11 @@ class _FadeDismissibleState extends State<FadeDismissible> with SingleTickerProv
   double _dragged = 0;
 
   bool _draggable = true;
-  bool _inDismissRange = true;
   bool? _canSwipeInternal; // calculate for direction once to allow swiping back.
 
-  void calculateInDismissRange(double positionDx, double maxWidth) {
-    final percentage = positionDx / maxWidth;
-    _inDismissRange = percentage >= widget.dismissRangeStart && percentage <= widget.dismissRangeEnd;
+  bool _isInDismissRange(double localDx) {
+    final percentage = localDx / Dimensions.inst.availableAppContentWidth;
+    return percentage >= widget.dismissRangeStart && percentage <= widget.dismissRangeEnd;
   }
 
   Future<void> _animateDismiss(double to, {required bool faster}) async {
@@ -4387,21 +4475,20 @@ class _FadeDismissibleState extends State<FadeDismissible> with SingleTickerProv
   }
 
   Widget buildChild(bool draggable, Widget child, double maxWidth, Animation<double> fadeAnimation) {
-    return HorizontalDragDetector(
+    return _FadeDismissibleDragDetector(
+      isInDismissRange: _isInDismissRange,
       onStart: !draggable
           ? null
           : (d) {
               if (PullToRefreshMixin.isPulling) return;
               FadeDismissible.isDismissing = true;
               if (widget.onDismissStart != null) widget.onDismissStart!(d);
-              calculateInDismissRange(d.localPosition.dx, maxWidth);
               if (widget.draggable != null) _draggable = widget.draggable!();
             },
       onUpdate: !draggable
           ? null
           : (d) {
               if (!_draggable) return;
-              if (!_inDismissRange) return;
               if (PullToRefreshMixin.isPulling) return;
               if (_canSwipeInternal == null) {
                 bool canSwipe = true;
@@ -4534,6 +4621,61 @@ class _FadeDismissibleState extends State<FadeDismissible> with SingleTickerProv
   }
 }
 
+class _FadeDismissibleDragDetector extends _LinearDragDetector<_FadeDismissibleDragRecognizer> {
+  final bool Function(double localDx) isInDismissRange;
+
+  @override
+  _FadeDismissibleDragRecognizer create() => _FadeDismissibleDragRecognizer(isInDismissRange: isInDismissRange, debugOwner: this);
+
+  const _FadeDismissibleDragDetector({
+    required this.isInDismissRange,
+    super.child,
+    super.onStart,
+    super.onUpdate,
+    super.onEnd,
+    super.onCancel,
+  });
+}
+
+// by claude
+/// leaves edge starts and diagonal moves to the scrollable underneath.
+class _FadeDismissibleDragRecognizer extends HorizontalDragGestureRecognizer {
+  static const _kMinHorizontalRatio = 2.0;
+
+  final bool Function(double localDx) isInDismissRange;
+
+  _FadeDismissibleDragRecognizer({
+    required this.isInDismissRange,
+    super.debugOwner,
+  });
+
+  double _verticalDistanceMoved = 0.0;
+
+  @override
+  bool isPointerAllowed(PointerEvent event) {
+    if (!isInDismissRange(event.localPosition.dx)) return false;
+    return super.isPointerAllowed(event);
+  }
+
+  @override
+  void handleEvent(PointerEvent event) {
+    if (event is PointerMoveEvent) _verticalDistanceMoved += event.delta.dy;
+    super.handleEvent(event);
+  }
+
+  @override
+  bool hasSufficientGlobalDistanceToAccept(PointerDeviceKind pointerDeviceKind, double? deviceTouchSlop) {
+    if (!super.hasSufficientGlobalDistanceToAccept(pointerDeviceKind, deviceTouchSlop)) return false;
+    return globalDistanceMoved.abs() > _verticalDistanceMoved.abs() * _kMinHorizontalRatio;
+  }
+
+  @override
+  void didStopTrackingLastPointer(int pointer) {
+    super.didStopTrackingLastPointer(pointer);
+    _verticalDistanceMoved = 0.0;
+  }
+}
+
 class FadeIgnoreTransition extends StatefulWidget {
   /// Wether to completely replace the [child] with a [SizedBox], instead of just using [IgnorePointer].
   final bool completelyKillWhenPossible;
@@ -4611,19 +4753,23 @@ class NamidaSelectableAutoLinkText extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = context.theme;
-    final textTheme = theme.textTheme;
+    final colors = NColorsData.of(context);
     return SelectableAutoLinkText(
       text,
-      style: textTheme.displayMedium?.copyWith(
-        fontSize: 13.5 * fontScale,
-      ),
-      linkStyle: textTheme.displayMedium?.copyWith(
-        color: theme.colorScheme.primary.withAlpha(210),
-        fontSize: 13.5 * fontScale,
-      ),
+      style: NText.medium
+          .of(context)
+          .copyWith(
+            fontSize: 13.5 * fontScale,
+          ),
+      linkStyle: NText.medium
+          .of(context)
+          .copyWith(
+            color: colors.primary.withOpacityExt(0.82),
+            fontSize: 13.5 * fontScale,
+          ),
       highlightedLinkStyle: TextStyle(
-        color: theme.colorScheme.primary.withAlpha(220),
-        backgroundColor: theme.colorScheme.onSurface.withAlpha(40),
+        color: colors.primary.withOpacityExt(0.86),
+        backgroundColor: colors.onSurface.withOpacityExt(0.16),
         fontSize: 13.5 * fontScale,
       ),
       scrollPhysics: const NeverScrollableScrollPhysics(),
@@ -4654,24 +4800,24 @@ class DefaultPlaylistCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
+    final colors = NColorsData.of(context);
     return NamidaInkWell(
       borderRadius: 12.0,
-      bgColor: Color.alphaBlend(colorScheme.withAlpha(10), theme.cardColor),
+      bgColor: NColors.fixed(Color.alphaBlend(colorScheme.withOpacityExt(0.04), colors.card)),
       onTap: onTap,
       padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 12.0),
       child: Row(
         children: [
           Icon(
             icon,
-            color: colorScheme.withAlpha(200),
+            color: colorScheme.withOpacityExt(0.78),
           ),
           const SizedBox(width: 10.0),
           Expanded(
-            child: Text(
+            child: NamidaText(
               title,
-              style: textTheme.displayMedium?.copyWith(color: Color.alphaBlend(colorScheme.withAlpha(10), textTheme.displayMedium!.color!)),
+              style: NText.medium,
+              color: NColors.fixed(Color.alphaBlend(colorScheme.withOpacityExt(0.04), NText.medium.of(context).color!)),
               softWrap: false,
               overflow: TextOverflow.fade,
             ),
@@ -4679,9 +4825,10 @@ class DefaultPlaylistCard extends StatelessWidget {
           const SizedBox(width: 6.0),
           displayLoadingIndicator
               ? const LoadingIndicator()
-              : Text(
+              : NamidaText(
                   text,
-                  style: textTheme.displayMedium?.copyWith(color: Color.alphaBlend(colorScheme.withAlpha(30), textTheme.displayMedium!.color!)),
+                  style: NText.medium,
+                  color: NColors.fixed(Color.alphaBlend(colorScheme.withOpacityExt(0.12), NText.medium.of(context).color!)),
                 ),
           const SizedBox(width: 2.0),
         ],
@@ -4706,9 +4853,8 @@ class NamidaCircularPercentage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
-    final textStyle = textTheme.displaySmall?.copyWith(fontSize: size / 3.2);
+    final colors = NColorsData.of(context);
+    final textStyle = NText.small.of(context).copyWith(fontSize: size / 3.2);
     final circularSlider = SleekCircularSlider(
       appearance: CircularSliderAppearance(
         customWidths: CustomSliderWidths(
@@ -4717,14 +4863,14 @@ class NamidaCircularPercentage extends StatelessWidget {
         ),
         customColors: CustomSliderColors(
           dotColor: Colors.transparent,
-          trackColor: theme.cardTheme.color,
+          trackColor: colors.cardTheme,
           dynamicGradient: true,
           progressBarColors: [
-            theme.colorScheme.primary.withAlpha(100),
+            colors.primary.withOpacityExt(0.39),
             Colors.transparent,
-            theme.colorScheme.secondary.withAlpha(100),
+            colors.secondary.withOpacityExt(0.39),
             Colors.transparent,
-            theme.colorScheme.primary.withAlpha(100),
+            colors.primary.withOpacityExt(0.39),
           ],
           hideShadow: true,
         ),
@@ -4753,123 +4899,6 @@ class NamidaCircularPercentage extends StatelessWidget {
           },
         ),
       ],
-    );
-  }
-}
-
-class NamidaReorderableActiveListView<E> extends StatefulWidget {
-  final List<E> enumValues;
-  final List<E> activeItems;
-  final String Function(E item) toText;
-  final IconData Function(E item) toIcon;
-  final IconData? Function(E item)? toSecondaryIcon;
-  final void Function(List<E> activeItems) onSave;
-  final void Function(int i, List<E> activeItems)? onItemRemoved;
-  final int minimumItems;
-
-  const NamidaReorderableActiveListView({
-    super.key,
-    required this.enumValues,
-    required this.activeItems,
-    required this.toText,
-    required this.toIcon,
-    this.toSecondaryIcon,
-    required this.onSave,
-    this.onItemRemoved,
-    this.minimumItems = 3,
-  });
-
-  @override
-  State<NamidaReorderableActiveListView<E>> createState() => _NamidaReorderableActiveListViewState<E>();
-}
-
-class _NamidaReorderableActiveListViewState<E> extends State<NamidaReorderableActiveListView<E>> {
-  late final RxList<({E item, bool active})> _itemsRx;
-
-  @override
-  void initState() {
-    super.initState();
-    _initializeList();
-  }
-
-  void _initializeList() {
-    final combined = LinkedHashSet<({E item, bool active})>(equals: (p0, p1) => p0.item == p1.item, hashCode: (p0) => p0.item.hashCode);
-    for (final e in widget.activeItems) {
-      combined.add((item: e, active: true));
-    }
-    for (final e in widget.enumValues) {
-      combined.add((item: e, active: false));
-    }
-
-    _itemsRx = combined.toList().obs;
-  }
-
-  @override
-  void dispose() {
-    _itemsRx.close();
-    super.dispose();
-  }
-
-  List<E> getActiveItems() => _itemsRx.value.where((e) => e.active).map((e) => e.item).toList();
-
-  void _onTap(int i) {
-    final (:item, :active) = _itemsRx.value[i];
-    if (active) {
-      if (_itemsRx.value.where((e) => e.active).length <= widget.minimumItems) {
-        showMinimumItemsSnack(widget.minimumItems);
-        return;
-      }
-    }
-    _itemsRx[i] = (item: item, active: !active);
-    final newItems = getActiveItems();
-    widget.onSave(newItems);
-
-    if (!_itemsRx.value[i].active) {
-      widget.onItemRemoved?.call(i, newItems);
-    }
-  }
-
-  void _onReorder(int oldIndex, int newIndex) {
-    if (newIndex > oldIndex) newIndex -= 1;
-    final entry = _itemsRx.value.removeAt(oldIndex);
-    _itemsRx.value.insert(newIndex, entry);
-    _itemsRx.refresh();
-    widget.onSave(getActiveItems());
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return ObxO(
-      rx: _itemsRx,
-      builder: (context, items) => NamidaListView(
-        showScrollbarOnStart: true,
-        itemExtent: null,
-        listBottomPadding: 0,
-        itemCount: items.length,
-        onReorder: _onReorder,
-        itemBuilder: (context, i) {
-          final (:item, :active) = items[i];
-          final mainIcon = widget.toIcon(item);
-          final secondaryIcon = widget.toSecondaryIcon?.call(item);
-          return Padding(
-            key: ValueKey(item),
-            padding: const EdgeInsets.all(3.0),
-            child: ListTileWithCheckMark(
-              title: "${i + 1}. ${widget.toText(item)}",
-              icon: secondaryIcon == null ? mainIcon : null,
-              leading: secondaryIcon == null
-                  ? null
-                  : StackedIcon(
-                      baseIcon: mainIcon,
-                      secondaryIcon: secondaryIcon,
-                      disableColor: true,
-                    ),
-              active: active,
-              onTap: () => _onTap(i),
-            ),
-          );
-        },
-      ),
     );
   }
 }
@@ -5366,9 +5395,9 @@ class BackgroundWrapper extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
+    final colors = NColorsData.of(context);
     return Material(
-      color: theme.scaffoldBackgroundColor,
+      color: colors.scaffold,
       clipBehavior: Clip.hardEdge,
       child: Stack(
         fit: StackFit.passthrough,
@@ -5387,7 +5416,7 @@ class BackgroundWrapper extends StatelessWidget {
 }
 
 class NamidaInkWell extends StatelessWidget {
-  final Color? bgColor;
+  final NColors? bgColor;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
   final bool enableSecondaryTap;
@@ -5423,13 +5452,14 @@ class NamidaInkWell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
+    final colors = animationDurationMS > 0 ? NColorsData.targetOf(context) : NColorsData.of(context);
     final borderR =
         decoration.borderRadius?.resolve(Directionality.of(context)) ?? (transparentHighlight || borderRadius == 0 ? null : BorderRadius.circular(borderRadius.multipliedRadius));
-    final highlightColor = transparentHighlight ? Colors.transparent : Color.alphaBlend(theme.scaffoldBackgroundColor.withAlpha(20), theme.highlightColor);
-    final bgColor = this.bgColor ?? decoration.color;
+    final highlightColor = transparentHighlight ? Colors.transparent : Color.alphaBlend(colors.scaffold.withOpacityExt(0.08), colors.highlight);
+    final resolvedBgColor = bgColor?.resolve(colors);
+    final finalBgColor = resolvedBgColor ?? decoration.color;
     final decorationFinal = BoxDecoration(
-      color: bgColor,
+      color: finalBgColor,
       borderRadius: borderR,
       backgroundBlendMode: decoration.backgroundBlendMode,
       boxShadow: decoration.boxShadow,
@@ -5462,24 +5492,27 @@ class NamidaInkWell extends StatelessWidget {
         ),
       ),
     );
-    return animationDurationMS > 0
-        ? AnimatedContainer(
-            alignment: alignment,
-            margin: margin,
-            duration: Duration(milliseconds: animationDurationMS),
-            decoration: decorationFinal,
-            foregroundDecoration: foregroundDecorationFinal,
-            clipBehavior: Clip.none,
-            child: childFinal,
-          )
-        : Container(
-            alignment: alignment,
-            margin: margin,
-            decoration: decorationFinal,
-            foregroundDecoration: foregroundDecorationFinal,
-            clipBehavior: Clip.none,
-            child: childFinal,
-          );
+    if (animationDurationMS > 0) {
+      final animationDuration = Duration(milliseconds: animationDurationMS);
+      final animationDurationFinal = NColorsData.targetDurationOf(context, animationDuration);
+      return AnimatedContainer(
+        alignment: alignment,
+        margin: margin,
+        duration: animationDurationFinal,
+        decoration: decorationFinal,
+        foregroundDecoration: foregroundDecorationFinal,
+        clipBehavior: Clip.none,
+        child: childFinal,
+      );
+    }
+    return Container(
+      alignment: alignment,
+      margin: margin,
+      decoration: decorationFinal,
+      foregroundDecoration: foregroundDecorationFinal,
+      clipBehavior: Clip.none,
+      child: childFinal,
+    );
   }
 }
 
@@ -5527,9 +5560,8 @@ class NamidaInkWellButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
-    final itemsColor = this.itemsColor ?? theme.colorScheme.onSurface.withOpacityExt(0.8);
+    final colors = NColorsData.targetOf(context);
+    final itemsColor = this.itemsColor ?? colors.onSurface.withOpacityExt(0.8);
     final textGood = text.isNotEmpty;
     return IgnorePointer(
       ignoring: !enabled && disableWhenLoading,
@@ -5540,7 +5572,7 @@ class NamidaInkWellButton extends StatelessWidget {
           animationDurationMS: animationDurationMS,
           borderRadius: borderRadius * sizeMultiplier,
           padding: EdgeInsets.symmetric(horizontal: 12.0 * sizeMultiplier * paddingMultiplier, vertical: 6.0 * sizeMultiplier * paddingMultiplier),
-          bgColor: bgColor ?? theme.colorScheme.secondaryContainer.withOpacityExt(0.5),
+          bgColor: NColors.fixed(bgColor ?? colors.secondaryContainer.withOpacityExt(0.5)),
           decoration: decoration,
           onTap: onTap,
           enableSecondaryTap: false,
@@ -5565,10 +5597,12 @@ class NamidaInkWellButton extends StatelessWidget {
                 Flexible(
                   child: Text(
                     text,
-                    style: textTheme.displayMedium?.copyWith(
-                      color: itemsColor,
-                      fontSize: (15.0 * sizeMultiplier),
-                    ),
+                    style: NText.medium
+                        .of(context)
+                        .copyWith(
+                          color: itemsColor,
+                          fontSize: (15.0 * sizeMultiplier),
+                        ),
                   ),
                 ),
                 if (textGood) const SizedBox(width: 4.0),
@@ -5665,7 +5699,6 @@ class _BetweenDatesTextButtonState extends State<BetweenDatesTextButton> {
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = context.textTheme;
     final textWidget = Text(lang.betweenDates);
 
     return TextButton.icon(
@@ -5697,13 +5730,13 @@ class _BetweenDatesTextButtonState extends State<BetweenDatesTextButton> {
                     if (widget.tracksLength != 0)
                       NamidaButtonText(
                         "(${widget.tracksLength.displayTrackKeyword})",
-                        style: textTheme.displaySmall,
+                        style: NText.small.of(context),
                       ),
                   ],
                 ),
                 NamidaButtonText(
                   "${oldestDate?.dateFormattedOriginal} → ${newestDate?.dateFormattedOriginal}",
-                  style: textTheme.displaySmall,
+                  style: NText.small.of(context),
                 ),
               ],
             ),
@@ -5999,7 +6032,8 @@ class ShimmerWrapper extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = transparent ? Colors.transparent : context.theme.cardColor.withAlpha(120);
+    final nColors = NColorsData.of(context);
+    final color = transparent ? Colors.transparent : nColors.card.withOpacityExt(0.47);
     return CustomAnimatedSwitcher(
       duration: fadeDurationMS.ms,
       alignment: alignment,
@@ -6369,19 +6403,23 @@ class NamidaScrollbar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (controller == null) return child;
-    return CupertinoScrollbar(
-      controller: controller,
-      showOnStart: showOnStart,
-      scrollStep: scrollStep,
-      thicknessWhileDragging: 8.5,
-      minInteractiveSize: 60.0,
-      pressDuration: isDesktop ? const Duration(milliseconds: 50) : const Duration(milliseconds: 80),
-      tapToScroll: () => settings.tapToScroll.value ?? false,
-      enhancedDragToScroll: () => settings.enhancedDragToScroll.value ?? true,
-      onThumbLongPressStart: () => isScrollbarThumbDragging = true,
-      onThumbLongPressEnd: () => isScrollbarThumbDragging = false,
-      thumbLabel: thumbLabel == null ? null : _createThumbLabelIfEnabled,
-      child: child,
+    return ObxO(
+      rx: settings.easyScrollbarGrab,
+      builder: (context, easyScrollbarGrab) => CupertinoScrollbar(
+        controller: controller,
+        showOnStart: showOnStart,
+        scrollStep: scrollStep,
+        thicknessWhileDragging: 8.5,
+        minInteractiveSize: easyScrollbarGrab == true ? 96.0 : 60.0,
+        pressDuration: isDesktop ? const Duration(milliseconds: 50) : const Duration(milliseconds: 120),
+        tapToScroll: () => settings.tapToScroll.value ?? false,
+        enhancedDragToScroll: () => settings.enhancedDragToScroll.value ?? true,
+        instantThumbGrab: () => settings.easyScrollbarGrab.value ?? false,
+        onThumbLongPressStart: () => isScrollbarThumbDragging = true,
+        onThumbLongPressEnd: () => isScrollbarThumbDragging = false,
+        thumbLabel: thumbLabel == null ? null : _createThumbLabelIfEnabled,
+        child: child,
+      ),
     );
   }
 }
@@ -6646,65 +6684,7 @@ class QueueUtilsRow extends StatelessWidget {
         const SizedBox(width: 6.0),
         scrollQueueWidget,
         const SizedBox(width: 6.0),
-        GestureDetector(
-          onLongPressStart: (details) async {
-            Widget buildButton(String title, IconData icon, bool isShuffleAll) {
-              // final enabled = isShuffleAll == settings.player.shuffleAllTracks.value;
-              return Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 2.0),
-                child: NamidaInkWell(
-                  padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
-                  borderRadius: 10.0,
-                  // bgColor: enabled ? CurrentColor.inst.color.withOpacityExt(0.2) : null,
-                  onTap: () {
-                    // settings.player.shuffleAllTracks.save(isShuffleAll);
-                    NamidaNavigator.inst.popMenu();
-                    Player.inst.shuffleTracks(isShuffleAll);
-                  },
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      StackedIcon(
-                        baseIcon: Broken.shuffle,
-                        secondaryIcon: icon,
-                        blurRadius: 8.0,
-                        secondaryIconSize: 12.0,
-                      ),
-                      const SizedBox(width: 8.0),
-                      Expanded(
-                        child: Text(
-                          title,
-                          style: context.textTheme.displayMedium,
-                        ),
-                      ),
-                      const SizedBox(width: 12.0),
-                    ],
-                  ),
-                ),
-              );
-            }
-
-            final menu = NamidaPopupWrapper(
-              children: () => [
-                buildButton(lang.shuffleNext, Broken.forward, false),
-                buildButton(lang.shuffleAll, Broken.task, true),
-              ],
-            );
-            menu.showPopupMenu(
-              context,
-            );
-          },
-          child: ObxO(
-            rx: settings.player.shuffleQueue,
-            builder: (context, shuffleQueue) => NamidaButton(
-              text: lang.shuffle,
-              icon: Broken.shuffle,
-              colors: shuffleQueue ? NamidaButtonColors.selected : NamidaButtonColors.normal,
-              // onTap: () => Player.inst.shuffleTracks(settings.player.shuffleAllTracks.value),
-              onTap: () => settings.player.shuffleQueue.save(!shuffleQueue),
-            ),
-          ),
-        ),
+        const _QueueShuffleButton(),
         const SizedBox(width: 12.0),
       ],
     );
@@ -6713,7 +6693,7 @@ class QueueUtilsRow extends StatelessWidget {
 
 class RepeatModeIconButton extends StatelessWidget {
   final bool compact;
-  final Color? color;
+  final NColors? color;
   final double iconSize;
   final VoidCallback? onPressed;
   final Widget Function(Widget child, String Function()? tooltipCallback, void Function() onTap)? builder;
@@ -6752,13 +6732,13 @@ class RepeatModeIconButton extends StatelessWidget {
         final mainIcon = repeatMode.toMainIcon();
         final secondaryIcon = repeatMode.toSecondaryIcon();
         const iconSize = 22.0;
-        final iconColor = context.defaultIconColor();
+        final iconColor = NColors.defaultIcon();
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 2.0),
           child: NamidaInkWell(
             padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
             borderRadius: 12.0,
-            bgColor: enabled ? CurrentColor.inst.color.withOpacityExt(0.2) : null,
+            bgColor: NColors.fixed(enabled ? CurrentColor.inst.color.withOpacityExt(0.2) : null),
             onTap: () {
               final times = repeatMode == PlayerRepeatMode.forNtimes ? _numberOfRepeats.value : null;
               Player.inst.setRepeatMode(repeatMode, times: times);
@@ -6779,7 +6759,7 @@ class RepeatModeIconButton extends StatelessWidget {
                             iconSize: iconSize,
                             secondaryIconSize: iconSize * 0.6,
                           )
-                        : Icon(
+                        : NIcon(
                             mainIcon,
                             size: iconSize,
                             color: iconColor,
@@ -6788,9 +6768,10 @@ class RepeatModeIconButton extends StatelessWidget {
                     if (repeatMode == PlayerRepeatMode.forNtimes)
                       ObxO(
                         rx: _numberOfRepeats,
-                        builder: (context, repeats) => Text(
+                        builder: (context, repeats) => NamidaText(
                           '$repeats',
-                          style: context.textTheme.displaySmall?.copyWith(color: iconColor),
+                          style: NText.small,
+                          color: iconColor,
                         ),
                       ),
                   ],
@@ -6800,9 +6781,9 @@ class RepeatModeIconButton extends StatelessWidget {
                   child: ObxPrefer(
                     rx: _numberOfRepeats,
                     enabled: repeatMode == PlayerRepeatMode.forNtimes,
-                    builder: (context, repeats) => Text(
+                    builder: (context, repeats) => NamidaText(
                       repeatMode.buildText(numberOfRepeats: repeats),
-                      style: context.textTheme.displayMedium,
+                      style: NText.medium,
                     ),
                   ),
                 ),
@@ -6842,9 +6823,8 @@ class RepeatModeIconButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
-    final iconColor = color ?? theme.colorScheme.onSecondaryContainer;
+    final colors = NColorsData.of(context);
+    final iconColor = color?.resolve(colors) ?? colors.onSecondaryContainer;
 
     final rawWidget = ObxO(
       rx: Player.inst.forcedRepeatMode,
@@ -6862,8 +6842,8 @@ class RepeatModeIconButton extends StatelessWidget {
                   ? StackedIcon(
                       baseIcon: mainIcon,
                       secondaryIcon: secondaryIcon,
-                      baseIconColor: iconColor,
-                      secondaryIconColor: iconColor,
+                      baseIconColor: NColors.fixed(iconColor),
+                      secondaryIconColor: NColors.fixed(iconColor),
                       iconSize: iconSize,
                       secondaryIconSize: iconSize * 0.6,
                     )
@@ -6875,9 +6855,10 @@ class RepeatModeIconButton extends StatelessWidget {
               if (repeatMode == PlayerRepeatMode.forNtimes)
                 ObxO(
                   rx: Player.inst.numberOfRepeats,
-                  builder: (context, numberOfRepeats) => Text(
+                  builder: (context, numberOfRepeats) => NamidaText(
                     '$numberOfRepeats',
-                    style: textTheme.displaySmall?.copyWith(color: iconColor),
+                    style: NText.small,
+                    color: NColors.fixed(iconColor),
                   ),
                 ),
             ],
@@ -6933,7 +6914,7 @@ class RepeatModeIconButton extends StatelessWidget {
 
 class NumberOfRepeatsWidgetProvider extends StatelessWidget {
   final RxBase<int> numberOfRepeatsRx;
-  final Color? iconColor;
+  final NColors? iconColor;
   final double iconSize;
   final double horizontalPadding;
 
@@ -6971,7 +6952,7 @@ class NumberOfRepeatsWidgetProvider extends StatelessWidget {
 
 class SoundControlButton extends StatelessWidget {
   final bool compact;
-  final Color? color;
+  final NColors? color;
   final double iconSize;
   final VoidCallback? onPressed;
   final Widget Function(Widget child, String Function() tooltipCallback, void Function() onTap)? builder;
@@ -6993,8 +6974,9 @@ class SoundControlButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = NColorsData.of(context);
     final tooltip = lang.soundControl;
-    final iconColor = color ?? context.theme.colorScheme.onSecondaryContainer;
+    final iconColor = color?.resolve(colors) ?? colors.onSecondaryContainer;
     final child = SoundControlButtonRaw(
       iconSize: iconSize,
       iconColor: iconColor,
@@ -7067,8 +7049,8 @@ class SoundControlButtonRaw extends StatelessWidget {
                 secondaryIcon: secondaryIcon,
                 iconSize: iconSize,
                 secondaryIconSize: iconSize * 0.5,
-                baseIconColor: iconColor,
-                secondaryIconColor: iconColor,
+                baseIconColor: NColors.fixed(iconColor),
+                secondaryIconColor: NColors.fixed(iconColor),
                 blurRadius: 12.0,
               )
             : Icon(
@@ -7157,6 +7139,7 @@ class LongPressDetector extends StatelessWidget {
   final Widget? child;
   final HitTestBehavior? behavior;
   final bool enableSecondaryTap;
+  final Duration? duration;
 
   const LongPressDetector({
     super.key,
@@ -7165,13 +7148,14 @@ class LongPressDetector extends StatelessWidget {
     this.child,
     this.behavior,
     this.enableSecondaryTap = false,
+    this.duration,
   });
 
   @override
   Widget build(BuildContext context) {
     final Map<Type, GestureRecognizerFactory> gestures = <Type, GestureRecognizerFactory>{};
     gestures[LongPressGestureRecognizer] = GestureRecognizerFactoryWithHandlers<LongPressGestureRecognizer>(
-      () => LongPressGestureRecognizer(debugOwner: this),
+      () => LongPressGestureRecognizer(debugOwner: this, duration: duration),
       initializer ??
           (LongPressGestureRecognizer instance) {
             instance
@@ -7247,7 +7231,7 @@ class ScaleDetectorState extends State<ScaleDetector> {
   void reset() => widget.onScaleReset?.call();
 
   void _onPointerSignal(PointerSignalEvent event) {
-    if (event is PointerScrollEvent && HardwareKeyboard.instance.isControlPressed) {
+    if (event is PointerScrollEvent && HardwareKeyboard.instance.isPrimaryModifierPressed) {
       GestureBinding.instance.pointerSignalResolver.register(event, _onScaleScroll);
     }
   }
@@ -7494,6 +7478,7 @@ class VerticalDragDetector extends _LinearDragDetector<VerticalDragGestureRecogn
     super.onUpdate,
     super.onEnd,
     super.onCancel,
+    super.dragStartBehavior,
   });
 }
 
@@ -7508,6 +7493,7 @@ abstract class _LinearDragDetector<T extends DragGestureRecognizer> extends Stat
   final void Function(T instance)? initializer;
   final Widget? child;
   final HitTestBehavior? behavior;
+  final DragStartBehavior dragStartBehavior;
 
   const _LinearDragDetector({
     super.key,
@@ -7519,6 +7505,7 @@ abstract class _LinearDragDetector<T extends DragGestureRecognizer> extends Stat
     this.onUpdate,
     this.onEnd,
     this.onCancel,
+    this.dragStartBehavior = DragStartBehavior.start,
   });
 
   @override
@@ -7534,6 +7521,7 @@ abstract class _LinearDragDetector<T extends DragGestureRecognizer> extends Stat
               ..onUpdate = onUpdate
               ..onEnd = onEnd
               ..onCancel = onCancel
+              ..dragStartBehavior = dragStartBehavior
               ..gestureSettings = MediaQuery.maybeGestureSettingsOf(context);
           },
     );
@@ -7615,7 +7603,6 @@ class NamidaHistoryDayHeaderBox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = context.textTheme;
     return DecoratedBox(
       decoration: BoxDecoration(
         color: bgColor,
@@ -7640,9 +7627,9 @@ class NamidaHistoryDayHeaderBox extends StatelessWidget {
           children: [
             const SizedBox(width: 12.0),
             Expanded(
-              child: Text(
+              child: NamidaText(
                 title,
-                style: textTheme.displayMedium,
+                style: NText.medium,
               ),
             ),
             const SizedBox(width: 4.0),
@@ -7685,7 +7672,7 @@ class NamidaClearDialogExpansionTile<T> extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
+    final nColors = NColorsData.of(context);
     final tempFilesSize = this.tempFilesSize;
     final tempFilesDelete = this.tempFilesDelete;
     return NamidaExpansionTile(
@@ -7696,9 +7683,9 @@ class NamidaClearDialogExpansionTile<T> extends StatelessWidget {
       trailingBuilder: (iconWidget) => Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          DecoratedBox(
-            decoration: BoxDecoration(
-              color: theme.cardColor,
+          NDecoratedBox(
+            decoration: (colors) => BoxDecoration(
+              color: colors.card,
               borderRadius: BorderRadius.circular(6.0.multipliedRadius),
             ),
             child: Padding(
@@ -7719,7 +7706,7 @@ class NamidaClearDialogExpansionTile<T> extends StatelessWidget {
               borderRadius: 12.0,
               icon: Broken.arrow_right_3,
               iconSize: 20.0,
-              color: theme.cardColor,
+              color: nColors.card,
               visualDensity: const VisualDensity(horizontal: -3.0, vertical: -3.0),
               title: data.title,
               subtitle: data.subtitle,
@@ -7753,7 +7740,7 @@ class NamidaClearDialogExpansionTile<T> extends StatelessWidget {
                 borderRadius: 12.0,
                 icon: Broken.broom,
                 iconSize: 20.0,
-                color: theme.cardColor,
+                color: nColors.card,
                 visualDensity: const VisualDensity(horizontal: -3.0, vertical: -3.0),
                 title: lang.deleteTempFiles,
                 subtitle: size.fileSizeFormatted,
@@ -7782,33 +7769,6 @@ class NamidaClearDialogExpansionTile<T> extends StatelessWidget {
 }
 
 /// Returns [AnimatedTheme] or [Theme] based on [settings.animatedTheme].
-class AnimatedThemeOrTheme extends StatelessWidget {
-  final ThemeData data;
-  final Widget child;
-  final Duration duration;
-
-  const AnimatedThemeOrTheme({
-    super.key,
-    required this.data,
-    required this.child,
-    this.duration = kThemeAnimationDuration,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return settings.animatedTheme.value
-        ? AnimatedTheme(
-            data: data,
-            duration: duration,
-            child: child,
-          )
-        : Theme(
-            data: data,
-            child: child,
-          );
-  }
-}
-
 class EnableDisablePlaylistReordering extends StatelessWidget {
   final String playlistName;
   final PlaylistManager playlistManager;
@@ -7933,8 +7893,6 @@ class _SetVideosPriorityChipState extends State<SetVideosPriorityChip> {
   }
 
   NamidaPopupWrapper? _getPopupWrapper() {
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
     return cachePriority != null || widget.totalCount > 1
         ? NamidaPopupWrapper(
             childrenAfterChildrenDefault: false,
@@ -7950,11 +7908,11 @@ class _SetVideosPriorityChipState extends State<SetVideosPriorityChip> {
                     ),
                     const SizedBox(width: 6.0),
                     Expanded(
-                      child: Text(
+                      child: NamidaText(
                         lang.priority,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: textTheme.displaySmall,
+                        style: NText.small,
                       ),
                     ),
                     const SizedBox(width: 6.0),
@@ -7993,10 +7951,10 @@ class _SetVideosPriorityChipState extends State<SetVideosPriorityChip> {
             ),
             child: NamidaInkWell(
               padding: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 12.0),
-              bgColor: theme.cardColor.withOpacityExt(0.5),
+              bgColor: const NColors(.card, opacity: 0.5),
               child: Text(
                 cachePriority?.toText() ?? '?',
-                style: widget.smaller ? theme.textTheme.displaySmall : theme.textTheme.displayMedium,
+                style: widget.smaller ? NText.small.of(context) : NText.medium.of(context),
               ),
             ),
           )
@@ -8113,13 +8071,13 @@ class _SwipeQueueActionBox extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final radius = Radius.circular(8.0.multipliedRadius);
-    return DecoratedBox(
-      decoration: BoxDecoration(
+    return NDecoratedBox(
+      decoration: (colors) => BoxDecoration(
         borderRadius: BorderRadius.horizontal(
           left: isLeft ? Radius.zero : radius,
           right: isLeft ? radius : Radius.zero,
         ),
-        color: context.theme.cardColor,
+        color: colors.card,
       ),
       child: ConstrainedBox(
         constraints: BoxConstraints(maxWidth: context.width * 0.25),
@@ -8132,10 +8090,10 @@ class _SwipeQueueActionBox extends StatelessWidget {
                 action.toIcon(),
                 size: 22.0,
               ),
-              SizedBox(height: 4.0),
-              Text(
+              const SizedBox(height: 4.0),
+              NamidaText(
                 action.toText(),
-                style: context.textTheme.displaySmall,
+                style: NText.small,
                 softWrap: false,
                 overflow: TextOverflow.fade,
               ),
@@ -8212,7 +8170,6 @@ class NamidaUpdateButton extends StatelessWidget {
 
     NamidaNavigator.inst.showSheet(
       builder: (context, bottomPadding, maxWidth, maxHeight) {
-        final textTheme = context.textTheme;
         return SizedBox(
           height: maxHeight,
           child: Padding(
@@ -8220,7 +8177,7 @@ class NamidaUpdateButton extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                SizedBox(height: 32.0),
+                const SizedBox(height: 32.0),
                 ObxO(
                   rx: VersionController.inst.latestVersion,
                   builder: (context, latestVersion) {
@@ -8234,10 +8191,10 @@ class NamidaUpdateButton extends StatelessWidget {
                             : [
                                 TextSpan(
                                   text: buildDateText,
-                                  style: textTheme.displayMedium,
+                                  style: NText.medium.of(context),
                                 ),
                               ],
-                        style: textTheme.displayLarge,
+                        style: NText.large.of(context),
                       ),
                     );
                   },
@@ -8251,33 +8208,33 @@ class NamidaUpdateButton extends StatelessWidget {
                         child: RichText(
                           text: TextSpan(
                             text: '⤵ ',
-                            style: textTheme.displaySmall,
+                            style: NText.small.of(context),
                           ),
                         ),
                       ),
                       RichText(
                         text: TextSpan(
                           text: currentVersion.prettyVersion,
-                          style: textTheme.displaySmall?.copyWith(fontSize: 11.0),
+                          style: NText.small.of(context).copyWith(fontSize: 11.0),
                           children: currentVersionDateText.isEmpty
                               ? null
                               : [
                                   TextSpan(
                                     text: currentVersionDateText,
-                                    style: textTheme.displaySmall?.copyWith(fontSize: 10.0),
+                                    style: NText.small.of(context).copyWith(fontSize: 10.0),
                                   ),
                                 ],
                         ),
                       ),
                     ],
                   ),
-                SizedBox(height: 12.0),
+                const SizedBox(height: 12.0),
                 Expanded(
                   child: _NamidaVersionReleasesInfoList(
                     maxHeight: maxHeight,
                   ),
                 ),
-                SizedBox(height: 12.0),
+                const SizedBox(height: 12.0),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
@@ -8296,18 +8253,19 @@ class NamidaUpdateButton extends StatelessWidget {
                         borderRadius: 12.0,
                         padding: const EdgeInsets.all(12.0),
                         height: 48.0,
-                        bgColor: CurrentColor.inst.color.withOpacityExt(0.9),
+                        bgColor: NColors.fixed(CurrentColor.inst.color.withOpacityExt(0.9)),
                         child: Center(
-                          child: Text(
+                          child: NamidaText(
                             lang.update.toUpperCase(),
-                            style: textTheme.displayMedium?.copyWith(color: Colors.white.withOpacityExt(0.9)),
+                            style: NText.medium,
+                            color: NColors.fixed(Colors.white.withOpacityExt(0.9)),
                           ),
                         ),
                       ),
                     ),
                   ],
                 ),
-                SizedBox(height: 12.0),
+                const SizedBox(height: 12.0),
               ],
             ),
           ),
@@ -8344,8 +8302,6 @@ class _NamidaVersionReleasesInfoListState extends State<_NamidaVersionReleasesIn
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
     return ObxO(
       rx: VersionController.inst.releasesAfterCurrent,
       builder: (context, releasesAfterCurrent) => releasesAfterCurrent == null
@@ -8360,7 +8316,7 @@ class _NamidaVersionReleasesInfoListState extends State<_NamidaVersionReleasesIn
                     margin: const EdgeInsets.symmetric(vertical: 4.0),
                     width: context.width,
                     height: widget.maxHeight * 0.5,
-                    bgColor: theme.cardColor,
+                    bgColor: NColors.card,
                   );
                 },
               ),
@@ -8375,14 +8331,14 @@ class _NamidaVersionReleasesInfoListState extends State<_NamidaVersionReleasesIn
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     if (index > 0)
-                      Text(
+                      NamidaText(
                         info.version.prettyVersion,
-                        style: textTheme.displayMedium,
+                        style: NText.medium,
                       ),
-                    SizedBox(height: 4.0),
+                    const SizedBox(height: 4.0),
                     NamidaInkWell(
-                      bgColor: theme.cardColor,
-                      padding: EdgeInsets.all(8.0),
+                      bgColor: NColors.card,
+                      padding: const EdgeInsets.all(8.0),
                       child: NamidaMarkdown.document(
                         document: _documents[info] ??= NamidaMarkdownDocument.parse(info.body),
                         selectable: false,
@@ -8391,359 +8347,11 @@ class _NamidaVersionReleasesInfoListState extends State<_NamidaVersionReleasesIn
                         padding: EdgeInsets.zero,
                       ),
                     ),
-                    SizedBox(height: 12.0),
+                    const SizedBox(height: 12.0),
                   ],
                 );
               },
             ),
-    );
-  }
-}
-
-class ShortcutsInfoWidget extends StatefulWidget {
-  final ShortcutsManager manager;
-  const ShortcutsInfoWidget({super.key, required this.manager});
-
-  @override
-  State<ShortcutsInfoWidget> createState() => _ShortcutsInfoWidgetState();
-}
-
-class _ShortcutsInfoWidgetState extends State<ShortcutsInfoWidget> {
-  final organizedMap = <String, List<ShortcutKeyActivator>>{};
-
-  @override
-  void initState() {
-    for (final k in widget.manager.bindings.keys) {
-      organizedMap.addForce(k.title(), k);
-    }
-
-    super.initState();
-  }
-
-  void _onAddOrEditTap(String title, HotkeyAction action) {
-    NamidaNavigator.inst.navigateDialog(
-      dialog: _HotKeyRecorderDialog(
-        title: title,
-        initalHotKey: settings.shortcuts.shortcuts.value[action],
-        onDelete: () {
-          ShortcutsController.instance?.setUserShortcut(action: action, data: null);
-        },
-        onHotKeyRecorded: (data) {
-          if (data != null) {
-            final conflictTitle = _findConflictingShortcutTitle(data, action);
-            if (conflictTitle != null) return '${lang.alreadyExists}: $conflictTitle';
-          }
-
-          ShortcutsController.instance?.setUserShortcut(action: action, data: data);
-          return null;
-        },
-      ),
-    );
-  }
-
-  String? _findConflictingShortcutTitle(ShortcutKeyData data, HotkeyAction action) {
-    final defaultKeys = widget.manager.bindings.keys;
-
-    // -- its not likely for already registered system hotkeys to be caught again here, but anyways
-    for (final MapEntry(key: userAction, value: userKey) in settings.shortcuts.shortcuts.value.entries) {
-      if (userAction == action || userKey == null) continue;
-      if (data.isSimilarTo(userKey)) {
-        final userActionDefaultKey = defaultKeys.firstWhereEff((k) => k.action == userAction);
-        return userActionDefaultKey?.title() ?? userAction.name;
-      }
-    }
-
-    for (final defaultKey in defaultKeys) {
-      final defaultKeyData = ShortcutKeyData.fromShortcutKeyActivator(defaultKey);
-      if (data.isSimilarTo(defaultKeyData)) return defaultKey.title();
-    }
-
-    return null;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
-    return ObxO(
-      rx: settings.shortcuts.shortcuts,
-      builder: (context, userShortcuts) => SuperSmoothListView(
-        shrinkWrap: true,
-        children: organizedMap.entries
-            .map(
-              (e) {
-                var shortcutsTexts = <String>[];
-                String title = e.key;
-                if (title == lang.libraryTabs) {
-                  shortcutsTexts = ['Ctrl + 1..9'];
-                } else if (title == lang.setRating) {
-                  shortcutsTexts = ['Ctrl + alt + 1..9'];
-                } else {
-                  shortcutsTexts = e.value.map((e) {
-                    return ShortcutKeyData.fromShortcutKeyActivator(e).buildKeyLabel();
-                  }).toList();
-                }
-                final action = e.value[0].action;
-                final data = action == null ? null : userShortcuts[action];
-                void addOrEditTapLocal() => action == null ? null : _onAddOrEditTap(title, action);
-                return Wrap(
-                  runSpacing: 2.0,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    ...shortcutsTexts
-                        .map(
-                          (shortcut) => NamidaInkWell(
-                            borderRadius: 4.0,
-                            padding: EdgeInsets.symmetric(horizontal: 4.0, vertical: 2.0),
-                            bgColor: theme.cardColor,
-                            child: RichText(
-                              text: TextSpan(
-                                text: shortcut,
-                                style: textTheme.displaySmall?.copyWith(fontSize: 13.0, fontWeight: FontWeight.w600),
-                              ),
-                            ),
-                          ),
-                        )
-                        .addSeparators(separator: const SizedBox(width: 2.0)),
-                    if (data != null)
-                      NamidaContainerDivider(
-                        height: 16.0,
-                        width: 2.0,
-                        margin: EdgeInsets.symmetric(horizontal: 3.0),
-                      ),
-                    if (data != null)
-                      NamidaInkWell(
-                        borderRadius: 4.0,
-                        padding: EdgeInsets.symmetric(vertical: 2.0),
-                        bgColor: theme.cardColor,
-                        onTap: addOrEditTapLocal,
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            SizedBox(width: 4.0),
-                            Icon(
-                              Broken.cpu,
-                              size: 14.0,
-                            ),
-                            SizedBox(width: 4.0),
-                            RichText(
-                              text: TextSpan(
-                                text: data.buildKeyLabel(),
-                                style: textTheme.displaySmall?.copyWith(fontSize: 13.0, fontWeight: FontWeight.w600),
-                              ),
-                            ),
-                            SizedBox(width: 4.0),
-                            if (action != null)
-                              NamidaInkWell(
-                                onTap: addOrEditTapLocal,
-                                borderRadius: 4.0,
-                                padding: EdgeInsets.symmetric(horizontal: 4.0, vertical: 2.0),
-                                bgColor: theme.colorScheme.secondaryContainer.withOpacityExt(0.6),
-                                child: Icon(
-                                  Broken.edit_2,
-                                  size: 13.0,
-                                ),
-                              ),
-                            SizedBox(width: 2.0),
-                          ],
-                        ),
-                      ),
-                    if (action != null && data == null) ...[
-                      SizedBox(width: 4.0),
-                      NamidaInkWell(
-                        onTap: addOrEditTapLocal,
-                        borderRadius: 4.0,
-                        padding: EdgeInsets.symmetric(horizontal: 4.0, vertical: 2.0),
-                        bgColor: theme.colorScheme.secondaryContainer.withOpacityExt(0.6),
-                        child: Icon(
-                          Broken.add_circle,
-                          size: 14.0,
-                        ),
-                      ),
-                    ],
-                    SizedBox(width: 4.0),
-                    RichText(
-                      text: TextSpan(
-                        text: title,
-                        style: textTheme.displayMedium?.copyWith(fontSize: 13.0),
-                      ),
-                    ),
-                  ],
-                );
-              },
-            )
-            .addSeparators(
-              separator: const NamidaContainerDivider(
-                margin: EdgeInsets.symmetric(vertical: 3.0),
-              ),
-            )
-            .toList(),
-      ),
-    );
-  }
-}
-
-class _HotKeyRecorderDialog extends StatefulWidget {
-  final String? title;
-  final ShortcutKeyData? initalHotKey;
-  final String? Function(ShortcutKeyData? data) onHotKeyRecorded;
-  final void Function() onDelete;
-
-  const _HotKeyRecorderDialog({
-    required this.title,
-    this.initalHotKey,
-    required this.onHotKeyRecorded,
-    required this.onDelete,
-  });
-
-  @override
-  State<_HotKeyRecorderDialog> createState() => _HotKeyRecorderDialogState();
-}
-
-class _HotKeyRecorderDialogState extends State<_HotKeyRecorderDialog> {
-  ShortcutKeyData? _hotKey;
-  String? _errorMsg;
-
-  @override
-  void initState() {
-    _hotKey = widget.initalHotKey;
-    HardwareKeyboard.instance.addHandler(_handleKeyEvent);
-    super.initState();
-  }
-
-  @override
-  void dispose() {
-    HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
-    super.dispose();
-  }
-
-  bool _handleKeyEvent(KeyEvent keyEvent) {
-    if (keyEvent is! KeyDownEvent) return false;
-    if (keyEvent.physicalKey == PhysicalKeyboardKey.enter || keyEvent.physicalKey == PhysicalKeyboardKey.numpadEnter) {
-      _confirmHotkey();
-      return true;
-    }
-
-    bool ctrl = false;
-    bool shift = false;
-    bool alt = false;
-    bool meta = false;
-
-    void investigateForModifiers(Set<PhysicalKeyboardKey> keys) {
-      for (final k in keys) {
-        if (k == PhysicalKeyboardKey.controlLeft || k == PhysicalKeyboardKey.controlRight) {
-          ctrl = true;
-          continue;
-        }
-        if (k == PhysicalKeyboardKey.shiftLeft || k == PhysicalKeyboardKey.shiftRight) {
-          shift = true;
-          continue;
-        }
-        if (k == PhysicalKeyboardKey.altLeft || k == PhysicalKeyboardKey.altRight) {
-          alt = true;
-          continue;
-        }
-        if (k == PhysicalKeyboardKey.metaLeft || k == PhysicalKeyboardKey.metaRight) {
-          meta = true;
-          continue;
-        }
-      }
-    }
-
-    investigateForModifiers({keyEvent.physicalKey});
-    final isKeyModifier = ctrl || shift || alt || meta; // check after pressed key is investigated
-    investigateForModifiers(HardwareKeyboard.instance.physicalKeysPressed);
-
-    setState(() {
-      _hotKey = ShortcutKeyData(
-        key: isKeyModifier ? null : keyEvent.logicalKey,
-        ctrl: ctrl,
-        shift: shift,
-        alt: alt,
-        meta: meta,
-      );
-      _errorMsg = null;
-    });
-
-    return true;
-  }
-
-  void _confirmHotkey() {
-    final error = widget.onHotKeyRecorded(_hotKey);
-    if (error != null) {
-      setState(() => _errorMsg = error);
-    } else {
-      NamidaNavigator.inst.closeDialog();
-    }
-  }
-
-  void _confirmDelete() {
-    widget.onDelete();
-    NamidaNavigator.inst.closeDialog();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final keyLabelNormalized = _hotKey?.buildKeyLabel() ?? '';
-    final isKeyGood = keyLabelNormalized.isNotEmpty;
-    final isEdit = widget.initalHotKey != null;
-    return CustomBlurryDialog(
-      icon: isEdit ? Broken.edit : Broken.add_circle,
-      title: widget.title ?? (isEdit ? lang.edit : lang.add),
-      normalTitleStyle: true,
-      trailingWidgets: [
-        if (isEdit)
-          NamidaIconButton(
-            icon: Broken.trash,
-            tooltip: () => lang.delete,
-            onPressed: _confirmDelete,
-          ),
-        if (isKeyGood)
-          NamidaIconButton(
-            icon: Broken.refresh,
-            tooltip: () => lang.clear,
-            onPressed: () {
-              setState(() {
-                _hotKey = null;
-                _errorMsg = null;
-              });
-            },
-          ),
-      ],
-      actions: [
-        const CancelButton(),
-        NamidaButton(
-          text: lang.save,
-          onTap: _confirmHotkey,
-        ),
-      ],
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Align(
-            alignment: Alignment.center,
-            child: NamidaInkWell(
-              borderRadius: 8.0,
-              bgColor: context.theme.cardColor,
-              padding: EdgeInsetsGeometry.symmetric(
-                horizontal: 12.0,
-                vertical: 12.0,
-              ),
-              child: Text(
-                isKeyGood ? keyLabelNormalized : '?',
-                style: context.textTheme.displayMedium,
-              ),
-            ),
-          ),
-          if (_errorMsg != null) ...[
-            SizedBox(height: 8.0),
-            Text(
-              _errorMsg!,
-              style: context.textTheme.displayMedium?.copyWith(color: context.theme.colorScheme.error),
-            ),
-          ],
-        ],
-      ),
     );
   }
 }
@@ -8903,7 +8511,7 @@ class _NamidaArtworkFullscreenState extends State<NamidaArtworkFullscreen> {
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
     final pageController = _pageController;
     if (pageController == null) return KeyEventResult.ignored;
-    if (HardwareKeyboard.instance.isControlPressed) return KeyEventResult.ignored;
+    if (HardwareKeyboard.instance.isPrimaryModifierPressed) return KeyEventResult.ignored;
 
     final key = event.logicalKey;
     final isLeft = key == LogicalKeyboardKey.arrowLeft;
@@ -8948,6 +8556,7 @@ class _NamidaArtworkFullscreenState extends State<NamidaArtworkFullscreen> {
         ? buildPage(context, 0)
         : Focus(
             autofocus: true,
+            skipTraversal: true,
             onKeyEvent: _onKeyEvent,
             child: PageView.builder(
               controller: pageController,
@@ -8961,9 +8570,9 @@ class _NamidaArtworkFullscreenState extends State<NamidaArtworkFullscreen> {
     final pageIndicatorWidget = count > 1
         ? ObxO(
             rx: _currentIndex,
-            builder: (context, currentIndex) => Text(
+            builder: (context, currentIndex) => NamidaText(
               '${currentIndex + 1}/$count',
-              style: context.textTheme.displayMedium,
+              style: NText.medium,
             ),
           )
         : null;
@@ -8984,8 +8593,8 @@ class _NamidaArtworkFullscreenState extends State<NamidaArtworkFullscreen> {
               ignoring: !_showTopBar,
               child: SizedBox(
                 width: context.width,
-                child: ColoredBox(
-                  color: context.theme.scaffoldBackgroundColor,
+                child: NColoredBox(
+                  color: NColors.scaffold,
                   child: Padding(
                     padding: EdgeInsets.only(
                       top: 12.0 + _heighestTopPadding,
@@ -9192,9 +8801,9 @@ class NamidaCoolBox extends StatelessWidget {
         padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: vPadding),
         child:
             builder?.call(context) ??
-            Text(
+            NamidaText(
               text,
-              style: context.theme.textTheme.displaySmall,
+              style: NText.small,
             ),
       ),
     );
@@ -9299,17 +8908,18 @@ class CustomIconButtonTonal extends StatelessWidget {
     required this.onTap,
   }) : assert(icon != null || iconWidget != null);
 
-  static Color? getIconColor(BuildContext context, [Color? colorScheme]) =>
-      context.theme.iconTheme.color?.withOpacityExt(0.7) ?? context.defaultIconColor(colorScheme).withOpacityExt(0.75);
+  static const iconColor = NColors(.icon, opacity: 0.7);
+  // static NColors iconColorAlt([Color? colorScheme]) => NColors.defaultIcon(mainColor: colorScheme, opacity: 0.75);
 
   @override
   Widget build(BuildContext context) {
+    final colors = NColorsData.of(context);
     return IconButton.filledTonal(
       padding: dense ? EdgeInsets.zero : null,
       style: ButtonStyle(
         tapTargetSize: dense ? MaterialTapTargetSize.shrinkWrap : null,
         visualDensity: dense ? VisualDensity.compact : null,
-        backgroundColor: WidgetStatePropertyAll((colorScheme ?? context.theme.colorScheme.secondary).withOpacityExt(0.18)),
+        backgroundColor: WidgetStatePropertyAll((colorScheme ?? colors.secondary).withOpacityExt(0.18)),
       ),
       onPressed: onTap,
       icon:
@@ -9317,7 +8927,7 @@ class CustomIconButtonTonal extends StatelessWidget {
           Icon(
             icon,
             size: iconSize,
-            color: getIconColor(context, colorScheme),
+            color: iconColor.resolve(colors),
           ),
       tooltip: tooltip,
     );
@@ -9377,7 +8987,6 @@ class SplitPageState extends State<SplitPage> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
     final pages = widget.pages;
     final selectedIndex = _selectedIndex;
     final selectedPage = pages[selectedIndex];
@@ -9412,36 +9021,40 @@ class SplitPageState extends State<SplitPage> {
                       } else {
                         borderRadius = BorderRadius.circular(brValue);
                       }
-                      return Expanded(
-                        child: NamidaInkWell(
-                          alignment: Alignment.center,
-                          animationDurationMS: 200,
-                          borderRadius: 8.0,
-                          bgColor: theme.cardTheme.color,
-                          padding: const EdgeInsets.all(8.0),
-                          decoration: BoxDecoration(
-                            border: isSelected
-                                ? Border.all(
-                                    color: theme.colorScheme.primary.withOpacityExt(0.6),
-                                    width: 1.2,
-                                  )
-                                : null,
-                            borderRadius: borderRadius,
+                      final buttonContent = Row(
+                        mainAxisAlignment: .center,
+                        children: [
+                          ?e.titleIconWidget,
+                          Flexible(
+                            fit: e.titleIconWidget == null ? FlexFit.tight : FlexFit.loose,
+                            child: NamidaText(
+                              e.title,
+                              style: NText.medium,
+                              textAlign: TextAlign.center,
+                            ),
                           ),
-                          onTap: () => _onButtonTap(i),
-                          child: Row(
-                            mainAxisAlignment: .center,
-                            children: [
-                              ?e.titleIconWidget,
-                              Flexible(
-                                fit: e.titleIconWidget == null ? FlexFit.tight : FlexFit.loose,
-                                child: Text(
-                                  e.title,
-                                  style: theme.textTheme.displayMedium,
-                                  textAlign: TextAlign.center,
-                                ),
-                              ),
-                            ],
+                        ],
+                      );
+                      return Expanded(
+                        child: NBuilder(
+                          selfAnimated: true,
+                          builder: (context, colors) => NamidaInkWell(
+                            alignment: Alignment.center,
+                            animationDurationMS: 200,
+                            borderRadius: 8.0,
+                            bgColor: NColors.cardTheme,
+                            padding: const EdgeInsets.all(8.0),
+                            decoration: BoxDecoration(
+                              border: isSelected
+                                  ? Border.all(
+                                      color: colors.primary.withOpacityExt(0.6),
+                                      width: 1.2,
+                                    )
+                                  : null,
+                              borderRadius: borderRadius,
+                            ),
+                            onTap: () => _onButtonTap(i),
+                            child: buttonContent,
                           ),
                         ),
                       );
@@ -9458,8 +9071,8 @@ class SplitPageState extends State<SplitPage> {
         const SizedBox(height: 6.0),
 
         if (widget.showDivider)
-          NamidaContainerDivider(
-            margin: const EdgeInsets.symmetric(horizontal: 18.0),
+          const NamidaContainerDivider(
+            margin: EdgeInsets.symmetric(horizontal: 18.0),
           ),
 
         Flexible(
@@ -9549,60 +9162,89 @@ class _PlayableTitleSubtitleWidgetState extends State<PlayableTitleSubtitleWidge
 }
 
 class NamidaToggleCard extends StatelessWidget {
-  final IconData icon;
+  /// null shows the [title] alone.
+  final IconData? icon;
   final String title;
   final bool showTitle;
   final bool active;
   final bool halfActive;
   final VoidCallback? onTap;
-  final EdgeInsetsGeometry padding;
+  final EdgeInsetsGeometry? padding;
   final double iconSize;
+  final bool dense;
 
   const NamidaToggleCard({
     super.key,
-    required this.icon,
+    this.icon,
     required this.title,
     this.showTitle = false,
     required this.active,
     this.halfActive = false,
     required this.onTap,
-    this.padding = const EdgeInsets.symmetric(horizontal: 4.0, vertical: 10.0),
+    this.padding,
     this.iconSize = 20.0,
+    this.dense = false,
   });
+
+  static const _kPadding = EdgeInsets.symmetric(horizontal: 4.0, vertical: 10.0);
+  static const _kDensePadding = EdgeInsets.symmetric(horizontal: 4.0, vertical: 8.0);
+
+  static SnackbarController? _latestStateSnackbar;
+
+  static String toStateText(String title, bool value) {
+    final valueText = value ? lang.yes : lang.no;
+    return '$title: $valueText';
+  }
+
+  static void showStateSnackbar({required IconData icon, required String title, required bool value}) {
+    _latestStateSnackbar?.close();
+    _latestStateSnackbar = snackyy(
+      icon: icon,
+      message: toStateText(title, value),
+      displayDuration: SnackDisplayDuration.mediumLow,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.theme;
-    final textTheme = theme.textTheme;
-    final tileAlpha = context.isDarkMode ? 5 : 20;
-    final inactiveColor = Color.alphaBlend(theme.colorScheme.onSurface.withAlpha(tileAlpha), theme.cardTheme.color!);
-    final activeColor = theme.colorScheme.secondaryContainer;
+    final defaultPadding = dense ? _kDensePadding : _kPadding;
+    final padding = this.padding ?? defaultPadding;
+    final titleIconSize = dense ? 18.0 : 22.0;
+    final titleIconGap = dense ? 3.0 : 4.0;
+    final colors = NColorsData.targetOf(context);
+    final tileOpacity = context.isDarkMode ? 0.02 : 0.08;
+    final inactiveColor = Color.alphaBlend(colors.onSurface.withOpacityExt(tileOpacity), colors.cardTheme);
+    final activeColor = colors.secondaryContainer;
     final bgColor = active
         ? activeColor
         : halfActive
         ? Color.alphaBlend(activeColor.withOpacityExt(0.4), inactiveColor)
         : inactiveColor;
     final isEnabled = onTap != null;
+    final icon = this.icon;
+    final isTitleShown = showTitle || icon == null;
     final card = NamidaInkWell(
       borderRadius: 10.0,
       padding: padding,
       animationDurationMS: 200,
-      bgColor: bgColor,
+      bgColor: NColors.fixed(bgColor),
       onTap: onTap,
-      child: showTitle
+      child: isTitleShown
           ? Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(
-                  icon,
-                  size: 22.0,
-                ),
-                const SizedBox(
-                  height: 4.0,
-                ),
-                Text(
+                if (icon != null) ...[
+                  Icon(
+                    icon,
+                    size: titleIconSize,
+                  ),
+                  SizedBox(
+                    height: titleIconGap,
+                  ),
+                ],
+                NamidaText(
                   title,
-                  style: textTheme.displaySmall?.copyWith(fontSize: 12.0),
+                  style: const NText(.small, size: .s12),
                   textAlign: TextAlign.center,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
@@ -9618,9 +9260,134 @@ class NamidaToggleCard extends StatelessWidget {
       opacity: isEnabled ? 1.0 : 0.4,
       duration: const Duration(milliseconds: 200),
       child: NamidaTooltip(
-        message: showTitle ? null : () => title,
+        message: isTitleShown ? null : () => title,
         child: card,
       ),
     );
   }
 }
+
+class _QueueShuffleButton extends StatelessWidget {
+  const _QueueShuffleButton();
+
+  void _onTap(BuildContext context) {
+    final mode = settings.player.shuffleButtonMode.value;
+    if (mode == null) return _showModesMenu(context);
+    Player.inst.shuffleByMode(mode);
+  }
+
+  void _showModesMenu(BuildContext context) {
+    final currentMode = settings.player.shuffleButtonMode.value;
+    final menu = NamidaPopupWrapper(
+      childrenDefault: () => ShuffleButtonMode.values.map(
+        (e) {
+          final isSelected = e == currentMode;
+          final tickIcon = isSelected
+              ? const NamidaCheckMark(
+                  active: true,
+                  size: 14.0,
+                )
+              : null;
+          return NamidaPopupItem(
+            icon: Broken.shuffle,
+            secondaryIcon: e.toSecondaryIcon(),
+            title: e.toText(),
+            selected: isSelected,
+            trailing: tickIcon,
+            onTap: () {
+              settings.player.shuffleButtonMode.save(e);
+              Player.inst.shuffleByMode(e);
+            },
+          );
+        },
+      ).toFixedList(),
+    );
+    menu.showPopupMenu(context);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Obx(
+      (context) {
+        final shuffleQueue = settings.player.shuffleQueue.valueR;
+        final mode = settings.player.shuffleButtonMode.valueR;
+        final edgesPainterBuilder = mode == null || !mode.hasEdges
+            ? null
+            : (Color foregroundColor, double borderRadius) => _ShuffleModeEdgesPainter(
+                mode: mode,
+                color: foregroundColor.withOpacityExt(0.5),
+                borderRadius: borderRadius,
+              );
+        return NamidaButton(
+          text: lang.shuffle,
+          icon: Broken.shuffle,
+          colors: shuffleQueue ? NamidaButtonColors.selected : NamidaButtonColors.normal,
+          foregroundPainterBuilder: edgesPainterBuilder,
+          onTap: () => _onTap(context),
+          onLongPress: () => _showModesMenu(context),
+        );
+      },
+    );
+  }
+}
+
+// by claude
+class _ShuffleModeEdgesPainter extends CustomPainter {
+  final ShuffleButtonMode mode;
+  final Color color;
+  final double borderRadius;
+
+  const _ShuffleModeEdgesPainter({
+    required this.mode,
+    required this.color,
+    required this.borderRadius,
+  });
+
+  static const _kFirstEdgeInset = 3.0;
+  static const _kEdgesGap = 2.6;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final bounds = Offset.zero & size;
+    final halfShortestSide = size.shortestSide / 2.0;
+    final radius = borderRadius.withMaximum(halfShortestSide);
+    final fadedColor = color.withOpacityExt(0.0);
+    final fadingGradient = LinearGradient(
+      begin: Alignment.topCenter,
+      end: Alignment.bottomCenter,
+      colors: [fadedColor, color, fadedColor],
+    );
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.1;
+    final edgesCount = math.max(mode.leftEdges, mode.rightEdges);
+    for (int i = 0; i < edgesCount; i++) {
+      final inset = _kFirstEdgeInset + i * _kEdgesGap;
+      final edge = bounds.deflate(inset);
+      final r = (radius - inset).withMinimum(0.0);
+      final corner = Radius.circular(r);
+      final path = Path();
+      if (i < mode.leftEdges) {
+        path
+          ..moveTo(edge.left + r, edge.top)
+          ..arcToPoint(Offset(edge.left, edge.top + r), radius: corner, clockwise: false)
+          ..lineTo(edge.left, edge.bottom - r)
+          ..arcToPoint(Offset(edge.left + r, edge.bottom), radius: corner, clockwise: false);
+      }
+      if (i < mode.rightEdges) {
+        path
+          ..moveTo(edge.right - r, edge.top)
+          ..arcToPoint(Offset(edge.right, edge.top + r), radius: corner)
+          ..lineTo(edge.right, edge.bottom - r)
+          ..arcToPoint(Offset(edge.right - r, edge.bottom), radius: corner);
+      }
+      paint.shader = fadingGradient.createShader(edge);
+      canvas.drawPath(path, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_ShuffleModeEdgesPainter oldDelegate) => mode != oldDelegate.mode || color != oldDelegate.color || borderRadius != oldDelegate.borderRadius;
+}
+
+typedef NamidaButtonPalette = ({Color colorScheme, Color bg, Color border, Color foreground});

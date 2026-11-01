@@ -51,6 +51,9 @@ class NamidaDeviceInfo {
   static bool get useOldStoragePermission => sdkVersion < 33;
   static int sdkVersion = -1;
 
+  /// ex: 160200 for 16.2.0.
+  static int iosVersion = -1;
+
   static String? _deviceId;
 
   static final deviceInfoCompleter = Completer<BaseDeviceInfo?>();
@@ -155,6 +158,7 @@ final kMainColorDarkOldValue = const Color(0xFF4e4c72).intValue;
 
 const isKuru = bool.fromEnvironment('IS_KURU_BUILD');
 const isWindowsPortable = bool.fromEnvironment('WINDOWS_PORTABLE');
+const kScreenshotsMode = bool.fromEnvironment('NAMIDA_SCREENSHOTS');
 
 const kEnableFancyAnimations = false;
 
@@ -200,14 +204,17 @@ class NamidaUtils {
       final shared = await NamidaChannel.inst.shareFiles(paths.toList());
       if (shared) return;
     }
-    await Share.shareXFiles(paths.map((e) => XFile(e)).toList());
+    final sharePositionOrigin = _getSharePositionOrigin();
+    await Share.shareXFiles(paths.map((e) => XFile(e)).toList(), sharePositionOrigin: sharePositionOrigin);
   }
 
   static Future<void> shareUri(String url) async {
-    if (Platform.isWindows || Platform.isLinux) {
+    // -- share_plus has no shareUri on macos
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
       await shareText(url);
     } else {
-      await Share.shareUri(Uri.parse(url));
+      final sharePositionOrigin = _getSharePositionOrigin();
+      await Share.shareUri(Uri.parse(url), sharePositionOrigin: sharePositionOrigin);
     }
   }
 
@@ -217,7 +224,18 @@ class NamidaUtils {
       copyToClipboard(content: text, maxLinesMessage: 2);
       return;
     }
-    await Share.share(text);
+    final sharePositionOrigin = _getSharePositionOrigin();
+    await Share.share(text, sharePositionOrigin: sharePositionOrigin);
+  }
+
+  /// ipad & macos share sheets are popovers, they point at the window center since callers don't pass the tapped button.
+  static Rect? _getSharePositionOrigin() {
+    if (!Platform.isIOS && !Platform.isMacOS) return null;
+    final view = WidgetsBinding.instance.platformDispatcher.implicitView;
+    if (view == null) return null;
+    final windowSize = view.physicalSize / view.devicePixelRatio;
+    final windowCenter = windowSize.center(Offset.zero);
+    return Rect.fromCenter(center: windowCenter, width: 1.0, height: 1.0);
   }
 
   static void copyToClipboard({
@@ -325,6 +343,112 @@ class NamidaLinkUtils {
     } catch (_) {}
 
     return null;
+  }
+
+  /// youtube's own `t` param (`t=5`, `t=5.235`, `t=1m30s`), null when missing or zero.
+  static int? extractYoutubeStartMS(String link) {
+    final paramIndex = _findStartParamIndex(link);
+    if (paramIndex < 0) return null;
+    return _parseStartParamMS(link, paramIndex + 2);
+  }
+
+  /// [link] with its `t` param set to [startMS], or removed when [startMS] isn't positive.
+  static String withYoutubeStartMS(String link, int startMS) {
+    final paramIndex = _findStartParamIndex(link);
+    if (paramIndex < 0) {
+      if (startMS <= 0) return link;
+      final hashIndex = link.indexOf('#');
+      final insertIndex = hashIndex < 0 ? link.length : hashIndex;
+      final hasQuery = link.lastIndexOf('?', insertIndex) >= 0;
+      final separator = hasQuery ? '&' : '?';
+      return link.replaceRange(insertIndex, insertIndex, '${separator}t=${_startMSToParam(startMS)}');
+    }
+
+    final valueStart = paramIndex + 2;
+    int valueEnd = valueStart;
+    while (valueEnd < link.length) {
+      final char = link.codeUnitAt(valueEnd);
+      if (char == _kCharAmpersand || char == _kCharHash) break;
+      valueEnd++;
+    }
+    if (startMS > 0) return link.replaceRange(valueStart, valueEnd, _startMSToParam(startMS));
+
+    final separatorIndex = paramIndex - 1;
+    final isFirstQueryParam = link.codeUnitAt(separatorIndex) == _kCharQuestionMark;
+    final hasNextParam = valueEnd < link.length && link.codeUnitAt(valueEnd) == _kCharAmpersand;
+    if (isFirstQueryParam && hasNextParam) return link.replaceRange(paramIndex, valueEnd + 1, '');
+    return link.replaceRange(separatorIndex, valueEnd, '');
+  }
+
+  static const _kCharQuestionMark = 0x3F;
+  static const _kCharAmpersand = 0x26;
+  static const _kCharHash = 0x23;
+  static const _kCharZero = 0x30;
+  static const _kCharNine = 0x39;
+  static const _kCharDot = 0x2E;
+  static const _kCharH = 0x68;
+  static const _kCharM = 0x6D;
+  static const _kCharS = 0x73;
+
+  /// index of the `t` in a `t=` that follows `?`, `&` or `#`, so `list=` isn't taken.
+  static int _findStartParamIndex(String link) {
+    int index = link.indexOf('t=');
+    while (index > 0) {
+      final previousChar = link.codeUnitAt(index - 1);
+      if (previousChar == _kCharQuestionMark || previousChar == _kCharAmpersand || previousChar == _kCharHash) return index;
+      index = link.indexOf('t=', index + 2);
+    }
+    return -1;
+  }
+
+  static int? _parseStartParamMS(String link, int start) {
+    int totalMS = 0;
+    int valueMS = 0;
+    bool isFraction = false;
+    int fractionDigitMS = 0;
+    bool hasDigits = false;
+    for (int i = start; i < link.length; i++) {
+      final char = link.codeUnitAt(i);
+      if (char >= _kCharZero && char <= _kCharNine) {
+        hasDigits = true;
+        final digit = char - _kCharZero;
+        if (isFraction) {
+          valueMS += digit * fractionDigitMS;
+          fractionDigitMS = fractionDigitMS ~/ 10;
+        } else {
+          valueMS = valueMS * 10 + digit * 1000;
+        }
+      } else if (char == _kCharDot) {
+        isFraction = true;
+        fractionDigitMS = 100;
+      } else {
+        final unitMS = switch (char) {
+          _kCharH => 3600,
+          _kCharM => 60,
+          _kCharS => 1,
+          _ => 0,
+        };
+        if (unitMS == 0) break;
+        totalMS += valueMS * unitMS;
+        valueMS = 0;
+        isFraction = false;
+      }
+    }
+    if (!hasDigits) return null;
+    totalMS += valueMS;
+    return totalMS > 0 ? totalMS : null;
+  }
+
+  /// `8370` -> `8.37`, `8000` -> `8`.
+  static String _startMSToParam(int startMS) {
+    final seconds = startMS ~/ 1000;
+    final millis = startMS % 1000;
+    if (millis == 0) return '$seconds';
+    var fraction = millis.toString().padLeft(3, '0');
+    while (fraction.endsWith('0')) {
+      fraction = fraction.substring(0, fraction.length - 1);
+    }
+    return '$seconds.$fraction';
   }
 
   /// the 11th char of a youtube id holds only 4 bits.
@@ -748,6 +872,7 @@ class AppPaths {
   static final VIDEOS_LOCAL_DB_INFO = DbWrapperFileInfo(directory: _USER_DATA, dbName: 'local_videos');
   static final VIDEOS_CACHE_DB_INFO = DbWrapperFileInfo(directory: _USER_DATA, dbName: 'cache_videos');
   static final LATEST_QUEUE = _join(_USER_DATA, 'latest_queue.json');
+  static final TRACKS_FILTERED = _join(_USER_DATA, 'tracks_filtered.json');
 
   // -- obsolete
   static final TRACKS_OLD = _join(_USER_DATA, 'tracks.json');
@@ -759,7 +884,9 @@ class AppPaths {
   static Future<List<String>> getAllExistingLogsAndSettingsAsZip({String? outputDirectory}) async {
     final format = DateFormat('yyyy-MM-dd HH.mm.ss');
     final dateText = format.format(DateTime.now());
-    final tmpDirParentPath = FileParts.joinPath((await pp.getTemporaryDirectory()).path, 'namida_logs_$dateText');
+    final tempDir = await pp.getTemporaryDirectory();
+    final tmpDirParent = await tempDir.createTemp('namida_logs_');
+    final tmpDirParentPath = tmpDirParent.path;
     final tmpDirContentsPath = FileParts.joinPath(tmpDirParentPath, 'contents');
     final tmpDirContents = await Directory(tmpDirContentsPath).create(recursive: true);
     await _copyAllExistingLogAndSettingsTo(tmpDirPath: tmpDirContentsPath);
@@ -770,7 +897,7 @@ class AppPaths {
       sourceDir: tmpDirContents,
       zipFile: zipFile,
     );
-    final leftoverDirectory = outputDirectory == null ? tmpDirContents : Directory(tmpDirParentPath);
+    final leftoverDirectory = outputDirectory == null ? tmpDirContents : tmpDirParent;
     leftoverDirectory.delete(recursive: true);
     return [zipFile.path];
   }
@@ -784,8 +911,8 @@ class AppPaths {
       await deviceInfoFile.writeAsString(deviceInfo);
       existingPaths.add(deviceInfoFile);
     } catch (_) {}
-    if (Platform.isLinux) {
-      // -- permissions not supported on linux
+    if (Platform.isLinux || Platform.isMacOS) {
+      // -- permissions not supported on linux & macos
     } else {
       final permissionsInfoFile = FileParts.join(tmpDirPath, 'permissions.txt');
       try {
@@ -873,12 +1000,21 @@ class AppPaths {
         if (home != null && home.isNotEmpty) return FileParts.joinPath(home, 'Logs', 'namida_logs.txt');
         return FileParts.joinPath(Directory.systemTemp.path, 'namida_logs.txt');
       },
-      linux: () {
-        final home = NamidaPlatformBuilder.linuxNamidaHome;
-        if (home != null && home.isNotEmpty) return FileParts.joinPath(home, 'Logs', 'namida_logs.txt');
+      linux: _getUnixFallbackLogsFilePath,
+      // -- documents always exists and the files app shows it, the user can still reach it when namida can't open
+      ios: () {
+        final home = NamidaPlatformBuilder.unixUserHome;
+        if (home != null && home.isNotEmpty) return FileParts.joinPath(home, 'Documents', 'namida_logs.txt');
         return FileParts.joinPath(Directory.systemTemp.path, 'namida_logs.txt');
       },
+      macos: _getUnixFallbackLogsFilePath,
     );
+  }
+
+  static String _getUnixFallbackLogsFilePath() {
+    final home = NamidaPlatformBuilder.unixNamidaHome;
+    if (home != null && home.isNotEmpty) return FileParts.joinPath(home, 'Logs', 'namida_logs.txt');
+    return FileParts.joinPath(Directory.systemTemp.path, 'namida_logs.txt');
   }
 
   static Future<String> _getPermissionsInfo() async {
@@ -1035,6 +1171,7 @@ class AppPaths {
 
   static final TOTAL_LISTEN_TIME = _join(_USER_DATA, 'total_listen.txt');
   static final SERVERS_PENDING_LISTENS = _join(_USER_DATA, 'servers_pending_listens.json');
+  static final DISCORD_AUTH = _join(AppDirs.ROOT_DIR, 'discord_auth.json');
   static final LISTEN_TIME_DAILY_DB_INFO = DbWrapperFileInfo(directory: _USER_DATA, dbName: 'listen_time_daily');
   static final FAVOURITES_PLAYLIST = _join(_USER_DATA, 'favs.json');
   static final NAMIDA_LOGO = '${AppDirs.ARTWORKS}.ARTWORKS.NAMIDA_DEFAULT_ARTWORK.PNG';
@@ -1211,6 +1348,13 @@ class AppDirs {
     YT_PALETTES,
     YT_DOWNLOAD_TASKS,
     // Internal Storage Directories are created on demand
+  ];
+
+  /// rebuilt or redownloaded when missing. artists & albums artworks can be picked by the user,
+  /// youtipie's cache holds what offline youtube history shows.
+  static final List<String> regenerableCaches = [
+    VIDEOS_CACHE, AUDIOS_CACHE, SERVERS_CACHE, THUMBNAILS, YT_THUMBNAILS, YT_THUMBNAILS_CHANNELS, //
+    ARTWORKS, PALETTES, YT_PALETTES, //
   ];
 }
 
@@ -1485,7 +1629,7 @@ abstract class NamidaFeaturesAvailablityBase {
   const NamidaFeaturesAvailablityBase();
 
   bool resolve();
-  String get text;
+  String toText();
 }
 
 class NamidaFeaturesAvailablityGroup extends NamidaFeaturesAvailablityBase {
@@ -1493,8 +1637,10 @@ class NamidaFeaturesAvailablityGroup extends NamidaFeaturesAvailablityBase {
 
   const NamidaFeaturesAvailablityGroup({required this.items});
 
+  static const mobile = NamidaFeaturesAvailablityGroup(items: [NamidaFeaturesAvailablity.android, NamidaFeaturesAvailablity.ios]);
+
   @override
-  String get text => items.join(' | ');
+  String toText() => items.map((e) => e.toText()).join(' | ');
 
   @override
   bool resolve() {
@@ -1504,31 +1650,39 @@ class NamidaFeaturesAvailablityGroup extends NamidaFeaturesAvailablityBase {
 
 enum NamidaFeaturesAvailablity implements NamidaFeaturesAvailablityBase {
   android('Android'),
+  ios('iOS'),
   windows('Windows'),
   linux('Linux'),
+  macos('macOS'),
   android13and_plus('Android 13+'), // >= 33
   android12and_plus('Android S/12+'), // >= 31
   android12and_below('Android <= 12'), // <= 32
   android11and_plus('Android 11+'), // >=30
   android11and_below('Android <= 11'), // <=30
+  ios16_2and_plus('iOS 16.2+'),
   ;
 
+  final String _displayName;
+  const NamidaFeaturesAvailablity(this._displayName);
+
   @override
-  final String text;
-  const NamidaFeaturesAvailablity(this.text);
+  String toText() => _displayName;
 
   @override
   bool resolve() {
     final isAndroid = NamidaFeaturesVisibility._isAndroid;
     return switch (this) {
       NamidaFeaturesAvailablity.android => isAndroid,
+      NamidaFeaturesAvailablity.ios => NamidaFeaturesVisibility._isIOS,
       NamidaFeaturesAvailablity.windows => NamidaFeaturesVisibility._isWindows,
       NamidaFeaturesAvailablity.linux => NamidaFeaturesVisibility._isLinux,
+      NamidaFeaturesAvailablity.macos => NamidaFeaturesVisibility._isMacOS,
       NamidaFeaturesAvailablity.android13and_plus => isAndroid && NamidaDeviceInfo.sdkVersion >= 33,
       NamidaFeaturesAvailablity.android12and_plus => isAndroid && NamidaDeviceInfo.sdkVersion >= 31,
       NamidaFeaturesAvailablity.android12and_below => isAndroid && NamidaDeviceInfo.sdkVersion <= 32,
       NamidaFeaturesAvailablity.android11and_plus => isAndroid && NamidaDeviceInfo.sdkVersion >= 30,
       NamidaFeaturesAvailablity.android11and_below => isAndroid && NamidaDeviceInfo.sdkVersion <= 30,
+      NamidaFeaturesAvailablity.ios16_2and_plus => NamidaFeaturesVisibility._isIOS && NamidaDeviceInfo.iosVersion >= 160200,
     };
   }
 }
@@ -1536,44 +1690,49 @@ enum NamidaFeaturesAvailablity implements NamidaFeaturesAvailablityBase {
 class NamidaFeaturesVisibility {
   static final _platform = defaultTargetPlatform;
   static final _isAndroid = _platform == TargetPlatform.android;
+  static final _isIOS = _platform == TargetPlatform.iOS;
   static final _isWindows = _platform == TargetPlatform.windows;
   static final _isLinux = _platform == TargetPlatform.linux;
+  static final _isMacOS = _platform == TargetPlatform.macOS;
+  static final _isMobile = _isAndroid || _isIOS;
+  static final _isDesktop = _isWindows || _isLinux || _isMacOS;
 
-  static final wallpaperColors = NamidaFeaturesAvailablity.android12and_plus.resolve();
   static final displayArtworkOnLockscreen = NamidaFeaturesAvailablity.android12and_below.resolve();
   static final notificationButtonsMightDisplaceArtwork = NamidaFeaturesAvailablity.android11and_below.resolve();
-  static final displayAppIcons = _isAndroid;
-  static final showEqualizerBands = _isAndroid;
   static final showSafFolders = _isAndroid;
   static final showAndroidIntegrations = _isAndroid;
-  static final showToggleMediaStore = onAudioQueryAvailable;
-  static final showToggleImmersiveMode = _isAndroid;
-  static final showRotateScreenInFullScreen = _isAndroid;
-  static final deviceOrientationSensorAvailable = _isAndroid;
-  static final fullScreenChangesScreenSize = _isAndroid;
-  static final floatingArtworkEffect = _isAndroid;
-  static final mediaWaveHaptic = _isAndroid;
+  static final showRotateScreenInFullScreen = _isMobile;
+  static final deviceOrientationSensorAvailable = _isMobile;
+  static final fullScreenChangesScreenSize = _isMobile;
+  static final floatingArtworkEffect = _isMobile;
+  static final mediaWaveHaptic = _isMobile;
   static const accessibilitySemantics = true;
 
-  static final methodSetCanEnterPip = _isAndroid;
   static final methodSetMonoAudio = _isAndroid;
   static final methodSetMusicAs = _isAndroid;
   static final methodOpenSystemEqualizer = _isAndroid;
-  static final methodOnNotificationTapAction = _isAndroid;
+
+  /// apple's now playing has only the 2 buttons around play/pause, each one is a track or a seek button.
+  static final nowPlayingSeekButtons = _isIOS || _isMacOS;
 
   static final onAudioQueryAvailable = _isAndroid;
   static final recieveSharingIntents = _isAndroid;
-  static final changeApplicationBrightness = _isAndroid;
+  static final changeApplicationBrightness = _isMobile;
   static final skipSilenceAvailable = PlayerConfig.isSkipSilenceSupported;
   static final equalizerAvailable = PlayerConfig.isEqualizerSupported;
   static final loudnessEnhancerAvailable = PlayerConfig.isLoudnessEnhancerSupported;
   static final soundEffectsAvailable = _isAndroid;
+  static final showOutputDevicePicker = !_isIOS; // -- ios routes through the system picker only
+  static final showExclusiveMode = _isDesktop;
 
-  static final showDownloadNotifications = _isWindows || _isLinux;
-  static final showVideoControlsOnHover = _isWindows || _isLinux;
-  static final tiltingCardsEffect = _isWindows || _isLinux;
-  static final smoothScrolling = _isWindows || _isLinux;
+  /// ios hides the hud for the hardware buttons too, so it's hidden only where namida draws its own slider.
+  static final hidingVolumeHudIsAppWide = _isIOS;
 
-  static final isStoragePermissionNotRequired = _isWindows || _isLinux;
-  static final recieveDragAndDrop = _isWindows || _isLinux;
+  static final showVideoControlsOnHover = _isDesktop;
+  static final tiltingCardsEffect = _isDesktop;
+  static final smoothScrolling = _isDesktop;
+
+  static final isStoragePermissionNotRequired = !_isAndroid;
+  static final fileBrowserPrefersSystemPicker = !_isAndroid; // -- ios folders outside the app are only reachable through the system picker
+  static final recieveDragAndDrop = _isDesktop;
 }

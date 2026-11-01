@@ -10,7 +10,7 @@ class _VideoInfoController {
   ///
   /// even tho web clients are more prone to errors,
   /// they're the only clients that contain reliable info like date, comments & endcards.
-  static final _defaultClient = InnertubeClients.tv;
+  static const _defaultClient = InnertubeClients.tv;
   static const _defaultRequiresJSPlayer = true;
 
   InnertubeClients get _usedClient => settings.youtube.innertubeClient.value ?? _defaultClient;
@@ -116,6 +116,8 @@ class _VideoInfoController {
     }
     return res;
   }
+
+  Future<HlsMasterPlaylist?> fetchHlsMasterPlaylist(String masterUrl) => YoutiPie.video.fetchHlsMasterPlaylist(masterUrl);
 
   Future<File?> fetchMusicVideoThumbnailToFile(String videoId, String filePath) {
     return YoutiPie.video.fetchMusicVideoThumbnailToFile(id: videoId, filePath: filePath);

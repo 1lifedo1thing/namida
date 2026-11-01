@@ -17,9 +17,11 @@ import 'package:namida/class/fuzzy_matcher.dart';
 import 'package:namida/class/http_response_wrapper.dart';
 import 'package:namida/class/lyrics.dart';
 import 'package:namida/class/track.dart';
+import 'package:namida/controller/indexer_controller.dart';
 import 'package:namida/controller/lyrics_integrations.dart';
 import 'package:namida/controller/lyrics_search_utils/lrc_search_details.dart';
 import 'package:namida/controller/lyrics_search_utils/lrc_search_utils_base.dart';
+import 'package:namida/controller/music_web_server/music_web_server_base.dart';
 import 'package:namida/controller/navigator_controller.dart';
 import 'package:namida/controller/player_controller.dart';
 import 'package:namida/controller/settings_controller.dart';
@@ -29,6 +31,7 @@ import 'package:namida/core/constants.dart';
 import 'package:namida/core/enums.dart';
 import 'package:namida/core/extensions.dart';
 import 'package:namida/core/icon_fonts/broken_icons.dart';
+import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/translations/language.dart';
 import 'package:namida/core/utils.dart';
 import 'package:namida/main.dart';
@@ -91,6 +94,10 @@ class Lyrics {
     currentLyricsText.value = LrcText.empty;
     currentLyricsLRC.value = lrc;
     _updateWidgets(lrc, null);
+  }
+
+  void copyLine(String text) {
+    NamidaUtils.copyToClipboard(content: text, maxLinesMessage: 2);
   }
 
   void resetLyrics({bool hide = true}) {
@@ -182,6 +189,27 @@ class Lyrics {
     _updateWidgets(lrc, txt);
   }
 
+  final _serverTracksWithoutLyrics = <String>{};
+
+  /// a server track missing them asks its server once, then keeps them as its embedded lyrics.
+  Future<String> _getEmbeddedLyrics(Playable item, LrcSearchUtils lrcUtils) async {
+    final embedded = lrcUtils.embeddedLyrics;
+    if (embedded.isNotEmpty) return embedded;
+    if (item is! Selectable) return embedded;
+    final track = item.track;
+    if (!track.isNetwork) return embedded;
+    final path = track.path;
+    if (_serverTracksWithoutLyrics.contains(path)) return embedded;
+    final serverLyrics = await MusicWebServer.baseUrlToLyrics(path);
+    if (serverLyrics == null) return embedded;
+    if (serverLyrics.isEmpty) {
+      _serverTracksWithoutLyrics.add(path);
+    } else {
+      Indexer.inst.updateTrackLyrics(track, serverLyrics);
+    }
+    return serverLyrics;
+  }
+
   static const _LyricsResolveResult _noLyrics = (lrc: null, txt: null, canBeAvailable: true);
   static const _LyricsResolveResult _unavailableLyrics = (lrc: null, txt: null, canBeAvailable: false);
 
@@ -194,7 +222,8 @@ class Lyrics {
     if (lrcUtils == null) return _noLyrics;
     if (checkInterrupted()) return null;
 
-    final embedded = lrcUtils.embeddedLyrics;
+    final embedded = await _getEmbeddedLyrics(item, lrcUtils);
+    if (checkInterrupted()) return null;
     if (LrcSearchUtils.isIgnoreMarker(embedded)) return _noLyrics;
 
     final local = await pickLocalLyrics(lrcUtils, embedded);
@@ -348,6 +377,12 @@ class Lyrics {
   }
 
   Future<bool> embedLyricsByUser(Track track, String lyrics) async {
+    final embeddedLyrics = track.lyrics;
+    final isReplacingEmbedded = embeddedLyrics.isNotEmpty && embeddedLyrics != lyrics;
+    if (isReplacingEmbedded) {
+      final confirmed = await _confirmReplacingEmbeddedLyrics(embeddedLyrics);
+      if (!confirmed) return false;
+    }
     final hasPermission = await requestManageStoragePermission(directoryToCreate: AppDirs.INTERNAL_STORAGE);
     if (!hasPermission) return false;
     bool didEmbed = false;
@@ -364,6 +399,37 @@ class Lyrics {
         )
         .ignoreError();
     return didEmbed;
+  }
+
+  Future<bool> _confirmReplacingEmbeddedLyrics(String embeddedLyrics) async {
+    var confirmed = false;
+    await NamidaNavigator.inst.navigateDialog(
+      dialog: CustomBlurryDialog(
+        isWarning: true,
+        normalTitleStyle: true,
+        title: lang.alreadyExists,
+        actions: [
+          const CancelButton(),
+          NamidaButton(
+            text: lang.embed,
+            onTap: () {
+              confirmed = true;
+              NamidaNavigator.inst.closeDialog();
+            },
+          ),
+        ],
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12.0),
+          child: NamidaText(
+            embeddedLyrics,
+            style: NText.small,
+            maxLines: 8,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ),
+    );
+    return confirmed;
   }
 
   /// with [LyricsSource.internet] nothing local was looked up, a lyrics file that is already there must not get replaced.
