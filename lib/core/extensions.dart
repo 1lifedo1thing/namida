@@ -18,6 +18,7 @@ import 'package:namida/controller/history_controller.dart';
 import 'package:namida/controller/indexer_controller.dart';
 import 'package:namida/controller/logs_controller.dart';
 import 'package:namida/controller/navigator_controller.dart';
+import 'package:namida/controller/platform/namida_storage/namida_storage.dart';
 import 'package:namida/controller/playlist_controller.dart';
 import 'package:namida/controller/search_sort_controller.dart';
 import 'package:namida/controller/settings_controller.dart';
@@ -1101,6 +1102,14 @@ extension DEWidgetsSeparator on Iterable<Widget> {
   }
 }
 
+extension LocalPathDisplay on String {
+  /// see [NamidaStorage.displayPath].
+  String toDisplayPath() => NamidaStorage.inst.displayPath(this);
+
+  /// for tiles & headers. ex: `/storage/emulated/0/Music` is `main/Music`.
+  String toShortDisplayPath() => toDisplayPath().formatPath();
+}
+
 extension DirectoryUtils on Directory {
   List<FileSystemEntity> listSyncSafe({bool recursive = false, bool followLinks = true}) {
     try {
@@ -1468,6 +1477,17 @@ extension ClamperExtDouble on double {
     if (x.isNaN) return max;
     return x;
   }
+}
+
+/// log scaled ratio of a count to a [reference] count (max, average..), so few huge counts don't push the rest to ~0.
+class LogScaledRatio {
+  final double _inverseLogReference;
+
+  LogScaledRatio(num reference) : _inverseLogReference = 1 / logScaleOf(reference);
+
+  double of(num value) => logScaleOf(value) * _inverseLogReference;
+
+  static double logScaleOf(num value) => math.log(1 + value);
 }
 
 extension ThemeModeExtensions on ThemeMode {

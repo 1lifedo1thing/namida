@@ -215,6 +215,7 @@ class _SettingsController extends _SettingsKeysWriter {
     NamedPresetsCodec.trackSearchFilter.decode,
     NamedPresetsCodec.trackSearchFilter.encode,
   );
+  late final trackSearchListensBoost = _key('trackSearchListensBoost', 2);
 
   /// the active preset's filters, or [trackSearchFilterDefault].
   RxBaseCore<List<TrackSearchFilter>> get trackSearchFilter => _activeTrackSearchFilter.filters;
@@ -284,7 +285,7 @@ class _SettingsController extends _SettingsKeysWriter {
   late final forceMiniplayerTrackColor = _key('forceMiniplayerTrackColor', false);
   late final isTrackPlayedSecondsCount = _key('isTrackPlayedSecondsCount', isKuru ? 25 : 40);
   late final isTrackPlayedPercentageCount = _key('isTrackPlayedPercentageCount', isKuru ? 25 : 40);
-  late final waveformTotalBars = _key('waveformTotalBars', isDesktop ? 100 : (isKuru ? 111 : 80), sync: false);
+  late final waveformTotalBars = _key('waveformTotalBars', isDesktop ? 100 : 80, sync: false);
   late final videosMaxCacheInMB = _key('videosMaxCacheInMB', isDesktop ? 24 * 1024 : (isKuru ? -1 : 8 * 1024), sync: false);
   late final audiosMaxCacheInMB = _key('audiosMaxCacheInMB', isDesktop ? 12 * 1024 : (isKuru ? -1 : 4 * 1024), sync: false);
   late final serversMaxCacheInMB = _key('serversMaxCacheInMB', isDesktop ? 12 * 1024 : (isKuru ? -1 : 4 * 1024), sync: false);
@@ -399,7 +400,7 @@ class _SettingsController extends _SettingsKeysWriter {
   late final downloadAddToLocalPlaylist = _key('downloadAddToLocalPlaylist', false);
   late final downloadAudioOnly = _key('downloadAudioOnly', isKuru ? true : false);
   late final downloadOverrideOldFiles = _key('downloadOverrideOldFiles', false);
-  late final enablePip = _key('enablePip', true, sync: false);
+  late final pipContents = _keySet<PipContent>('pipContents', const {PipContent.video}, item: PipContent.values.asCodec(), sync: false);
   late final pickColorsFromDeviceWallpaper = _key('pickColorsFromDeviceWallpaper', false, sync: false);
   late final onNotificationTapAction = _keyEnum('onNotificationTapAction', NotificationTapAction.openApp, NotificationTapAction.values);
   late final performanceMode = _keyEnum('performanceMode', isDesktop ? PerformanceMode.goodLooking : PerformanceMode.balanced, PerformanceMode.values, sync: false);
@@ -463,7 +464,7 @@ class _SettingsController extends _SettingsKeysWriter {
 
   late final activeSearchMediaTypes = _keyList(
     'activeSearchMediaTypes',
-    isKuru ? const [MediaType.track, MediaType.album, MediaType.artist, MediaType.folder] : const [MediaType.track, MediaType.album, MediaType.artist],
+    isKuru ? const [MediaType.track, MediaType.album, MediaType.artist, MediaType.folderMusic, MediaType.folderVideo] : const [MediaType.track, MediaType.album, MediaType.artist],
     item: MediaType.values.asCodec(),
   );
 
@@ -599,6 +600,7 @@ class _SettingsController extends _SettingsKeysWriter {
 
   @override
   void _migrateKeys() {
+    _migrateKey('enablePip', 'pipContents', (json) => json == false ? const <String>[] : null);
     for (final name in const ['albumSort', 'artistSort', 'genreSort', 'playlistSort']) {
       final listName = '${name}s';
       _migrateKey(name, listName, (json) => json is String && _raw[listName] == null ? [json] : null);
@@ -644,6 +646,8 @@ class _SettingsController extends _SettingsKeysWriter {
       ];
     }
 
+    _migrateLegacyFolderSearch(_raw['activeSearchMediaTypes']);
+
     // -- `true` was the old default, only an explicit `false` is kept
     _migrateKey('prioritizeEmbeddedLyrics', 'embeddedLyricsPriority', (json) => json == false && _raw['embeddedLyricsPriority'] == null ? EmbeddedLyricsPriority.off.name : null);
 
@@ -669,6 +673,16 @@ class _SettingsController extends _SettingsKeysWriter {
       'sorts': sortsJson,
       if (isReversed) 'reverse': isReversed,
     };
+  }
+
+  /// [MediaType.folder] used to search both music and video folders.
+  static void _migrateLegacyFolderSearch(dynamic activeSearchMediaTypesJson) {
+    if (activeSearchMediaTypesJson is! List) return;
+    final folderIndex = activeSearchMediaTypesJson.indexOf(MediaType.folder.name);
+    if (folderIndex == -1) return;
+    activeSearchMediaTypesJson.removeAt(folderIndex);
+    final splitFolderTypes = [MediaType.folderMusic.name, MediaType.folderVideo.name].where((name) => !activeSearchMediaTypesJson.contains(name)).toFixedList();
+    activeSearchMediaTypesJson.insertAll(folderIndex, splitFolderTypes);
   }
 
   /// playlists defaulted to [GroupSortType.dateModified], which only albums and artists sort by.

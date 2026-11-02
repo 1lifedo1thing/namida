@@ -388,7 +388,7 @@ class _LyricsEditorPageState extends State<LyricsEditorPage> with SingleTickerPr
     _draftTimer?.cancel();
     _draftTimer = null;
     if (!_hasUnsavedChanges) return false;
-    final file = await _draftFile.writeAsJson(_doc.toJson());
+    final file = await _draftFile.writeAsJsonAtomic(_doc.toJson());
     return file != null;
   }
 
@@ -654,7 +654,7 @@ class _LyricsEditorPageState extends State<LyricsEditorPage> with SingleTickerPr
     }
     snackyy(
       title: lang.save,
-      message: '${lang.savedIn}: ${file.path}',
+      message: '${lang.savedIn}: ${file.path.toDisplayPath()}',
       icon: Broken.document_download,
       top: false,
     );

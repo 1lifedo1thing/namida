@@ -23,6 +23,7 @@ import 'package:namida/controller/lyrics_search_utils/lrc_search_details.dart';
 import 'package:namida/controller/lyrics_search_utils/lrc_search_utils_base.dart';
 import 'package:namida/controller/music_web_server/music_web_server_base.dart';
 import 'package:namida/controller/navigator_controller.dart';
+import 'package:namida/controller/pip_controller.dart';
 import 'package:namida/controller/player_controller.dart';
 import 'package:namida/controller/settings_controller.dart';
 import 'package:namida/controller/tagger_controller.dart';
@@ -57,9 +58,10 @@ class Lyrics {
   final currentLyricsText = LrcText.empty.obs;
   final currentLyricsLRC = Rxn<Lrc>();
   final lyricsCanBeAvailable = true.obs;
+  final isResolvingLyrics = false.obs;
 
   bool get _lyricsViewsEnabled => settings.enableLyrics.value || settings.enableSimpleLyricsLine.value;
-  bool get _lyricsEnabled => _lyricsViewsEnabled || LyricsIntegrations.isActive;
+  bool get _lyricsEnabled => _lyricsViewsEnabled || LyricsIntegrations.isActive || PipController.inst.isLyricsEnabled();
   EmbeddedLyricsPriority get _embeddedLyricsPriority => settings.embeddedLyricsPriority.value;
   LyricsSource get _lyricsSource => settings.lyricsSource.value;
 
@@ -103,6 +105,7 @@ class Lyrics {
   void resetLyrics({bool hide = true}) {
     currentLyricsText.value = LrcText.empty;
     currentLyricsLRC.value = null;
+    isResolvingLyrics.value = false;
     WakelockController.inst.updateLRCStatus(false);
     for (final view in LyricsLRCParsedViewState.mountedViews) {
       view.clearLists(hide: hide);
@@ -173,6 +176,7 @@ class Lyrics {
     } catch (_) {}
 
     lyricsCanBeAvailable.value = true;
+    isResolvingLyrics.value = true;
 
     final resolved = await _resolveLyrics(item, checkInterrupted);
     if (resolved == null || checkInterrupted()) return;
@@ -186,6 +190,7 @@ class Lyrics {
     } else if (!resolved.canBeAvailable) {
       lyricsCanBeAvailable.value = false;
     }
+    isResolvingLyrics.value = false;
     _updateWidgets(lrc, txt);
   }
 
@@ -314,7 +319,7 @@ class Lyrics {
     return (lrc: null, txt: txt, canBeAvailable: true);
   }
 
-  Future<List<LyricsModel>> searchLRCLyricsFromInternet({
+  Future<LyricsInternetSearchResult> searchLRCLyricsFromInternet({
     required LrcSearchUtils lrcUtils,
     String? customQuery,
     bool allProviders = false,
@@ -323,7 +328,7 @@ class Lyrics {
     final searchTries = lrcUtils.searchDetailsQueries();
     if (searchTries.isEmpty) {
       customQuery ??= lrcUtils.initialSearchTextHint;
-      if (customQuery.isEmpty) return [];
+      if (customQuery.isEmpty) return (lyrics: <LyricsModel>[], failedProviders: <LyricsProvider>[]);
     }
 
     final res = await _searchLRCLyricsFromInternet(
@@ -332,7 +337,7 @@ class Lyrics {
       allProviders: allProviders,
       onPartial: onPartial,
     );
-    return res.lyrics;
+    return (lyrics: res.lyrics, failedProviders: res.failedProviders);
   }
 
   Future<_LRCSearchResult> _searchLRCLyricsFromInternet({
@@ -367,7 +372,7 @@ class Lyrics {
       if (deviceFile == null) {
         snackyy(
           title: lang.lyricsSaveLocationNotWritable,
-          message: failed.path,
+          message: failed.path.toDisplayPath(),
           isError: true,
         );
       }
@@ -558,6 +563,7 @@ class _LRCSearchResult {
 
   /// a request has failed, empty [lyrics] don't mean there are none.
   final bool hadFailure;
+  final List<LyricsProvider> failedProviders;
 
   /// the best match has no lyrics to look for, only set without `allProviders`.
   final bool isInstrumental;
@@ -567,11 +573,12 @@ class _LRCSearchResult {
     required this.lyrics,
     required this.done,
     required this.hadFailure,
+    required this.failedProviders,
     required this.isInstrumental,
   });
 
-  static const empty = _LRCSearchResult(token: -1, lyrics: [], done: true, hadFailure: false, isInstrumental: false);
-  static const interrupted = _LRCSearchResult(token: -1, lyrics: [], done: true, hadFailure: true, isInstrumental: false);
+  static const empty = _LRCSearchResult(token: -1, lyrics: [], done: true, hadFailure: false, failedProviders: [], isInstrumental: false);
+  static const interrupted = _LRCSearchResult(token: -1, lyrics: [], done: true, hadFailure: true, failedProviders: [], isInstrumental: false);
 }
 
 class _LRCSearchManager with PortsProvider<SendPort> {
@@ -663,7 +670,16 @@ class _LRCSearchManager with PortsProvider<SendPort> {
 
         void send(List<LyricsModel> lyrics, bool done) {
           if (session.cancelled) return;
-          sendPort.send(_LRCSearchResult(token: p.token, lyrics: lyrics, done: done, hadFailure: session.hadFailure, isInstrumental: session.isInstrumental));
+          sendPort.send(
+            _LRCSearchResult(
+              token: p.token,
+              lyrics: lyrics,
+              done: done,
+              hadFailure: session.hadFailure,
+              failedProviders: session.failedProviders,
+              isInstrumental: session.isInstrumental,
+            ),
+          );
         }
 
         final lyrics = await searcher.search(session, onPartial: (lyrics) => send(lyrics, false));
@@ -682,17 +698,20 @@ class _LRCSearchSession {
 
   bool _cancelled = false;
   bool _requestIssued = false;
-  bool _hadFailure = false;
   bool _isInstrumental = false;
+  final failedProviders = <LyricsProvider>[];
 
   bool get cancelled => _cancelled;
-  bool get hadFailure => _hadFailure;
+  bool get hadFailure => failedProviders.isNotEmpty;
   bool get isInstrumental => _isInstrumental;
 
   _LRCSearchSession(this.request);
 
   void markRequestIssued() => _requestIssued = true;
-  void markFailure() => _hadFailure = true;
+  void markFailure(LyricsProvider provider) {
+    if (!failedProviders.contains(provider)) failedProviders.add(provider);
+  }
+
   void markInstrumental() => _isInstrumental = true;
 
   void cancel() {
@@ -770,7 +789,7 @@ class _LRCProvidersSearcher {
         LyricsProvider.kugou => await _fetchKuGou(session, details: details, customQuery: customQuery, limit: kugouLimit),
       };
     } catch (_) {
-      session.markFailure();
+      session.markFailure(provider);
       return [];
     }
   }
@@ -978,7 +997,7 @@ class _LRCProvidersSearcher {
         final lyrics = lrc.contains('[length:') || durMS <= 0 ? lrc : '[length:${Lyrics.formatLengthTag(durMS)}]\n$lrc';
         fetched.add(_model(lyrics, true, LyricsProvider.kugou));
       } catch (_) {
-        session.markFailure();
+        session.markFailure(LyricsProvider.kugou);
       }
     }
     LyricsModel.removeDuplicateLyrics(fetched);
@@ -1131,6 +1150,7 @@ class LrcText {
 }
 
 typedef LocalLyricsPick = ({File? file, bool isEmbedded, bool isEmbeddedPrioritized, Lrc? embeddedLrc});
+typedef LyricsInternetSearchResult = ({List<LyricsModel> lyrics, List<LyricsProvider> failedProviders});
 
 typedef _LyricsResolveResult = ({Lrc? lrc, LrcText? txt, bool canBeAvailable});
 typedef _LRCFetchResult = ({Lrc? lrc, String? txt, bool didSearchFail, bool isInstrumental});

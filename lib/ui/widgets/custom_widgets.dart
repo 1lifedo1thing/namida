@@ -25,6 +25,7 @@ import 'package:super_sliver_list/super_sliver_list.dart';
 import 'package:namida/base/audio_handler.dart';
 import 'package:namida/base/pull_to_refresh.dart';
 import 'package:namida/class/faudiomodel.dart';
+import 'package:namida/class/file_parts.dart';
 import 'package:namida/class/route.dart';
 import 'package:namida/class/track.dart';
 import 'package:namida/class/version_wrapper.dart';
@@ -36,6 +37,7 @@ import 'package:namida/controller/navigator_controller.dart';
 import 'package:namida/controller/platform/namida_channel/namida_channel.dart';
 import 'package:namida/controller/player_controller.dart';
 import 'package:namida/controller/playlist_controller.dart';
+import 'package:namida/controller/scroll_search_controller.dart';
 import 'package:namida/controller/settings_controller.dart';
 import 'package:namida/controller/time_ago_controller.dart';
 import 'package:namida/controller/version_controller.dart';
@@ -128,7 +130,7 @@ class CustomSwitch extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final finalColor = passedColor ?? CurrentColor.inst.color;
+    final finalColor = passedColor ?? NamidaNavigator.inheritedColorOf(context);
     final colors = NColorsData.targetOf(context);
     final duration = Duration(milliseconds: durationInMillisecond);
     const curve = Curves.fastEaseInToSlowEaseOut;
@@ -259,6 +261,7 @@ class CustomListTile extends StatelessWidget {
   /// takes the place of [subtitle].
   final Widget? subtitleWidget;
   final bool subtitleAbove;
+  final bool reserveSubtitleHeight;
   final Widget? trailing;
   final Widget? trailingRaw;
   final String? trailingText;
@@ -283,6 +286,7 @@ class CustomListTile extends StatelessWidget {
     this.subtitle,
     this.subtitleWidget,
     this.subtitleAbove = false,
+    this.reserveSubtitleHeight = false,
     this.trailing,
     this.trailingRaw,
     this.trailingText,
@@ -312,7 +316,8 @@ class CustomListTile extends StatelessWidget {
 
     final baseHeight = 6.0 + VisualDensity.compact.baseSizeAdjustment.dy;
     var oneLineHeight = baseHeight + (dense ? 50.0 : 56.0);
-    var minTileHeight = hasSubtitle ? baseHeight + (dense ? 60.0 : 62.0) : oneLineHeight;
+    final useSubtitleHeight = hasSubtitle || reserveSubtitleHeight;
+    var minTileHeight = useSubtitleHeight ? baseHeight + (dense ? 60.0 : 62.0) : oneLineHeight;
     var verticalPadding = 8.0;
     var borderR = this.borderR;
     var iconSize = 24.0;
@@ -1708,7 +1713,7 @@ class _NamidaExpansionTileState extends State<NamidaExpansionTile> with SingleTi
       children: [
         header,
         if (_isBodyBuilt)
-          _ExpansionSizeReveal(
+          NamidaSizeReveal(
             animation: _sizeAnimation,
             child: FadeTransition(
               opacity: _fadeAnimation,
@@ -1820,11 +1825,11 @@ class _ExpansionTint extends AnimatedWidget {
 }
 
 // -- unlike [SizeTransition], no clip once fully expanded, it would cut children shadows/glows.
-class _ExpansionSizeReveal extends AnimatedWidget {
+class NamidaSizeReveal extends AnimatedWidget {
   final Animation<double> animation;
   final Widget child;
 
-  const _ExpansionSizeReveal({required this.animation, required this.child}) : super(listenable: animation);
+  const NamidaSizeReveal({super.key, required this.animation, required this.child}) : super(listenable: animation);
 
   @override
   Widget build(BuildContext context) {
@@ -1949,7 +1954,7 @@ class CreatePlaylistButton extends StatelessWidget {
                   if (pl != null && m3uPath != null) {
                     await PlaylistController.inst.exportPlaylistToM3UFile(pl, m3uPath);
                     snackyy(
-                      message: "${lang.savedIn}: $m3uPath",
+                      message: "${lang.savedIn}: ${m3uPath.toDisplayPath()}",
                       leftBarIndicatorColor: CurrentColor.inst.color,
                       altDesign: true,
                       top: false,
@@ -1968,7 +1973,7 @@ class CreatePlaylistButton extends StatelessWidget {
                 (context) => CustomSwitchListTile(
                   icon: Broken.direct_send,
                   title: lang.convertToM3UPlaylist,
-                  subtitle: m3uDirectoryRx.valueR,
+                  subtitle: m3uDirectoryRx.valueR.toDisplayPath(),
                   value: exportAsM3uRx.valueR,
                   onChanged: (_) => exportAsM3uRx.toggle(),
                   trailingBeforeSwitch: NamidaIconButton(
@@ -4100,6 +4105,10 @@ class SearchPageTitleRow extends StatelessWidget {
   final Widget? trailing;
   final Widget? subtitleWidget;
   final Widget? leading;
+  final Widget? titleTrailing;
+  final NColors? color;
+  final VoidCallback? onTap;
+  final double verticalPadding;
 
   const SearchPageTitleRow({
     super.key,
@@ -4109,25 +4118,44 @@ class SearchPageTitleRow extends StatelessWidget {
     this.trailing,
     this.subtitleWidget,
     this.leading,
+    this.titleTrailing,
+    this.color,
+    this.onTap,
+    this.verticalPadding = 0.0,
   });
+
+  static const _kTappableMargin = EdgeInsets.symmetric(horizontal: 8.0);
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    final row = Row(
       children: [
-        const SizedBox(width: 16.0),
         Expanded(
           child: Row(
             children: [
-              leading ?? Icon(icon),
+              leading ??
+                  NIcon(
+                    icon,
+                    color: color,
+                  ),
               const SizedBox(width: 8.0),
               Flexible(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    NamidaText(
-                      title,
-                      style: const NText(.large, size: .s15p5),
+                    Row(
+                      mainAxisSize: .min,
+                      spacing: 4.0,
+                      children: [
+                        Flexible(
+                          child: NamidaText(
+                            title,
+                            style: const NText(.large, size: .s15p5),
+                            color: color,
+                          ),
+                        ),
+                        ?titleTrailing,
+                      ],
                     ),
                     ?subtitleWidget,
                     if (subtitle != '')
@@ -4142,8 +4170,25 @@ class SearchPageTitleRow extends StatelessWidget {
           ),
         ),
         ?trailing,
-        const SizedBox(width: 8.0),
       ],
+    );
+    final content = ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: NamidaButton.kDefaultMinHeight),
+      child: row,
+    );
+    final onTap = this.onTap;
+    if (onTap == null) {
+      return Padding(
+        padding: EdgeInsets.only(left: 16.0, right: 8.0, top: verticalPadding, bottom: verticalPadding),
+        child: content,
+      );
+    }
+    return NamidaInkWell(
+      margin: _kTappableMargin,
+      padding: EdgeInsets.only(left: 8.0, top: verticalPadding, bottom: verticalPadding),
+      borderRadius: 12.0,
+      onTap: onTap,
+      child: content,
     );
   }
 }
@@ -6427,12 +6472,14 @@ class NamidaScrollbar extends StatelessWidget {
 class NamidaScrollbarWithController extends StatefulWidget {
   /// used as is and never disposed, a new one is created otherwise.
   final ScrollController? controller;
+  final LibraryTab? libraryTab;
   final bool showOnStart;
   final double scrollStep;
   final Widget Function(ScrollController sc) child;
   const NamidaScrollbarWithController({
     super.key,
     this.controller,
+    this.libraryTab,
     this.showOnStart = false,
     this.scrollStep = 0.0,
     required this.child,
@@ -6451,11 +6498,15 @@ class _NamidaScrollbarWithControllerState extends State<NamidaScrollbarWithContr
     final controller = widget.controller;
     _ownsController = controller == null;
     _sc = controller ?? NamidaScrollController.create();
+    final libraryTab = widget.libraryTab;
+    if (libraryTab != null) ScrollSearchController.inst.registerPageScrollController(libraryTab, _sc);
     super.initState();
   }
 
   @override
   void dispose() {
+    final libraryTab = widget.libraryTab;
+    if (libraryTab != null) ScrollSearchController.inst.unregisterPageScrollController(libraryTab, _sc);
     if (_ownsController) _sc.dispose();
     super.dispose();
   }
@@ -8490,6 +8541,13 @@ class _NamidaArtworkFullscreenState extends State<NamidaArtworkFullscreen> {
     NamidaOnTaps.inst.showSavedImageInSnack(savePath, widget.themeColor?.call());
   }
 
+  void _share() async {
+    final resolved = _resolvedImages[_currentIndex.value];
+    if (resolved == null) return;
+    final path = await resolved.getSharablePath();
+    await NamidaUtils.shareFiles([path]);
+  }
+
   void _saveCollage(Future<String?> Function(BuildContext context) onSaveCollage) async {
     final savePath = await onSaveCollage(context);
     NamidaOnTaps.inst.showSavedImageInSnack(savePath, widget.themeColor?.call());
@@ -8631,6 +8689,11 @@ class _NamidaArtworkFullscreenState extends State<NamidaArtworkFullscreen> {
                             onPressed: _save,
                           ),
                         ),
+                        NamidaIconButton(
+                          tooltip: () => lang.share,
+                          icon: Broken.share,
+                          onPressed: _share,
+                        ),
                       ],
                     ),
                   ),
@@ -8735,6 +8798,15 @@ class _ResolvedFullscreenImage {
 
   _ResolvedFullscreenImage.file(File this.file) : bytes = null, provider = FileImage(file);
   _ResolvedFullscreenImage.bytes(Uint8List this.bytes) : file = null, provider = MemoryImage(bytes);
+
+  Future<String> getSharablePath() async {
+    final file = this.file;
+    if (file != null) return file.path;
+    final bytesFilePath = FileParts.joinPath(AppDirs.APP_CACHE, 'namida_shared_image.png');
+    final bytesFile = File(bytesFilePath);
+    await bytesFile.writeAsBytes(bytes!);
+    return bytesFile.path;
+  }
 }
 
 class ObxPrefer<T> extends StatelessWidget {

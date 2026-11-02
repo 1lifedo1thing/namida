@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.media.MediaScannerConnection
 import android.media.RingtoneManager
 import android.media.audiofx.AudioEffect
 import android.net.wifi.WifiManager
@@ -38,12 +39,12 @@ class NamidaMainActivity : FlutterActivity() {
   companion object {
     var currentLifecycle: Lifecycle? = null
     var currentApplicationContext : Context? = null
+    private var pipAspectRatio: Rational? = null
   }
 
 
   private val CHANNELNAME = "namida"
   private val CHANNELNAME_STORAGE = "namida/storage"
-  private val EVENTCHANNELNAME = "namida_events"
   private lateinit var channel: MethodChannel
   private lateinit var channelStorage: MethodChannel
   private lateinit var context: Context
@@ -231,19 +232,13 @@ class NamidaMainActivity : FlutterActivity() {
           result.success(true)
         }
 
-        "setCanEnterPip" -> {
-          val canEnter = call.argument<Boolean?>("canEnter")
-          if (canEnter != null) canEnterPip = canEnter
+        "setPipAspectRatio" -> {
+          val width = call.argument<Int?>("width")
+          val height = call.argument<Int?>("height")
+          val ratio = if (width != null && height != null) Rational(width, height) else null
+          pipAspectRatio = ratio
+          if (ratio != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && isInPip()) updatePipAspectRatio(ratio)
           result.success(null)
-        }
-
-        "updatePipRatio" -> {
-          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && isInPip()) {
-            updatePipRatio(call.argument<Int?>("width"), call.argument<Int?>("height"))
-            result.success(true)
-          } else {
-            result.success(false)
-          }
         }
 
         "setMusicAs" -> {
@@ -279,6 +274,13 @@ class NamidaMainActivity : FlutterActivity() {
         "shareFiles" -> {
           val paths = call.argument<List<String>>("paths") ?: emptyList()
           result.success(shareFilesExternally(paths))
+        }
+
+        "scanMediaFiles" -> {
+          val paths = call.argument<List<String>>("paths") ?: emptyList()
+          val pathsArray = paths.toTypedArray()
+          MediaScannerConnection.scanFile(applicationContext, pathsArray, null, null)
+          result.success(null)
         }
 
         "openHomeWidgetSettings" -> {
@@ -318,6 +320,7 @@ class NamidaMainActivity : FlutterActivity() {
             "namida" -> LauncherIcon.DEFAULT
             "cutsie" -> LauncherIcon.CUTSIE
             "jellyda" -> LauncherIcon.JELLYDA
+            "namiween" -> LauncherIcon.NAMIWEEN
             "eddy" -> LauncherIcon.EDDY
             "namichin" -> LauncherIcon.NAMICHIN
             "space" -> LauncherIcon.SPACE
@@ -330,7 +333,6 @@ class NamidaMainActivity : FlutterActivity() {
             "monet" -> LauncherIcon.MONET
             "glowy" -> LauncherIcon.GLOWY
             "spooky" -> LauncherIcon.SPOOKY
-            "namiween" -> LauncherIcon.NAMIWEEN
             "tired" -> LauncherIcon.TIRED
             else -> null
           }
@@ -342,35 +344,9 @@ class NamidaMainActivity : FlutterActivity() {
               result.error("INVALID_ICON", "No matching icon for key: $key", null)
           }
         }
-        "isAppIconEnabled" -> {
-          val key = call.argument<String>("key")
-          val nativeIcon = when (key) {
-            "namida" -> LauncherIcon.DEFAULT
-            "cutsie" -> LauncherIcon.CUTSIE
-            "jellyda" -> LauncherIcon.JELLYDA
-            "eddy" -> LauncherIcon.EDDY
-            "namichin" -> LauncherIcon.NAMICHIN
-            "space" -> LauncherIcon.SPACE
-            "retro" -> LauncherIcon.RETRO
-            "ookami" -> LauncherIcon.OOKAMI
-            "original" -> LauncherIcon.ORIGINAL
-            "enhanced" -> LauncherIcon.ENHANCED
-            "hollow" -> LauncherIcon.HOLLOW
-            "pastel" -> LauncherIcon.PASTEL
-            "monet" -> LauncherIcon.MONET
-            "glowy" -> LauncherIcon.GLOWY
-            "spooky" -> LauncherIcon.SPOOKY
-            "namiween" -> LauncherIcon.NAMIWEEN
-            "tired" -> LauncherIcon.TIRED
-            else -> null
-          }
-
-          if (nativeIcon != null) {
-              val enabled = LauncherIconController.isEnabled(nativeIcon)
-              result.success(enabled)
-          } else {
-              result.error("INVALID_ICON", "No matching icon for key: $key", null)
-          }
+        "getEnabledAppIcon" -> {
+          val enabledIcon = LauncherIcon.values().firstOrNull { LauncherIconController.isEnabled(it) }
+          result.success(enabledIcon?.dartKey)
         }
         // SPLASH_AUTO_GENERATED END
 
@@ -530,8 +506,6 @@ class NamidaMainActivity : FlutterActivity() {
         else -> result.notImplemented()
       }
     }
-
-    pipEventChannel = BetterEventChannel(messenger, EVENTCHANNELNAME)
   }
 
   private fun showToast(text: String?, duration: Int) {
@@ -556,14 +530,11 @@ class NamidaMainActivity : FlutterActivity() {
 
   override fun onUserLeaveHint() {
     channel.invokeMethod("onUserLeaveHint", null)
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+    val ratio = pipAspectRatio
+    if (ratio != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
       try {
-        if (canEnterPip &&
-          com.ryanheise.just_audio.MainMethodCallHandler.willPlayWhenReady() &&
-          com.ryanheise.just_audio.MainMethodCallHandler.hasVideo() &&
-          !isInPip()
-        ) {
-          enterPip()
+        if (com.ryanheise.just_audio.MainMethodCallHandler.willPlayWhenReady() && !isInPip()) {
+          enterPip(ratio)
         }
       } catch (_: Exception) {
         // -- non initialized handler
@@ -619,7 +590,6 @@ class NamidaMainActivity : FlutterActivity() {
 
   override fun onDestroy() {
     channel.invokeMethod("onDestroy", null)
-    pipEventChannel?.endOfStream()
     super.onDestroy()
   }
 
@@ -630,8 +600,6 @@ class NamidaMainActivity : FlutterActivity() {
 
   // ------- PIP -------
 
-  private var canEnterPip: Boolean = false
-  private var pipEventChannel: BetterEventChannel? = null
   private var pipBuilder: PictureInPictureParams.Builder? = null
 
   public fun isInPip(): Boolean {
@@ -645,26 +613,24 @@ class NamidaMainActivity : FlutterActivity() {
     isInPictureInPictureMode: Boolean,
     newConfig: Configuration
   ) {
-    pipEventChannel?.success(isInPictureInPictureMode)
+    channel.invokeMethod("onPipModeChanged", isInPictureInPictureMode)
+    super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
   }
 
   @RequiresApi(api = Build.VERSION_CODES.O)
-  private fun enterPip() {
-    val rational =
-      com.ryanheise.just_audio.MainMethodCallHandler.getVideoRational() ?: Rational(1, 1)
+  private fun enterPip(ratio: Rational) {
     val pipB = pipBuilder
     if (pipB != null) {
-      pipB.setAspectRatio(rational)
+      pipB.setAspectRatio(ratio)
       activity.enterPictureInPictureMode(pipB.build())
     }
   }
 
   @RequiresApi(api = Build.VERSION_CODES.O)
-  private fun updatePipRatio(width: Int?, height: Int?) {
-    if (width == null || height == null) return
+  private fun updatePipAspectRatio(ratio: Rational) {
     val pipB = pipBuilder
     if (pipB == null) return
-    pipB.setAspectRatio(Rational(width, height))
+    pipB.setAspectRatio(ratio)
     activity.setPictureInPictureParams(pipB.build())
   }
 

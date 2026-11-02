@@ -25,6 +25,7 @@ import 'package:namida/controller/navigator_controller.dart';
 import 'package:namida/controller/player_controller.dart';
 import 'package:namida/controller/playlist_controller.dart';
 import 'package:namida/controller/queue_controller.dart';
+import 'package:namida/controller/scroll_search_controller.dart';
 import 'package:namida/controller/settings_controller.dart';
 import 'package:namida/controller/stats_controller.dart';
 import 'package:namida/controller/time_ago_controller.dart';
@@ -94,6 +95,7 @@ class HomePageRefresher {
 
 abstract class _HomePageStateBase<T extends ItemWithDate, E, S extends StatefulWidget> extends State<S> with TickerProviderStateMixin, PullToRefreshMixin {
   bool get isStatsTypeYT;
+  LibraryTab get libraryTab;
 
   HistoryManager<T, E> get historyManager;
   NamidaGeneratorBase<T, E> get generator;
@@ -159,6 +161,7 @@ abstract class _HomePageStateBase<T extends ItemWithDate, E, S extends StatefulW
     _scrollController = NamidaScrollController.create();
     _lostMemoriesScrollController = NamidaScrollController.create();
     _topRecentsScrollController = NamidaScrollController.create();
+    ScrollSearchController.inst.registerPageScrollController(libraryTab, _scrollController);
     HomePageRefresher._requests.addListener(_refreshAll);
     _fillLists();
   }
@@ -167,6 +170,7 @@ abstract class _HomePageStateBase<T extends ItemWithDate, E, S extends StatefulW
   void dispose() {
     HomePageRefresher._requests.removeListener(_refreshAll);
     _emptyAll();
+    ScrollSearchController.inst.unregisterPageScrollController(libraryTab, _scrollController);
     _scrollController.dispose();
     _lostMemoriesScrollController.dispose();
     _topRecentsScrollController.dispose();
@@ -270,9 +274,11 @@ abstract class _HomePageStateBase<T extends ItemWithDate, E, S extends StatefulW
         topListensEntries++;
       }
       final avgTopListensCount = topListensEntries == 0 ? 0 : topListensTotal ~/ topListensEntries;
+      final topListensRatio = LogScaledRatio(avgTopListensCount);
+      final timeNowMSSE = timeNow.millisecondsSinceEpoch;
       final int within1MonthsDaysMSSE = timeNow.subtract(const Duration(days: 30 * 1)).millisecondsSinceEpoch;
       final int within3MonthsDaysMSSE = timeNow.subtract(const Duration(days: 30 * 3)).millisecondsSinceEpoch;
-      final int within6MonthsDaysMSSE = timeNow.subtract(const Duration(days: 30 * 6)).millisecondsSinceEpoch;
+      // final int within6MonthsDaysMSSE = timeNow.subtract(const Duration(days: 30 * 6)).millisecondsSinceEpoch;
       final int within12MonthsDaysMSSE = timeNow.subtract(const Duration(days: 30 * 12)).millisecondsSinceEpoch;
       await _yieldFrame();
       if (generation != _fillGeneration) return;
@@ -280,20 +286,37 @@ abstract class _HomePageStateBase<T extends ItemWithDate, E, S extends StatefulW
           ? <E>[] // -- not enough history for the percentages below to mean anything
           : _allItemsInLibrary.getRandomSampleWhere(100, (item) {
               final listens = topTracksMapListens[item];
-              if (listens != null && listens.isNotEmpty) {
-                final lastListen = listens.last;
-                final listensPercentage = listens.length / avgTopListensCount;
-                // -- if listens percentage >= p and there is no listen in the last n days
-                // -- ex: 90/100 >= 0.9 && no listens within 12 months (where 100 is avg top listens)
-                return switch (listensPercentage) {
-                  >= 0.90 when within12MonthsDaysMSSE > lastListen => true,
-                  >= 0.50 when within6MonthsDaysMSSE > lastListen => true,
-                  >= 0.20 when within3MonthsDaysMSSE > lastListen => true,
-                  >= 0.1 when within1MonthsDaysMSSE > lastListen => true,
-                  _ => false,
-                };
+              if (listens == null) return false;
+
+              // -- old tiers, each one implied the last one (>= 0.50 && 1 month) so only that one ever decided
+              // X -- if log listens ratio >= p and there is no listen in the last n days
+              // X -- ex: log(1+50)/log(1+100) = 0.85 >= 0.80 && no listens within 6 months (where 100 is avg top listens)
+              // if (listens.isNotEmpty) {
+              //   final lastListen = listens.last;
+              //   final listensRatio = topListensRatio.of(listens.length);
+              //   return switch (listensRatio) {
+              //     >= 0.95 when within12MonthsDaysMSSE > lastListen => true,
+              //     >= 0.80 when within6MonthsDaysMSSE > lastListen => true,
+              //     >= 0.65 when within3MonthsDaysMSSE > lastListen => true,
+              //     >= 0.50 when within1MonthsDaysMSSE > lastListen => true,
+              //     _ => false,
+              //   };
+              // }
+
+              final listensCount = listens.length;
+              if (listensCount < 3) return false; // too few to know its usual pace
+              if (topListensRatio.of(listensCount) < 0.50) return false; // not loved enough
+
+              // -- lost if it got at most 1 listen within its last 4 usual gaps (kept between 1 and 12 months)
+              final usualGapMS = (listens.last - listens.first) ~/ (listensCount - 1);
+              final windowStartMSSE = (timeNowMSSE - usualGapMS * 4).clampInt(within12MonthsDaysMSSE, within1MonthsDaysMSSE);
+              int listensInWindow = 0;
+              for (int i = listensCount - 1; i >= 0; i--) {
+                if (listens[i] < windowStartMSSE) break;
+                listensInWindow++;
+                if (listensInWindow > 1) return false;
               }
-              return false;
+              return true;
             });
 
       await _yieldFrame();
@@ -662,6 +685,9 @@ abstract class _HomePageStateBase<T extends ItemWithDate, E, S extends StatefulW
 class _TracksHomePageState extends _HomePageStateBase<TrackWithDate, Track, HomePageLocal> {
   @override
   bool get isStatsTypeYT => false;
+
+  @override
+  LibraryTab get libraryTab => LibraryTab.home;
 
   @override
   HistoryManager<TrackWithDate, Track> get historyManager => HistoryController.inst;
@@ -1045,6 +1071,9 @@ class _TracksHomePageState extends _HomePageStateBase<TrackWithDate, Track, Home
 class _YoutubeHomePageState extends _HomePageStateBase<YoutubeID, String, YTHomePageLocal> {
   @override
   bool get isStatsTypeYT => true;
+
+  @override
+  LibraryTab get libraryTab => LibraryTab.ytHome;
 
   @override
   HistoryManager<YoutubeID, String> get historyManager => YoutubeHistoryController.inst;

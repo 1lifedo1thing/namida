@@ -38,7 +38,7 @@ class TracksSearchWrapper {
 
   static TracksSearchParams generateParams(
     SendPort sendPort,
-    Iterable<TrackExtended> tracks,
+    Iterable<Track> tracks,
     ListensSortedMap<Track> topTracksMapListens, {
     required List<TrackSearchFilter> filters,
   }) {
@@ -48,40 +48,40 @@ class TracksSearchWrapper {
     final addTags = filters.contains(TrackSearchFilter.tags);
     final addLanguages = filters.contains(TrackSearchFilter.language);
     final addFolder = filters.contains(TrackSearchFilter.folder);
-    final maxListensCount = topTracksMapListens.values.firstOrNull?.length;
     final lyricsLocations = addLyrics ? LyricsLocations.fromSettings() : null;
     return (
-      tracks: tracks
-          .map(
-            (e) => (
-              title: e.title,
-              artist: e.originalArtist,
-              album: e.originalAlbum,
-              albumArtist: e.albumArtist,
-              genre: e.originalGenre,
-              style: e.originalStyle,
-              composer: e.composer,
-              multiValues: e.multiValues,
-              year: e.year,
-              comment: e.comment,
-              description: addDescription ? e.description : null,
-              lyrics: addLyrics ? e.lyrics : null,
-              moods: addMoods ? e.effectiveMoods : null,
-              tags: addTags ? e.effectiveTags : null,
-              languages: addLanguages ? e.languagesList : null,
-              networkFolderName: addFolder && e.isNetwork ? e.folderName : null,
-              path: e.path,
-              isVideo: e.isVideo,
-              listensCount: topTracksMapListens[e.asTrack()]?.length,
-            ),
-          )
-          .toFixedList(),
+      tracks: tracks.map(
+        (tr) {
+          final e = tr.toTrackExt();
+          return (
+            title: e.title,
+            artist: e.originalArtist,
+            album: e.originalAlbum,
+            albumArtist: e.albumArtist,
+            genre: e.originalGenre,
+            style: e.originalStyle,
+            composer: e.composer,
+            multiValues: e.multiValues,
+            year: e.year,
+            comment: e.comment,
+            description: addDescription ? e.description : null,
+            lyrics: addLyrics ? e.lyrics : null,
+            moods: addMoods ? e.effectiveMoods : null,
+            tags: addTags ? e.effectiveTags : null,
+            languages: addLanguages ? e.languagesList : null,
+            networkFolderName: addFolder && e.isNetwork ? e.folderName : null,
+            path: e.path,
+            isVideo: e.isVideo,
+            listensCount: topTracksMapListens[tr]?.length,
+          );
+        },
+      ).toFixedList(),
       splitConfig: SplitArtistGenreConfigsWrapper.settings(),
       filters: filters,
       cleanup: settings.enableSearchCleanup.value,
       lyricsCacheDirectory: AppDirs.LYRICS,
       lyricsLocations: lyricsLocations,
-      maxListensCount: maxListensCount,
+      listensBoost: settings.trackSearchListensBoost.value,
       sendPort: sendPort,
     );
   }
@@ -93,8 +93,7 @@ class TracksSearchWrapper {
     final cleanup = params.cleanup;
     final lyricsCacheDirectory = params.lyricsCacheDirectory;
     final lyricsLocations = params.lyricsLocations;
-    final maxListensCount = params.maxListensCount ?? 0;
-    final maxListensLog = math.log(maxListensCount + 1);
+    final listensBoost = params.listensBoost;
 
     var stitle = tsf.contains(TrackSearchFilter.title);
     final sfilename = tsf.contains(TrackSearchFilter.filename);
@@ -147,7 +146,7 @@ class TracksSearchWrapper {
       final description = sdescription ? trMap.description?.toLowerCase() : null;
 
       final listensCount = trMap.listensCount;
-      final listensMultiplier = _listensMultiplierOf(listensCount, maxListensLog);
+      final listensMultiplier = _listensMultiplierOf(listensCount, listensBoost);
 
       final splitArtist = sartist
           ? _mapListCleanedAndCleanedMinor(
@@ -274,15 +273,19 @@ class TracksSearchWrapper {
     );
   }
 
-  /// log scaled so few listens still count, the most played track doubles its score.
-  static int _listensMultiplierOf(int? listensCount, double maxListensLog) {
-    if (listensCount == null || listensCount <= 0) return _kListensBoostSteps;
-    final boost = (math.log(listensCount + 1) / maxListensLog * _kListensBoostSteps).round();
-    return _kListensBoostSteps + boost;
+  /// own listens only, so other items never change it. each doubling of listens adds [listensBoost] / 8.
+  static int _listensMultiplierOf(int? listensCount, int listensBoost) {
+    if (listensCount == null || listensCount <= 0 || listensBoost <= 0) return _kListensMultiplierBase;
+    final doublings = math.log(listensCount + 1) / math.ln2;
+    final boost = (doublings * listensBoost * _kListensBoostPerDoubling).round();
+    return _kListensMultiplierBase + boost;
   }
 
-  static const _kListensBoostSteps = 20;
+  static const _kListensMultiplierBase = 32;
+  static const _kListensBoostPerDoubling = _kListensMultiplierBase ~/ 8;
   static const _kRelevantScoreDivisor = 3;
+
+  static int relevantMinScoreOf(int bestScore) => bestScore ~/ _kRelevantScoreDivisor;
 
   static _PropertySimple? _fillAllAvailableLyrics(Track track, String embedded, String lyricsCacheDirectory, LyricsLocations lyricsLocations) {
     final lyricsBuffer = StringBuffer();
@@ -502,11 +505,11 @@ class TracksSearchWrapper {
     return result;
   }
 
-  ({List<Track> relevant, List<Track> lessRelevant}) filterSplitByRelevance(String text, {bool? isVideo}) {
+  ({List<Track> relevant, List<Track> lessRelevant, int bestScore}) filterSplitByRelevance(String text, {bool? isVideo}) {
     final relevant = <Track>[];
     final lessRelevant = <Track>[];
-    _filter(text, (trExt) => relevant.add(trExt.track), (trExt) => lessRelevant.add(trExt.track), isVideo: isVideo);
-    return (relevant: relevant, lessRelevant: lessRelevant);
+    final bestScore = _filter(text, (trExt) => relevant.add(trExt.track), (trExt) => lessRelevant.add(trExt.track), isVideo: isVideo);
+    return (relevant: relevant, lessRelevant: lessRelevant, bestScore: bestScore);
   }
 
   List<int> filterIndicesAsList(String text) {
@@ -537,7 +540,7 @@ class TracksSearchWrapper {
     return (ranks: ranks, matchesCount: matchesCount);
   }
 
-  void _filter(
+  int _filter(
     String text,
     void Function(_CustomTrackExtended trExt) onRelevantMatch,
     void Function(_CustomTrackExtended trExt) onLessRelevantMatch, {
@@ -565,7 +568,7 @@ class TracksSearchWrapper {
       }
     }
 
-    final relevantMinScore = bestScore ~/ _kRelevantScoreDivisor;
+    final relevantMinScore = relevantMinScoreOf(bestScore);
     final sortedKeys = scored.keys.toFixedList()..sort((a, b) => b.compareTo(a));
     for (final scoreKey in sortedKeys) {
       final innerList = scored[scoreKey]!;
@@ -578,6 +581,7 @@ class TracksSearchWrapper {
         }
       }
     }
+    return bestScore;
   }
 
   static String Function(String text) _functionOfCleanup(bool enableSearchCleanup) {
@@ -832,7 +836,7 @@ class _ScoreCalculator {
     score = 0;
 
     scoreProperty(key.title, multiplier: 6, allowFuzzy: true, preferPrefix: true);
-    scoreProperty(key.subtitle, multiplier: 2, allowFuzzy: true, preferPrefix: true);
+    scoreProperty(key.subtitle, multiplier: 2, exactMultiplier: 6, allowFuzzy: true, preferPrefix: true);
     if (score > 0) return score;
     final extras = key.extras;
     if (extras != null) {
@@ -1010,6 +1014,6 @@ typedef TracksSearchParams = ({
   bool cleanup,
   String lyricsCacheDirectory,
   LyricsLocations? lyricsLocations,
-  int? maxListensCount,
+  int listensBoost,
   SendPort sendPort,
 });

@@ -899,6 +899,7 @@ class AppPaths {
     );
     final leftoverDirectory = outputDirectory == null ? tmpDirContents : tmpDirParent;
     leftoverDirectory.delete(recursive: true);
+    if (outputDirectory != null) NamidaChannel.inst.scanMediaFilesTry([zipFile.path]);
     return [zipFile.path];
   }
 
@@ -1233,7 +1234,7 @@ class _LogsRedactor {
 
   Future<File?> writeRedactedJson(Map<String, dynamic> json, File destination) async {
     final homeDirectoryRegex = _homeDirectoryRegex;
-    if (homeDirectoryRegex == null) return destination.writeAsJson(json);
+    if (homeDirectoryRegex == null) return destination.writeAsJsonAtomic(json);
 
     final text = _indentedJsonEncoder.convert(json);
     final redactedText = text.replaceAll(homeDirectoryRegex, _redactedHomeDirectory);
@@ -1514,7 +1515,7 @@ class NamidaFileExtensionsWrapper {
   };
 
   static const _lrcExtensions = {
-    'lrc', 'xml', 'ttml', 'srt', 'vtt', 'sbv', 'ssa', 'ass', //
+    'lrc', 'xml', 'ttml', 'srt', 'vtt', 'sbv', 'ssa', 'ass', 'wlrc', //
   };
 
   static const audio = NamidaFileExtensionsWrapper._(_audioExtensions);
@@ -1734,5 +1735,6 @@ class NamidaFeaturesVisibility {
 
   static final isStoragePermissionNotRequired = !_isAndroid;
   static final fileBrowserPrefersSystemPicker = !_isAndroid; // -- ios folders outside the app are only reachable through the system picker
+  static final temporaryFilesVisibleInFileExplorer = !_isIOS; // -- the files app shows only the documents folder
   static final recieveDragAndDrop = _isDesktop;
 }

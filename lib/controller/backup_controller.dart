@@ -18,6 +18,7 @@ import 'package:namida/controller/json_to_history_parser.dart';
 import 'package:namida/controller/listen_time_controller.dart';
 import 'package:namida/controller/logs_controller.dart';
 import 'package:namida/controller/navigator_controller.dart';
+import 'package:namida/controller/platform/namida_channel/namida_channel.dart';
 import 'package:namida/controller/platform/namida_storage/namida_storage.dart';
 import 'package:namida/controller/platform/zip_manager/zip_manager.dart';
 import 'package:namida/controller/player_controller.dart';
@@ -59,7 +60,7 @@ class BackupController {
     } catch (e) {
       snackyy(
         title: "${lang.error}: ${operationName ?? lang.backupAndRestore}",
-        message: '$e: "$path"',
+        message: '$e: "${path.toDisplayPath()}"',
         isError: true,
       );
     }
@@ -152,7 +153,7 @@ class BackupController {
         AppDirs.YT_HISTORY_PLAYLIST,
       ];
       await createBackupFile(itemsToBackup, fileSuffix: " - auto");
-      _trimExtraBackupFiles.thready(backupDirectoryPath);
+      _trimExtraBackupFiles.thready(backupDirectoryPath).then(NamidaChannel.inst.scanMediaFilesTry);
     }
   }
 
@@ -200,7 +201,7 @@ class BackupController {
           // -- without this device's sync identity, as a main zip entry that restore extracts in place
           final stagedSyncSettingsPath = FileParts.joinPath(stagingDirPath, p.getFilename);
           final syncBackupJson = settings.sync.buildBackupJson();
-          stagedSyncSettings = await File(stagedSyncSettingsPath).writeAsJson(syncBackupJson);
+          stagedSyncSettings = await File(stagedSyncSettingsPath).writeAsJsonAtomic(syncBackupJson);
           continue;
         }
 
@@ -220,13 +221,16 @@ class BackupController {
     }
 
     try {
+      final failedDirsErrors = <String>[];
       for (final d in dirsOnly) {
         final prefix = d.path.startsWith(AppDirs.YOUTUBE_MAIN_DIRECTORY) ? 'YOUTUBE_' : '';
-        final dirZipFile = FileParts.join(stagingDirPath, "${prefix}TEMPDIR_${d.path.getFilename}.zip");
+        final dirName = d.path.getFilename;
+        final dirZipFile = FileParts.join(stagingDirPath, "${prefix}TEMPDIR_$dirName.zip");
         try {
           await _zipManager.createZipFromDirectory(sourceDir: d, zipFile: dirZipFile);
           compressedDirectories.add(dirZipFile);
-        } catch (_) {
+        } catch (e) {
+          failedDirsErrors.add('$dirName: $e');
           await dirZipFile.tryDeleting();
         }
       }
@@ -253,7 +257,12 @@ class BackupController {
       await partialBackupFile.rename(backupFilePath);
 
       succeeded = true;
-      snackyy(title: lang.createdBackupSuccessfully, message: lang.createdBackupSuccessfullySub);
+      if (failedDirsErrors.isEmpty) {
+        snackyy(title: lang.createdBackupSuccessfully, message: lang.createdBackupSuccessfullySub);
+      } else {
+        final failedDirsText = failedDirsErrors.join('\n');
+        snackyy(title: "${lang.error}: ${lang.createBackup}", message: failedDirsText, isError: true);
+      }
     } catch (e) {
       printy(e, isError: true);
       snackyy(title: lang.error, message: e.toString());
@@ -264,7 +273,9 @@ class BackupController {
     await stagingDir.delete(recursive: true).ignoreError();
 
     isCreatingBackup.value = false;
-    return succeeded ? backupFile : null;
+    if (!succeeded) return null;
+    NamidaChannel.inst.scanMediaFilesTry([backupFilePath]);
+    return backupFile;
   }
 
   Future<void> _ensureDbCheckpointed(File file) async {
@@ -326,7 +337,7 @@ class BackupController {
     return false;
   }
 
-  static void _trimExtraBackupFiles(String dirPath) {
+  static List<String> _trimExtraBackupFiles(String dirPath) {
     final dir = Directory(dirPath);
     final possibleFiles = dir.listSyncSafe();
 
@@ -342,11 +353,13 @@ class BackupController {
       }
     }
 
+    final deletedPaths = <String>[];
     final remainingBackups = <File>[];
     for (final s in statsLookup.entries) {
       if (s.value.size == 0) {
         try {
           File(s.key).deleteSync();
+          deletedPaths.add(s.key);
         } catch (_) {}
       } else {
         remainingBackups.add(File(s.key));
@@ -360,9 +373,11 @@ class BackupController {
       for (final item in remainingBackups.take(extra)) {
         try {
           item.deleteSync();
+          deletedPaths.add(item.path);
         } catch (_) {}
       }
     }
+    return deletedPaths;
   }
 
   Future<void> restoreBackupOnTap(bool auto) async {
@@ -458,7 +473,7 @@ class BackupController {
     final restored = await syncSettingsFile.readAsJson();
     if (restored is! Map<String, dynamic>) return;
     settings.sync.keepIdentityIn(restored);
-    await syncSettingsFile.writeAsJson(restored);
+    await syncSettingsFile.writeAsJsonAtomic(restored);
   }
 
   /// extracts the zips that the main backup zip placed in [AppDirs.USER_DATA].

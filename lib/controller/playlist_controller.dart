@@ -22,6 +22,7 @@ import 'package:namida/controller/generators_controller.dart';
 import 'package:namida/controller/indexer_controller.dart';
 import 'package:namida/controller/music_web_server/music_web_server_base.dart';
 import 'package:namida/controller/navigator_controller.dart';
+import 'package:namida/controller/platform/namida_channel/namida_channel.dart';
 import 'package:namida/controller/player_controller.dart';
 import 'package:namida/controller/queue_controller.dart';
 import 'package:namida/controller/search_sort_controller.dart';
@@ -339,6 +340,7 @@ class PlaylistController extends PlaylistManager<TrackWithDate, Track, SortEntry
       headerLines: headerLines,
       relative: true,
     ));
+    NamidaChannel.inst.scanMediaFilesTry([path]);
     if (!asCopy) _m3uHeadersBaselines.set(path, headerValues);
   }
 
@@ -929,7 +931,7 @@ class PlaylistController extends PlaylistManager<TrackWithDate, Track, SortEntry
         child: Column(
           children: [
             NamidaText(
-              '${lang.enableM3uSync}?\n\n${lang.enableM3uSyncNote1}\n\n${lang.enableM3uSyncNote2(playlistsBackupPath: AppDirs.M3UBackup)}\n\n${lang.warning.toUpperCase()}: ${lang.enableM3uSyncSubtitle}',
+              '${lang.enableM3uSync}?\n\n${lang.enableM3uSyncNote1}\n\n${lang.enableM3uSyncNote2(playlistsBackupPath: AppDirs.M3UBackup.toDisplayPath())}\n\n${lang.warning.toUpperCase()}: ${lang.enableM3uSyncSubtitle}',
               style: NText.medium,
             ),
             const SizedBox(height: 12.0),
@@ -1045,6 +1047,7 @@ class PlaylistController extends PlaylistManager<TrackWithDate, Track, SortEntry
     for (final m3uPath in m3uPaths) {
       await File(m3uPath).deleteIfExists();
     }
+    NamidaChannel.inst.scanMediaFilesTry(m3uPaths);
   }
 
   @override
@@ -1176,15 +1179,13 @@ class PlaylistController extends PlaylistManager<TrackWithDate, Track, SortEntry
 
   static Map<String, LocalPlaylist> _readPlaylistFilesCompute(String path) {
     final map = <String, LocalPlaylist>{};
-    final files = Directory(path).listSyncSafe();
+    final files = Directory(path).listFilesWithoutAtomicTempsSync();
     for (final f in files) {
-      if (f is File) {
-        try {
-          final response = f.readAsJsonSync(ensureExists: false);
-          final pl = LocalPlaylist.fromJson(response, TrackWithDate.fromJson, SortType.sortListFromJsonList);
-          map[pl.name] = pl;
-        } catch (_) {}
-      }
+      try {
+        final response = f.readAsJsonSync(ensureExists: false);
+        final pl = LocalPlaylist.fromJson(response, TrackWithDate.fromJson, SortType.sortListFromJsonList);
+        map[pl.name] = pl;
+      } catch (_) {}
     }
 
     return map;

@@ -24,30 +24,29 @@ abstract class NamidaChannel {
 
   final isInPip = false.obs;
 
-  Future<NamidaAppIcons?> getEnabledAppIcon() async {
-    if (!supportsAppIcons) return null;
-    NamidaAppIcons? newEnabledIcon;
-    for (final e in NamidaAppIcons.values) {
-      final enabled = await NamidaChannel.inst.isAppIconEnabled(e) ?? false;
-      if (enabled) {
-        newEnabledIcon = e;
-        break;
-      }
-    }
-    return newEnabledIcon;
+  /// null until [refreshEnabledAppIcon] runs, and on platforms without app icons.
+  final enabledAppIcon = Rxn<NamidaAppIcons>();
+
+  Future<void> refreshEnabledAppIcon() async {
+    if (!supportsAppIcons) return;
+    final key = await _getEnabledAppIconKey();
+    enabledAppIcon.value = NamidaAppIcons.values.getEnum(key);
+  }
+
+  Future<void> changeAppIcon(NamidaAppIcons type) async {
+    await _changeAppIcon(type);
+    await refreshEnabledAppIcon();
   }
 
   bool get canOpenFileInExplorer;
   Future<void>? openFileInExplorer(String filePath, {bool isDirectory = false});
 
   bool get supportsAppIcons => false;
-  Future<bool?> isAppIconEnabled(NamidaAppIcons type) async => false;
+  Future<String?> _getEnabledAppIconKey() async => null;
+  Future<void> _changeAppIcon(NamidaAppIcons type) async {}
 
-  Future<void> changeAppIcon(NamidaAppIcons type) async {}
-
-  Future<void> updatePipRatio({int? width, int? height}) async {}
-
-  Future<void> setCanEnterPip(bool canEnter) async {}
+  /// null disables entering pip.
+  Future<void> setPipAspectRatio({required int? width, required int? height}) async {}
 
   /// an in-app snackbar where the system has no toasts.
   Future<void> showToast({required String message, required SnackDisplayDuration duration}) async {
@@ -94,6 +93,8 @@ abstract class NamidaChannel {
   Future<void> setUsbDacHandlerEnabled(bool enabled) async {}
 
   Future<bool> shareFiles(List<String> paths) async => false;
+
+  Future<void> scanMediaFilesTry(List<String> paths) async {}
 
   /// files and links the system opened namida with, ex: "open in" or an oauth redirect. file urls arrive as paths.
   /// android & desktop get them through intents and launch args instead.
@@ -177,6 +178,7 @@ enum NamidaAppIcons {
   namida("assets/namida_icon.png", [AuthorInfo("شاكور", null, AuthorPlatform.discord, null), AuthorInfo("MSOB7YY", "MSOB7YY", AuthorPlatform.github, null)]),
   cutsie("assets/namida_icon_cutsie.webp", [AuthorInfo("smilez", null, AuthorPlatform.discord, AuthorAIModel.gpt4)]),
   jellyda("assets/namida_icon_jellyda.webp", [AuthorInfo("Tsuune", "tsuuneki", AuthorPlatform.discord, null), AuthorInfo("Tsuune", "TsunekiHouse", AuthorPlatform.telegram, null)]),
+  namiween("assets/namida_icon_namiween.webp", [AuthorInfo("Tsuune", "tsuuneki", AuthorPlatform.discord, null), AuthorInfo("Tsuune", "TsunekiHouse", AuthorPlatform.telegram, null)]),
   eddy("assets/namida_icon_eddy.webp", [AuthorInfo(":𝟛𝓗𝓪𝓹𝓹𝔂", null, AuthorPlatform.discord, null)]),
   namichin("assets/namida_icon_namichin.webp", [AuthorInfo("Scarecloud", null, AuthorPlatform.discord, null)]),
   space("assets/namida_icon_space.webp", [AuthorInfo(":𝟛𝓗𝓪𝓹𝓹𝔂", null, AuthorPlatform.discord, null)]),
@@ -189,7 +191,6 @@ enum NamidaAppIcons {
   monet("assets/namida_icon_monet.png", [AuthorInfo("Sujal", null, AuthorPlatform.telegram, null)]),
   glowy("assets/namida_icon_glowy.webp", [AuthorInfo("Sujal", null, AuthorPlatform.telegram, null)]),
   spooky("assets/namida_icon_spooky.webp", [AuthorInfo("Miguquis", null, AuthorPlatform.discord, AuthorAIModel.gemini)]),
-  namiween("assets/namida_icon_namiween.webp", [AuthorInfo("𐔌 . ⋮ Reggie .ᐟ ֹ ₊ ꒱", null, AuthorPlatform.discord, AuthorAIModel.unknown)]),
   tired("assets/namida_icon_tired.webp", [AuthorInfo("Zephyr", null, AuthorPlatform.discord, AuthorAIModel.unknown)]),
   ;
 

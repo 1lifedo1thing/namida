@@ -19,6 +19,7 @@ import 'package:namida/controller/history_controller.dart';
 import 'package:namida/controller/indexer_controller.dart';
 import 'package:namida/controller/navigator_controller.dart';
 import 'package:namida/controller/platform/namida_channel/namida_channel.dart';
+import 'package:namida/controller/search_ports_provider.dart';
 import 'package:namida/controller/search_sort_controller.dart';
 import 'package:namida/controller/settings_controller.dart';
 import 'package:namida/core/constants.dart';
@@ -182,7 +183,7 @@ void showTrackAdvancedDialog({
               ),
               const SizedBox(height: 12.0),
               NamidaText(
-                path,
+                path.toDisplayPath(),
                 style: NText.small,
               ),
               const SizedBox(height: 12.0),
@@ -259,7 +260,7 @@ void showTrackAdvancedDialog({
                   final err = erroredPaths[pathKey];
                   final errText = err.toString();
                   return TapDetector(
-                    onTap: () => NamidaUtils.copyToClipboard(content: pathKey),
+                    onTap: () => NamidaUtils.copyToClipboard(content: pathKey, message: pathKey.toDisplayPath()),
                     child: Row(
                       mainAxisSize: .min,
                       children: [
@@ -274,7 +275,7 @@ void showTrackAdvancedDialog({
                             crossAxisAlignment: .start,
                             children: [
                               NamidaText(
-                                pathKey,
+                                pathKey.toDisplayPath(),
                                 style: NText.small,
                               ),
                               NamidaText(
@@ -303,6 +304,8 @@ void showTrackAdvancedDialog({
         await doForAllFiles((file, newPath) => file.copy(newPath));
         await Indexer.inst.convertPathsToTracksAndAddToLists(successPaths.values);
       }
+      final successNewPaths = successPaths.values.toFixedList();
+      NamidaChannel.inst.scanMediaFilesTry(successNewPaths);
     } finally {
       rxToEdit.value = false;
 
@@ -1248,14 +1251,14 @@ class _TracksSearchTemp with PortsProvider<TracksSearchParams> {
 
   void search(String text) async {
     if (!isInitialized) await initialize();
-    final p = {'text': text, 'temp': true};
-    await sendPort(p);
+    final SearchRequest request = (text: text, temp: false, isVideo: null);
+    await sendPort(request);
   }
 
   @override
   void onResult(dynamic result) {
     if (result == null) return;
-    final r = result as (List<Track>, bool, String);
+    final r = result as (List<Track>, List<Track>, int, bool, String, bool?);
     _onResult(r.$1);
   }
 
