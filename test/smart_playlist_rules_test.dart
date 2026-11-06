@@ -161,6 +161,12 @@ void main() {
     enableCleanup: enableCleanup,
   );
 
+  SmartPlaylistDateValue? legacyDateValueOf(DateTime? date, {required bool clockOnly}) {
+    if (date == null) return null;
+    if (clockOnly) return SmartPlaylistDatePartsValue.ofLegacyClock(date);
+    return SmartPlaylistDate.legacy(date);
+  }
+
   SmartPlaylistRuleDateTime dateRule(
     SmartPlaylistRuleFilterDateTime filter,
     SmartPlaylistRuleFilterDateTimeSource source, {
@@ -169,14 +175,19 @@ void main() {
     bool clockOnly = false,
     SmartPlaylistRelativeDuration? relativeDuration,
   }) => SmartPlaylistRuleDateTime(
-    data: data,
-    data2: data2,
+    data: legacyDateValueOf(data, clockOnly: clockOnly),
+    data2: legacyDateValueOf(data2, clockOnly: clockOnly),
     filter: filter,
     source: source,
     enableCleanup: false,
-    clockOnly: clockOnly,
+    parts: clockOnly ? SmartPlaylistDateParts.timeOnly : SmartPlaylistDateParts.dateAndClock,
     relativeDuration: relativeDuration,
   );
+
+  SmartPlaylistDatePartsValue clockValue(String text) {
+    final clock = SmartPlaylistDatePartsValue.tryParseClock(text)!;
+    return SmartPlaylistDatePartsValue(secondOfDay: clock.secondOfDay, hasSeconds: clock.hasSeconds);
+  }
 
   SmartPlaylistRuleNumber numberRule(
     SmartPlaylistRuleFilterNumberSource source,
@@ -257,7 +268,7 @@ void main() {
         filter: SmartPlaylistRuleFilterNumber.isGreaterThan,
         source: SmartPlaylistRuleFilterNumberSource.totalListens,
         enableCleanup: false,
-        clockOnly: false,
+        dateParts: SmartPlaylistDateParts.date,
         relativeDuration: null,
       );
       expect((listens as SmartPlaylistRuleNumber).aggregate, SmartPlaylistNumberAggregate.sum);
@@ -371,10 +382,10 @@ void main() {
 
     test('midnight is a valid clock bound', () {
       final empty = dateRule(.isInBetween, .lastListen, clockOnly: true);
-      final rule = empty.copyWith(datas: (empty.textToData('00:00:00'), empty.textToData2('06:00:00')));
+      final rule = empty.copyWith(datas: (clockValue('00:00'), clockValue('06:00')));
       expect(rule.validate(), isNull);
       expect(resolveAmong(rule, clockTracks), {'clock_0100', 'clock_0200', 'clock_0000'});
-      final withoutEnd = empty.copyWith(datas: (empty.textToData('00:00:00'), null));
+      final withoutEnd = empty.copyWith(datas: (clockValue('00:00'), null));
       expect(withoutEnd.validate(), lang.emptyValue);
     });
 
@@ -656,6 +667,46 @@ void main() {
       expect(pl.toMap()['sorts_v2'], {
         'sorts': ['title'],
       });
+    });
+  });
+
+  group('unused fields', () {
+    test('a rule keeps only what its filter uses', () {
+      final text = SmartPlaylistRuleText(
+        data: const [SmartPlaylistTextDataTokenLiteral('foo')],
+        data2: const [SmartPlaylistTextDataTokenLiteral('bar')],
+        filter: .exists,
+        source: .title,
+        enableCleanup: true,
+      );
+      expect(text.data, isNull);
+      expect(text.data2, isNull);
+      expect(text.validate(), isNull);
+      expect(text.toMap()['data'], isNull);
+
+      final number = SmartPlaylistRuleNumber(data: 20, data2: 80, filter: .isGreaterThan, source: .rating, enableCleanup: false);
+      expect(number.data2, isNull);
+      expect(number.validate(), isNull);
+
+      const twoWeeks = SmartPlaylistRelativeDuration(amount: 2, unit: .weeks);
+      final date = dateRule(.isAfter, .dateAdded, data: DateTime(2020), relativeDuration: twoWeeks);
+      expect(date.relativeDuration, isNull);
+      final relative = date.copyWith(filter: .isWithinLast, relativeDuration: twoWeeks);
+      expect(relative.data, isNull);
+      expect(relative.validate(), isNull);
+    });
+
+    test('switching the filter drops the old values', () {
+      final rule = SmartPlaylistRuleText(
+        data: const [SmartPlaylistTextDataTokenLiteral('foo')],
+        data2: null,
+        filter: .contains,
+        source: .title,
+        enableCleanup: true,
+      );
+      final exists = rule.copyWith(filter: .exists);
+      expect(exists.validate(), isNull);
+      expect(exists, SmartPlaylistRuleText(data: null, data2: null, filter: .exists, source: .title, enableCleanup: true));
     });
   });
 }
