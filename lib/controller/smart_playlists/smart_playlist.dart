@@ -18,8 +18,11 @@ class SmartPlaylist {
   final List<String> moods;
   final List<SmartPlaylistRuleGroup> ruleGroups;
   final SmartPlaylistLimit? limit;
+  final int? pinnedDate;
 
   final int modifiedDate;
+
+  bool get isPinned => pinnedDate != null;
 
   const SmartPlaylist({
     required this.name,
@@ -29,6 +32,7 @@ class SmartPlaylist {
     required this.moods,
     required this.ruleGroups,
     required this.limit,
+    this.pinnedDate,
     this.modifiedDate = 0,
   });
 
@@ -134,6 +138,7 @@ class SmartPlaylist {
       moods: (map['moods'] as List).cast<String>(),
       ruleGroups: (map['ruleGroups'] as List).map(SmartPlaylistRuleGroup.fromMap).toList(),
       limit: SmartPlaylistLimit.fromMapNullable(map['limit']),
+      pinnedDate: map['pinnedDate'] as int?,
       modifiedDate: map['_mt'] as int? ?? 0,
     );
   }
@@ -156,6 +161,7 @@ class SmartPlaylist {
       'moods': moods,
       'ruleGroups': ruleGroups.map((e) => e.toMap()).toFixedList(),
       'limit': ?limit?.toMap(),
+      'pinnedDate': ?pinnedDate,
       if (modifiedDate > 0) '_mt': modifiedDate,
     };
   }
@@ -167,6 +173,9 @@ class SmartPlaylist {
     SortChain<SortType>? sorting,
     List<String>? moods,
     List<SmartPlaylistRuleGroup>? ruleGroups,
+
+    /// pinning keeps an older pin date.
+    bool? isPinned,
     int? modifiedDate,
   }) => SmartPlaylist(
     name: name ?? this.name,
@@ -176,6 +185,11 @@ class SmartPlaylist {
     moods: moods ?? this.moods,
     ruleGroups: ruleGroups ?? this.ruleGroups,
     limit: this.limit,
+    pinnedDate: switch (isPinned) {
+      null => this.pinnedDate,
+      true => this.pinnedDate ?? currentTimeMS,
+      false => null,
+    },
     modifiedDate: modifiedDate ?? this.modifiedDate,
   );
 }
@@ -559,21 +573,23 @@ mixin SmartPlaylistRuleFilterSource {
   IconData? toIcon();
 }
 
-/// keeps only the first tracks by [sorting] that fit in [amount] of [unit].
+/// keeps only the first tracks by [sorting] that fit in [amount] of [unit], from the first values of [fromScope] when set.
 ///
 /// by claude
 class SmartPlaylistLimit {
   final int amount;
   final SmartPlaylistLimitUnit unit;
   final SortChain<SortType> sorting;
+  final SmartPlaylistLimitScope? fromScope;
 
   const SmartPlaylistLimit({
     required this.amount,
     required this.unit,
     required this.sorting,
+    this.fromScope,
   });
 
-  const SmartPlaylistLimit.initial() : amount = 25, unit = SmartPlaylistLimitUnit.tracks, sorting = const SortChain([SortEntry(SortType.mostPlayed)]);
+  const SmartPlaylistLimit.initial() : amount = 25, unit = SmartPlaylistLimitUnit.tracks, sorting = const SortChain([SortEntry(SortType.mostPlayed)]), fromScope = null;
 
   Iterable<Track> _ordered(List<Track> tracks) {
     final comparables = SearchSortController.inst.getTracksChainComparables(sorting);
@@ -581,7 +597,14 @@ class SmartPlaylistLimit {
   }
 
   List<Track> select(List<Track> tracks) {
-    if (unit == SmartPlaylistLimitUnit.tracks) return _ordered(tracks).take(amount).toList();
+    final fromScope = this.fromScope;
+    final scopePicker = fromScope == null ? null : _SmartPlaylistScopePicker(fromScope);
+    final ordered = _ordered(tracks);
+
+    if (unit == SmartPlaylistLimitUnit.tracks) {
+      final kept = scopePicker == null ? ordered : ordered.where(scopePicker.keeps);
+      return kept.take(amount).toList();
+    }
 
     final costOf = unit.buildCostGetter();
     int minCost = -1;
@@ -593,10 +616,12 @@ class SmartPlaylistLimit {
     int remaining = unit.toBaseUnits(amount);
     final selected = <Track>[];
     // -- a track exceeding what's left is skipped instead of stopping, so smaller ones still fill it
-    for (final tr in _ordered(tracks)) {
+    for (final tr in ordered) {
       if (remaining < minCost) break;
       final cost = costOf(tr);
       if (cost > remaining) continue;
+      // -- after the cost check, so a skipped track never takes a scope slot
+      if (scopePicker != null && !scopePicker.keeps(tr)) continue;
       selected.add(tr);
       remaining -= cost;
     }
@@ -604,14 +629,15 @@ class SmartPlaylistLimit {
   }
 
   int selectCount(List<Track> tracks) {
-    if (unit == SmartPlaylistLimitUnit.tracks) return tracks.length.withMaximum(amount);
+    if (unit == SmartPlaylistLimitUnit.tracks && fromScope == null) return tracks.length.withMaximum(amount);
     return select(tracks).length;
   }
 
   String toText() {
     final amountText = unit.toAmountText(amount);
+    final scopeText = fromScope?.toText();
     final sortText = sorting.firstType?.toText();
-    return sortText == null ? amountText : '$amountText • $sortText';
+    return [amountText, ?scopeText, ?sortText].join(' • ');
   }
 
   static SmartPlaylistLimit? fromMapNullable(dynamic map) {
@@ -621,6 +647,7 @@ class SmartPlaylistLimit {
         amount: map['amount'] as int,
         unit: SmartPlaylistLimitUnit.values.getEnum(map['unit']) ?? SmartPlaylistLimitUnit.tracks,
         sorting: SmartPlaylist._parseSorting(map),
+        fromScope: SmartPlaylistLimitScope.fromMapNullable(map['from']),
       );
     } catch (_) {}
     return null;
@@ -631,6 +658,7 @@ class SmartPlaylistLimit {
       'amount': amount,
       'unit': unit.name,
       'sorts_v2': sorting.toJson(),
+      'from': ?fromScope?.toMap(),
     };
   }
 
@@ -642,7 +670,65 @@ class SmartPlaylistLimit {
     amount: amount ?? this.amount,
     unit: unit ?? this.unit,
     sorting: sorting ?? this.sorting,
+    fromScope: fromScope,
   );
+}
+
+/// a limit keeps only the tracks of the first [amount] values of [scope] met in its order, ex: from 1 genre.
+///
+/// by claude
+class SmartPlaylistLimitScope {
+  final SmartPlaylistNumberScope scope;
+  final int amount;
+
+  const SmartPlaylistLimitScope({
+    required this.scope,
+    required this.amount,
+  });
+
+  String toText() => scope.toCountText(amount);
+
+  static SmartPlaylistLimitScope? fromMapNullable(dynamic map) {
+    if (map is! Map) return null;
+    final scope = SmartPlaylistNumberScope.values.getEnum(map['scope']);
+    final amount = map['amount'];
+    if (scope == null || amount is! int || amount <= 0) return null;
+    return SmartPlaylistLimitScope(scope: scope, amount: amount);
+  }
+
+  Map<String, dynamic> toMap() {
+    return <String, dynamic>{
+      'scope': scope.name,
+      'amount': amount,
+    };
+  }
+}
+
+/// picks scope values while a limit walks its tracks in order, one picker per walk.
+///
+/// by claude
+class _SmartPlaylistScopePicker {
+  final SmartPlaylistLimitScope fromScope;
+
+  _SmartPlaylistScopePicker(this.fromScope);
+
+  final _pickedKeys = <Object>{};
+
+  /// true when [tr] has a value picked before, otherwise picks its values (in tag order) while there is room.
+  bool keeps(Track tr) {
+    final keys = fromScope.scope.getKnownKeysOf(tr);
+    final pickedKeys = _pickedKeys;
+    for (final key in keys) {
+      if (pickedKeys.contains(key)) return true;
+    }
+    final maxCount = fromScope.amount;
+    bool didPick = false;
+    for (final key in keys) {
+      if (pickedKeys.length >= maxCount) break;
+      if (pickedKeys.add(key)) didPick = true;
+    }
+    return didPick;
+  }
 }
 
 enum SmartPlaylistLimitUnit {
@@ -673,6 +759,13 @@ enum SmartPlaylistLimitUnit {
     SmartPlaylistLimitUnit.hours => lang.hours,
     SmartPlaylistLimitUnit.megabytes => 'MB',
     SmartPlaylistLimitUnit.gigabytes => 'GB',
+  };
+
+  IconData toIcon() => switch (this) {
+    SmartPlaylistLimitUnit.tracks => Broken.music,
+    SmartPlaylistLimitUnit.minutes => Broken.timer_1,
+    SmartPlaylistLimitUnit.hours => Broken.clock,
+    SmartPlaylistLimitUnit.megabytes || SmartPlaylistLimitUnit.gigabytes => Broken.driver,
   };
 
   String toAmountText(int amount) => switch (this) {

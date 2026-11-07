@@ -873,6 +873,7 @@ class AppPaths {
   static final VIDEOS_CACHE_DB_INFO = DbWrapperFileInfo(directory: _USER_DATA, dbName: 'cache_videos');
   static final LATEST_QUEUE = _join(_USER_DATA, 'latest_queue.json');
   static final TRACKS_FILTERED = _join(_USER_DATA, 'tracks_filtered.json');
+  static final TRACKS_DUPLICATED = _join(_USER_DATA, 'tracks_duplicated.json');
 
   // -- obsolete
   static final TRACKS_OLD = _join(_USER_DATA, 'tracks.json');
@@ -1535,6 +1536,7 @@ class NamidaFileExtensionsWrapper {
   static const jsonAndZip = NamidaFileExtensionsWrapper._({'json', ..._zipExtensions});
   static const jsonHtmlAndZip = NamidaFileExtensionsWrapper._({'json', 'html', ..._zipExtensions});
   static const jsonlAndZip = NamidaFileExtensionsWrapper._({'jsonl', ..._zipExtensions});
+  static const csvJsonAndZip = NamidaFileExtensionsWrapper._({'csv', 'json', ..._zipExtensions});
   static const compressed = NamidaFileExtensionsWrapper._({..._zipExtensions, 'tar', 'gz', 'bz2', 'xz', 'cab', 'iso', 'jar'});
   static const lrcOrTxt = NamidaFileExtensionsWrapper._({..._lrcExtensions, 'txt'});
   static const lrc = NamidaFileExtensionsWrapper._({..._lrcExtensions});

@@ -25,6 +25,7 @@ import 'package:namida/class/file_parts.dart';
 import 'package:namida/class/route.dart';
 import 'package:namida/class/track.dart';
 import 'package:namida/controller/backup_controller.dart';
+import 'package:namida/controller/bookmarks_controller.dart';
 import 'package:namida/controller/chapters_controller.dart';
 import 'package:namida/controller/connectivity.dart';
 import 'package:namida/controller/current_color.dart';
@@ -332,6 +333,7 @@ Future<bool> _mainAppInitialization() async {
     ScrollSearchController.inst.initialize();
     Subtitles.inst.initialize();
     ChaptersController.inst.initialize();
+    BookmarksController.inst.initialize();
   } catch (e, st) {
     logger.error('_mainAppInitialization 2', e: e, st: st);
   }
@@ -480,10 +482,8 @@ void _initErrorInterpreters() {
 
 void _initLifeCycle() {
   NamidaChannel.inst.addOnDestroy(() async {
-    if (settings.player.killAfterDismissingApp.value.resolveShouldKill()) {
-      await Player.inst.pause();
-      await Player.inst.dispose();
-    }
+    // -- process must go too, a new engine in it can't bind what this one holds (ex: sync server port)
+    if (settings.player.killAfterDismissingApp.value.resolveShouldKill()) await Namida.disposeAllResourcesAndExit();
   });
 
   NamidaChannel.inst.addOnResume(CurrentColor.inst.refreshColorsAfterResumeApp);
@@ -562,8 +562,9 @@ class Namida extends StatefulWidget {
 
   static Future<Never> disposeAllResourcesAndExit() async {
     _isExiting = true;
+    final hasWindowManager = WindowController.instance != null;
     await [
-      windowManager.hide(),
+      if (hasWindowManager) windowManager.hide(),
       TrayController.instance?.dispose(),
     ].executeAllAndSilentReportErrors();
     await Future.any(
@@ -574,7 +575,7 @@ class Namida extends StatefulWidget {
       ],
     );
     if (Platform.isWindows) terminateProcessWindows();
-    await windowManager.destroy().ignoreError();
+    if (hasWindowManager) await windowManager.destroy().ignoreError();
     return exit(0); // -- destroy alone can take seconds to actually close the process
   }
 

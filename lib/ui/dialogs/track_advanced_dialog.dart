@@ -17,6 +17,8 @@ import 'package:namida/controller/edit_delete_controller.dart';
 import 'package:namida/controller/file_browser.dart';
 import 'package:namida/controller/history_controller.dart';
 import 'package:namida/controller/indexer_controller.dart';
+import 'package:namida/controller/items_cache.dart';
+import 'package:namida/controller/lyrics_search_utils/lrc_search_utils_selectable.dart';
 import 'package:namida/controller/navigator_controller.dart';
 import 'package:namida/controller/platform/namida_channel/namida_channel.dart';
 import 'package:namida/controller/search_ports_provider.dart';
@@ -26,20 +28,22 @@ import 'package:namida/core/constants.dart';
 import 'package:namida/core/dimensions.dart';
 import 'package:namida/core/enums.dart';
 import 'package:namida/core/extensions.dart';
+import 'package:namida/core/functions.dart';
 import 'package:namida/core/icon_fonts/broken_icons.dart';
 import 'package:namida/core/namida_converter_ext.dart';
 import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/translations/language.dart';
 import 'package:namida/core/utils.dart';
 import 'package:namida/main.dart';
+import 'package:namida/ui/dialogs/clear_cache_dialog.dart';
 import 'package:namida/ui/dialogs/color_picker_dialog.dart';
-import 'package:namida/ui/dialogs/track_clear_dialog.dart';
 import 'package:namida/ui/widgets/animated_widgets.dart';
 import 'package:namida/ui/widgets/custom_widgets.dart';
 import 'package:namida/ui/widgets/expandable_box.dart';
 import 'package:namida/ui/widgets/library/track_tile.dart';
 import 'package:namida/ui/widgets/network_artwork.dart';
 import 'package:namida/ui/widgets/settings/advanced_settings.dart';
+import 'package:namida/youtube/class/download_task_base.dart';
 
 void showTrackAdvancedDialog({
   required List<Selectable> tracks,
@@ -86,18 +90,21 @@ void showTrackAdvancedDialog({
 
   final isCopyingRx = false.obs;
   final isMovingRx = false.obs;
+  final isRenamingRx = false.obs;
   final isDeletingRx = false.obs;
 
-  void updateCanShowClearDialog(CacheVideoPriority? cachePriority) async {
-    canShowClearDialogRx.value = cachePriority == CacheVideoPriority.VIP ? false : await tracks.hasAnythingCached;
+  void updateCanShowClearDialog() async {
+    final tracksRaw = tracks.map((e) => e.track).toFixedList();
+    canShowClearDialogRx.value = await ItemsCache.hasAnything(tracksRaw);
   }
+
+  updateCanShowClearDialog();
 
   final setVideosPriorityChip = SetVideosPriorityChip(
     totalCount: tracksWithYTID.length,
     videosId: tracksWithYTID.values,
     countToText: (count) => count.displayTrackKeyword,
-    onInitialPriority: updateCanShowClearDialog,
-    onChanged: updateCanShowClearDialog,
+    onChanged: (_) => updateCanShowClearDialog(),
   );
 
   void onCopyOrMove({required String title, required bool isMove}) async {
@@ -213,6 +220,7 @@ void showTrackAdvancedDialog({
 
     final successPaths = <String, String>{};
     final erroredPaths = <String, Object>{};
+    int lyricsMovedCount = 0;
     Future<void> doForAllFiles(Future<File?> Function(File file, String newPath) callback) async {
       await Future.wait(
         tracksUniquedPhysical.map((e) async {
@@ -300,6 +308,8 @@ void showTrackAdvancedDialog({
       if (isMove) {
         await doForAllFiles((file, newPath) => file.move(newPath));
         await EditDeleteController.inst.updateTrackPathInEveryPartOfNamidaBulk(successPaths, removeOldTracksFromLibrary: true);
+        final libraryPaths = Indexer.inst.allTracksMappedByPath.keys.toFixedList();
+        lyricsMovedCount = await LrcSearchUtilsSelectable.moveLyricsOfMovedTracks(successPaths, libraryPaths);
       } else {
         await doForAllFiles((file, newPath) => file.copy(newPath));
         await Indexer.inst.convertPathsToTracksAndAddToLists(successPaths.values);
@@ -311,6 +321,7 @@ void showTrackAdvancedDialog({
 
       if (successPaths.isNotEmpty || erroredPaths.isNotEmpty) {
         String? successMessage = successPaths.isNotEmpty ? lang.countFiles(count: successPaths.length) : null;
+        final lyricsMessage = lyricsMovedCount > 0 ? '${lang.lyrics}: ${lang.countFiles(count: lyricsMovedCount)}' : null;
         String? errorMessage = erroredPaths.isNotEmpty ? lang.countFiles(count: erroredPaths.length) : null;
         if (successMessage != null && errorMessage != null) {
           successMessage = "${lang.succeeded}: $successMessage";
@@ -333,6 +344,7 @@ void showTrackAdvancedDialog({
           title: "$title: ${erroredPaths.isNotEmpty ? lang.failed : lang.succeeded}",
           message: [
             ?successMessage,
+            ?lyricsMessage,
             ?errorMessage,
           ].join('\n'),
           button: erroredPaths.isNotEmpty ? SnackbarButton(text: lang.info, function: openFailedPathsInfo) : null,
@@ -347,8 +359,73 @@ void showTrackAdvancedDialog({
     }
   }
 
+  final singlePhysicalTrack = tracksUniquedPhysical.length == 1 ? tracksUniquedPhysical.first : null;
+  final singleTrackDisplayFolder = singlePhysicalTrack?.path.getDirectoryPath.toDisplayPath();
+  final singleTrackFilename = singlePhysicalTrack?.path.getFilename;
+
+  Future<void> onRenameTap(PhysicalMedia track) async {
+    if (!await requestManageStoragePermission()) return;
+    final oldPath = track.path;
+    final directoryPath = oldPath.getDirectoryPath;
+    final filename = oldPath.getFilename;
+    final filenameWOExt = oldPath.getFilenameWOExt;
+    final extension = filename.substring(filenameWOExt.length);
+
+    String? validateName(String? name) {
+      if (name == null || name.isEmpty) return lang.emptyValue;
+      if (name.startsWith('.')) return "${lang.filenameShouldntStartWith} .";
+      final newFilename = '$name$extension';
+      final badCharacters = DownloadTaskFilename.badCharactersIn(newFilename);
+      if (badCharacters.isNotEmpty) return "${lang.nameContainsBadCharacter} $badCharacters";
+      final newPath = FileParts.joinPath(directoryPath, newFilename);
+      // -- a letter case rename points to the same file on case insensitive storage
+      final isTaken = newPath != oldPath && File(newPath).existsSync() && !FileSystemEntity.identicalSync(oldPath, newPath);
+      if (isTaken) return lang.fileAlreadyExists;
+      return null;
+    }
+
+    await showNamidaBottomSheetWithTextField(
+      title: lang.rename,
+      textfieldConfig: BottomSheetTextFieldConfig(
+        initalControllerText: filenameWOExt,
+        hintText: filenameWOExt,
+        labelText: lang.fileName,
+        validator: validateName,
+      ),
+      buttonText: lang.save,
+      onButtonTap: (name) async {
+        final newPath = FileParts.joinPath(directoryPath, '$name$extension');
+        if (newPath == oldPath) return true;
+        isRenamingRx.value = true;
+        try {
+          final oldFile = File(oldPath);
+          final newFile = await oldFile.move(newPath);
+          if (newFile == null) {
+            snackyy(title: lang.error, message: lang.failed, isError: true);
+          } else {
+            final newPathsByOldPath = {oldPath: newPath};
+            await EditDeleteController.inst.updateTrackPathInEveryPartOfNamidaBulk(newPathsByOldPath, removeOldTracksFromLibrary: true);
+            NamidaChannel.inst.scanMediaFilesTry([newPath]);
+            final libraryPaths = Indexer.inst.allTracksMappedByPath.keys.toFixedList();
+            final lyricsMovedCount = await LrcSearchUtilsSelectable.moveLyricsOfMovedTracks(newPathsByOldPath, libraryPaths);
+            if (lyricsMovedCount > 0) {
+              final lyricsMessage = '${lang.lyrics}: ${lang.countFiles(count: lyricsMovedCount)}';
+              snackyy(title: lang.rename, message: lyricsMessage);
+            }
+          }
+        } catch (e) {
+          snackyy(title: lang.error, message: '$e', isError: true);
+        } finally {
+          isRenamingRx.value = false;
+        }
+        NamidaNavigator.inst.closeAllDialogs();
+        return true;
+      },
+    );
+  }
+
   await NamidaNavigator.inst.navigateDialog(
-    tapToDismiss: () => !isDeletingRx.value && !isMovingRx.value && !isCopyingRx.value,
+    tapToDismiss: () => !isDeletingRx.value && !isMovingRx.value && !isCopyingRx.value && !isRenamingRx.value,
     onDisposing: () {
       willUpdateArtwork.close();
       isLoadingFilesToShare.close();
@@ -359,6 +436,7 @@ void showTrackAdvancedDialog({
       canShowClearDialogRx.close();
       isCopyingRx.close();
       isMovingRx.close();
+      isRenamingRx.close();
       isDeletingRx.close();
     },
     colorScheme: colorScheme,
@@ -368,56 +446,6 @@ void showTrackAdvancedDialog({
       title: lang.advanced,
       child: Column(
         children: [
-          if (tracksOnlyCount > 0 || videosOnlyCount > 0)
-            Row(
-              children: [
-                Expanded(
-                  child: ObxO(
-                    rx: isCopyingRx,
-                    builder: (context, isLoading) => AnimatedEnabled(
-                      enabled: !isLoading,
-                      child: AnimatedRotatingBorder(
-                        isLoading: isLoading,
-                        borderRadius: 16.0.multipliedRadius,
-                        colors: [colorScheme.withOpacityExt(0.5)],
-                        child: CustomListTile(
-                          extraDense: true,
-                          maxTitleLines: 1,
-                          borderR: 16.0,
-                          passedColor: colorScheme,
-                          title: lang.copy,
-                          icon: Broken.copy,
-                          onTap: () => onCopyOrMove(title: lang.copy, isMove: false),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 4.0),
-                Expanded(
-                  child: ObxO(
-                    rx: isMovingRx,
-                    builder: (context, isLoading) => AnimatedEnabled(
-                      enabled: !isLoading,
-                      child: AnimatedRotatingBorder(
-                        isLoading: isLoading,
-                        borderRadius: 16.0.multipliedRadius,
-                        colors: [colorScheme.withOpacityExt(0.5)],
-                        child: CustomListTile(
-                          extraDense: true,
-                          maxTitleLines: 1,
-                          borderR: 16.0,
-                          passedColor: colorScheme,
-                          title: lang.move,
-                          icon: Broken.blend_2,
-                          onTap: () => onCopyOrMove(title: lang.move, isMove: true),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
           ObxO(
             rx: canShowClearDialogRx,
             builder: (context, canShowClearDialog) => Opacity(
@@ -427,11 +455,60 @@ void showTrackAdvancedDialog({
                 title: lang.clear,
                 subtitle: lang.chooseWhatToClear,
                 icon: Broken.broom,
-                onTap: canShowClearDialog ? () => showTrackClearDialog(tracks, colorScheme) : null,
+                onTap: canShowClearDialog ? () => showClearCacheDialog(tracks: tracks, colorScheme: colorScheme) : null,
                 trailing: setVideosPriorityChip,
               ),
             ),
           ),
+          if (tracksOnlyCount > 0 || videosOnlyCount > 0)
+            Obx(
+              (context) {
+                final isMoving = isMovingRx.valueR;
+                final isCopying = isCopyingRx.valueR;
+                final isBusy = isMoving || isCopying;
+                return AnimatedEnabled(
+                  enabled: !isBusy,
+                  child: AnimatedRotatingBorder(
+                    isLoading: isBusy,
+                    borderRadius: 18.0.multipliedRadius,
+                    colors: [colorScheme.withOpacityExt(0.5)],
+                    child: CustomListTile(
+                      extraDense: false,
+                      passedColor: colorScheme,
+                      title: lang.move,
+                      subtitle: singleTrackDisplayFolder,
+                      icon: Broken.blend_2,
+                      onTap: () => onCopyOrMove(title: lang.move, isMove: true),
+                      trailing: NamidaIconButton(
+                        tooltip: () => lang.copy,
+                        icon: Broken.copy,
+                        onPressed: () => onCopyOrMove(title: lang.copy, isMove: false),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          if (singlePhysicalTrack != null)
+            ObxO(
+              rx: isRenamingRx,
+              builder: (context, isLoading) => AnimatedEnabled(
+                enabled: !isLoading,
+                child: AnimatedRotatingBorder(
+                  isLoading: isLoading,
+                  borderRadius: 18.0.multipliedRadius,
+                  colors: [colorScheme.withOpacityExt(0.5)],
+                  child: CustomListTile(
+                    extraDense: false,
+                    passedColor: colorScheme,
+                    title: lang.rename,
+                    subtitle: singleTrackFilename,
+                    icon: Broken.edit_2,
+                    onTap: () => onRenameTap(singlePhysicalTrack),
+                  ),
+                ),
+              ),
+            ),
           if (tracksOnlyCount > 0 || videosOnlyCount > 0)
             ObxO(
               rx: isDeletingRx,
@@ -442,7 +519,7 @@ void showTrackAdvancedDialog({
                   borderRadius: 18.0.multipliedRadius,
                   colors: [colorScheme.withOpacityExt(0.5)],
                   child: CustomListTile(
-                    extraDense: true,
+                    extraDense: false,
                     passedColor: colorScheme,
                     title: lang.delete,
                     subtitle: lang.deleteNTracksFromStorage(
@@ -473,7 +550,7 @@ void showTrackAdvancedDialog({
                 borderRadius: 18.0.multipliedRadius,
                 colors: [colorScheme.withOpacityExt(0.5)],
                 child: CustomListTile(
-                  extraDense: true,
+                  extraDense: false,
                   passedColor: colorScheme,
                   title: lang.share,
                   icon: Broken.share,

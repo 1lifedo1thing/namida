@@ -1554,6 +1554,15 @@ extension RouteUtils on NamidaRoute {
       case RouteType.PAGE_party:
         finalWidget = getTextWidget(lang.partyListeningParty);
         break;
+      case RouteType.SUBPAGE_INDEXER_DUPLICATE_TRACKS:
+        finalWidget = getTextWidget(lang.duplicatedTracks);
+        break;
+      case RouteType.SUBPAGE_INDEXER_FILTERED_TRACKS:
+        finalWidget = getTextWidget(lang.filteredBySizeAndDuration);
+        break;
+      case RouteType.SUBPAGE_INDEXER_NOMEDIA_FOLDERS:
+        finalWidget = getTextWidget(lang.tracksExcludedByNomedia);
+        break;
       default:
         null;
     }
@@ -1966,6 +1975,7 @@ extension TrackSourceL10n on TrackSource {
     TrackSource.lastfm => 'Last.fm',
     TrackSource.spotify => 'Spotify',
     TrackSource.listenbrainz => 'ListenBrainz',
+    TrackSource.appleMusic => 'Apple Music',
   };
 }
 
@@ -2718,7 +2728,7 @@ extension HomePageItemsL10n on HomePageItems {
     HomePageItems.recentArtists => lang.recentArtists,
     HomePageItems.topRecentAlbums => lang.topRecentAlbums,
     HomePageItems.topRecentArtists => lang.topRecentArtists,
-    HomePageItems.pinnedPlaylists => lang.pinnedPlaylists,
+    HomePageItems.pinned => lang.pinned,
   };
 
   IconData toMainIcon() => switch (this) {
@@ -2732,7 +2742,7 @@ extension HomePageItemsL10n on HomePageItems {
     HomePageItems.recentArtists => Broken.undo,
     HomePageItems.topRecentAlbums => Broken.crown_1,
     HomePageItems.topRecentArtists => Broken.crown_1,
-    HomePageItems.pinnedPlaylists => Broken.paperclip,
+    HomePageItems.pinned => Broken.paperclip,
   };
 
   IconData? toIcon() => switch (this) {
@@ -2746,7 +2756,14 @@ extension HomePageItemsL10n on HomePageItems {
     HomePageItems.topRecentAlbums => Broken.music_dashboard,
     HomePageItems.recentArtists => Broken.user,
     HomePageItems.topRecentArtists => Broken.user,
-    HomePageItems.pinnedPlaylists => Broken.music_playlist,
+    HomePageItems.pinned => null,
+  };
+}
+
+extension PinnedItemTypeL10n on PinnedItemType {
+  String toText() => switch (this) {
+    PinnedItemType.playlist => lang.playlists,
+    PinnedItemType.smartPlaylist => lang.smartPlaylists,
   };
 }
 
@@ -3075,6 +3092,25 @@ extension TrackSearchFilterL10n on TrackSearchFilter {
     TrackSearchFilter.moods => lang.moods,
     TrackSearchFilter.tags => lang.tags,
     TrackSearchFilter.lyrics => lang.lyrics,
+  };
+
+  IconData toIcon() => switch (this) {
+    TrackSearchFilter.filename => SortType.filename.toIcon(),
+    TrackSearchFilter.folder => MediaType.folder.toIcon(),
+    TrackSearchFilter.title => TagField.title.toIcon(),
+    TrackSearchFilter.album => TagField.album.toIcon(),
+    TrackSearchFilter.artist => TagField.artist.toIcon(),
+    TrackSearchFilter.albumartist => TagField.albumArtist.toIcon(),
+    TrackSearchFilter.genre => TagField.genre.toIcon(),
+    TrackSearchFilter.style => TagField.style.toIcon(),
+    TrackSearchFilter.language => TagField.language.toIcon(),
+    TrackSearchFilter.composer => TagField.composer.toIcon(),
+    TrackSearchFilter.comment => TagField.comment.toIcon(),
+    TrackSearchFilter.description => TagField.description.toIcon(),
+    TrackSearchFilter.year => TagField.year.toIcon(),
+    TrackSearchFilter.moods => TagField.mood.toIcon(),
+    TrackSearchFilter.tags => TagField.tags.toIcon(),
+    TrackSearchFilter.lyrics => TagField.lyrics.toIcon(),
   };
 }
 
@@ -3439,5 +3475,17 @@ extension RomanizationScriptL10n on RomanizationScript {
     RomanizationScript.cyrillic => 'Кириллица (Cyrillic)',
     RomanizationScript.armenian => 'Հայերեն (Armenian)',
     RomanizationScript.georgian => 'ქართული (Georgian)',
+  };
+}
+
+extension PlayableBookmarkRoleL10n on PlayableBookmarkRole {
+  String toText() => switch (this) {
+    PlayableBookmarkRole.start => lang.start,
+    PlayableBookmarkRole.end => lang.stop,
+  };
+
+  IconData toIcon() => switch (this) {
+    PlayableBookmarkRole.start => Broken.play_circle,
+    PlayableBookmarkRole.end => Broken.stop_circle,
   };
 }

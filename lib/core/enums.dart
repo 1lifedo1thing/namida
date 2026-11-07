@@ -805,6 +805,9 @@ enum RouteType {
   SUBPAGE_mostPlayedTracks,
   SUBPAGE_queueTracks,
   SUBPAGE_INDEXER_UPDATE_MISSING_TRACKS(isOpenableFromSettings: true),
+  SUBPAGE_INDEXER_DUPLICATE_TRACKS(isOpenableFromSettings: true),
+  SUBPAGE_INDEXER_FILTERED_TRACKS(isOpenableFromSettings: true),
+  SUBPAGE_INDEXER_NOMEDIA_FOLDERS(isOpenableFromSettings: true),
 
   // ----- Subpages -----
   SETTINGS_page(isOpenableFromSettings: true),
@@ -1014,7 +1017,19 @@ enum HomePageItems {
   recentArtists,
   topRecentAlbums,
   topRecentArtists,
-  pinnedPlaylists,
+  pinned,
+  ;
+
+  static const _legacyNames = {'pinnedPlaylists': pinned};
+
+  /// names saved before a value was renamed are read too.
+  static HomePageItems? fromName(String name) => values.getEnum(name) ?? _legacyNames[name];
+}
+
+enum PinnedItemType {
+  playlist,
+  smartPlaylist,
+  ;
 }
 
 enum MixesItems {

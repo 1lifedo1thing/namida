@@ -4,6 +4,7 @@ import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:basic_audio_handler/basic_audio_handler.dart';
+import 'package:flutter_scrollbar_modified/flutter_scrollbar_modified.dart';
 import 'package:history_manager/history_manager.dart';
 import 'package:nampack/nampack.dart';
 
@@ -190,6 +191,41 @@ void main() {
     await settings.tutorial.prepareSettingsFile();
     expect(settings.tutorial.lyricsFullscreenTipSeen.userValue, null);
     expect(settings.tutorial.buildJson(), {'_v': 2});
+  });
+
+  test('home items saved under an old name still load', () async {
+    File(AppPaths.SETTINGS).writeAsStringSync(jsonEncode({'_v': 2, 'homePageItems': ['mixes', 'pinnedPlaylists', 'nope']}));
+    await settings.prepareSettingsFile();
+    expect(settings.homePageItems.value, containsAllInOrder([HomePageItems.mixes, HomePageItems.pinned]));
+    expect(settings.homePageItems.value.map((e) => e.name), isNot(contains('nope')));
+
+    File(AppPaths.SETTINGS_YOUTUBE).writeAsStringSync(jsonEncode({'_v': 2, 'ytHomePageItems': ['pinnedPlaylists']}));
+    await settings.youtube.prepareSettingsFile();
+    expect(settings.youtube.ytHomePageItems.value, contains(HomePageItems.pinned));
+  });
+
+  test('a home item hidden under an old name stays hidden', () async {
+    final hiddenNames = HomePageItems.values.where((e) => e != HomePageItems.mixes).map((e) => e == HomePageItems.pinned ? 'pinnedPlaylists' : e.name).toList();
+    File(AppPaths.SETTINGS).writeAsStringSync(
+      jsonEncode({
+        '_v': 2,
+        'homePageItems': ['mixes'],
+        '_x': {'homePageItems': hiddenNames},
+      }),
+    );
+    await settings.prepareSettingsFile();
+    expect(settings.homePageItems.value, [HomePageItems.mixes]);
+
+    final hiddenNamesWithoutPinned = hiddenNames.where((e) => e != 'pinnedPlaylists').toList();
+    File(AppPaths.SETTINGS).writeAsStringSync(
+      jsonEncode({
+        '_v': 2,
+        'homePageItems': ['mixes'],
+        '_x': {'homePageItems': hiddenNamesWithoutPinned},
+      }),
+    );
+    await settings.prepareSettingsFile();
+    expect(settings.homePageItems.value, [HomePageItems.mixes, HomePageItems.pinned]);
   });
 
   test('syncable file: delta carries changed keys, newest wins, reset propagates', () async {
@@ -387,6 +423,26 @@ void main() {
 
     await loadFile(settings, {'_v': 2, 'ytMostPlayedCustomDateRange': DateRange.dummy().toJson()});
     expect(settings.ytMostPlayedCustomDateRange.userValue, null);
+  });
+
+  test('old scrollbar track toggles merge into one mode, easy grab becomes instant grab', () async {
+    await loadFile(settings, {'_v': 2, 'tapToScroll': true, 'enhancedDragToScroll': false, 'easyScrollbarGrab': true});
+    expect(settings.scrollbarTrackMode.value, ScrollbarTrackMode.jumpToTouch);
+    expect(settings.instantThumbGrab.value, true);
+    final json = settings.buildJson();
+    expect(json.containsKey('tapToScroll'), false);
+    expect(json.containsKey('enhancedDragToScroll'), false);
+    expect(json.containsKey('easyScrollbarGrab'), false);
+
+    await loadFile(settings, {'_v': 2, 'enhancedDragToScroll': false});
+    expect(settings.scrollbarTrackMode.value, ScrollbarTrackMode.thumbOnly);
+
+    await loadFile(settings, {'_v': 2, 'tapToScroll': false, 'enhancedDragToScroll': true});
+    expect(settings.scrollbarTrackMode.value, ScrollbarTrackMode.dragAnywhere);
+    expect(settings.buildJson().containsKey('scrollbarTrackMode'), false);
+
+    await loadFile(settings, {'_v': 2, 'tapToScroll': true, 'scrollbarTrackMode': ScrollbarTrackMode.thumbOnly.name});
+    expect(settings.scrollbarTrackMode.value, ScrollbarTrackMode.thumbOnly);
   });
 
   group('keys', () {
