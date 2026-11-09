@@ -7,6 +7,7 @@ import 'package:youtipie/class/streams/caption.dart';
 import 'package:namida/class/file_parts.dart';
 import 'package:namida/class/http_response_wrapper.dart';
 import 'package:namida/class/lang.dart';
+import 'package:namida/controller/network_proxy_controller.dart';
 import 'package:namida/core/constants.dart';
 import 'package:namida/core/extensions.dart';
 import 'package:namida/youtube/class/download_task_base.dart';
@@ -165,7 +166,7 @@ class SubtitleTrackYoutube extends SubtitleTrack {
   /// which end up parsed as karaoke parts.
   String get _requestUrl => '${caption.url.replaceAll(_fmtParamRegex, '')}&fmt=vtt';
 
-  /// caption urls expire after a few hours, so the fetched file is kept around.
+  /// caption urls expire after a few hours, so the fetched file is kept around. throws when the request fails.
   @override
   Future<File?> ensureLocalFile() async {
     final cacheFile = this.cacheFile;
@@ -175,14 +176,12 @@ class SubtitleTrackYoutube extends SubtitleTrack {
 
     HttpClientWrapper? client;
     try {
-      client = HttpClientWrapper.createSync();
+      client = HttpClientWrapper.createSync(NetworkProxyController.inst.rhttpSettings);
       final res = await client.getUrl(_requestUrl, cancelToken: null);
       final body = res.body;
       if (body.isEmpty) return null;
       await cacheFile.writeAsString(body);
       return cacheFile;
-    } catch (_) {
-      return null;
     } finally {
       client?.close().ignoreError();
     }

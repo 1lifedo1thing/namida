@@ -10,6 +10,7 @@ import 'package:playlist_manager/playlist_manager.dart';
 import 'package:rhttp/rhttp.dart';
 
 import 'package:namida/class/folder.dart';
+import 'package:namida/class/http_response_wrapper.dart';
 import 'package:namida/class/missing_track_matcher.dart';
 import 'package:namida/class/queue.dart';
 import 'package:namida/class/route.dart';
@@ -21,6 +22,7 @@ import 'package:namida/controller/indexer_controller.dart';
 import 'package:namida/controller/lyrics_search_utils/lrc_search_utils_selectable.dart';
 import 'package:namida/controller/music_web_server/music_web_server_base.dart';
 import 'package:namida/controller/navigator_controller.dart';
+import 'package:namida/controller/network_proxy_controller.dart';
 import 'package:namida/controller/platform/namida_channel/namida_channel.dart';
 import 'package:namida/controller/platform/namida_storage/namida_storage.dart';
 import 'package:namida/controller/player_controller.dart';
@@ -506,9 +508,11 @@ Future<void> showGeneralPopupDialog(
               text: lang.confirm,
               onTap: () async {
                 isUpdating.value = true;
-                await EditDeleteController.inst.updateTrackPathInEveryPartOfNamida(tracks.first, newPath);
+                final newTrack = await EditDeleteController.inst.updateTrackPathInEveryPartOfNamida(tracks.first, newPath);
                 isUpdating.value = false;
                 NamidaNavigator.inst.closeDialog(2);
+                final didFixFailedCurrentTrack = errorPlayingTrack != null && newTrack != null && Player.inst.currentTrack?.track == newTrack;
+                if (didFixFailedCurrentTrack) Player.inst.skipToQueueItem(Player.inst.currentIndex.value);
               },
             ),
           ),
@@ -704,6 +708,14 @@ Future<void> showGeneralPopupDialog(
           ),
         );
 
+  String getRemoveFromPlaylistSubtitle(String playlistName) {
+    final playlistText = playlistName.translatePlaylistName();
+    final isOneSelectedListen = source == QueueSource.selectedTracks && playlistName == k_PLAYLIST_NAME_HISTORY && tracksWithDates.length == 1;
+    if (!isOneSelectedListen) return playlistText;
+    final listenText = tracksWithDates.first.dateAdded.dateAndClockFormatted;
+    return '$playlistText • $listenText';
+  }
+
   final Widget? removeFromPlaylistListTile = shoulShowRemoveFromPlaylist()
       ? ObxO(
           rx: colorDelightened,
@@ -711,7 +723,7 @@ Future<void> showGeneralPopupDialog(
             color: colorDelightened,
             compact: true,
             title: lang.removeFromPlaylist,
-            subtitle: playlistName!.translatePlaylistName(),
+            subtitle: getRemoveFromPlaylistSubtitle(playlistName!),
             icon: Broken.box_remove,
             onTap: () async {
               cancelSkipTimer();
@@ -1499,7 +1511,12 @@ Future<void> showGeneralPopupDialog(
                                   icon: Broken.chart_2,
                                   onTap: () {
                                     NamidaNavigator.inst.closeDialog();
-                                    showTracksStatsCardDialog(tracks: tracks, title: title, subtitle: subtitle, isCircle: isCircle);
+                                    showTracksStatsCardDialog(
+                                      tracks: tracks,
+                                      title: title,
+                                      subtitle: subtitle,
+                                      isCircle: isCircle,
+                                    );
                                   },
                                 ),
 
@@ -1957,10 +1974,14 @@ extension CustomArtworkManagerDialog on CustomArtworkManager {
                               ),
                               itemBuilder: (context, index) {
                                 final url = urls[index];
+                                final proxySettings = NetworkProxyController.inst.rhttpSettings;
                                 return BorderRadiusClip(
                                   borderRadius: BorderRadius.circular(8.0.multipliedRadius),
                                   child: FutureBuilder(
-                                    future: Rhttp.getBytes(url),
+                                    future: NamidaHttp.getBytes(
+                                      url,
+                                      settings: proxySettings,
+                                    ),
                                     builder: (context, snapshot) {
                                       final bytes = snapshot.data?.body;
                                       return CustomAnimatedSwitcher(
@@ -1984,7 +2005,10 @@ extension CustomArtworkManagerDialog on CustomArtworkManager {
                                                   Uint8List? fullResbytes;
                                                   try {
                                                     final fullResUrl = url.replaceAll(_lastfmImageSizeRegex, '/i/u/ar0/');
-                                                    final res = await Rhttp.getBytes(fullResUrl);
+                                                    final res = await NamidaHttp.getBytes(
+                                                      fullResUrl,
+                                                      settings: proxySettings,
+                                                    );
                                                     fullResbytes = res.body;
                                                   } catch (_) {}
 

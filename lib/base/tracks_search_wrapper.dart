@@ -519,6 +519,14 @@ class TracksSearchWrapper {
     return result;
   }
 
+  List<int> filterRelevantIndicesAsList(String text) {
+    final result = <int>[];
+    void onRelevantMatch(_CustomTrackExtended trExt) => result.add(trExt.ogIndex);
+    void onLessRelevantMatch(_CustomTrackExtended trExt) {}
+    _filter(text, onRelevantMatch, onLessRelevantMatch);
+    return result;
+  }
+
   Set<int> filterIndicesAsSet(String text) {
     final result = <int>{};
     void onMatch(_CustomTrackExtended trExt) => result.add(trExt.ogIndex);
@@ -836,7 +844,13 @@ class _ScoreCalculator {
     score = 0;
 
     scoreProperty(key.title, multiplier: 6, allowFuzzy: true, preferPrefix: true);
-    scoreProperty(key.subtitle, multiplier: 2, exactMultiplier: 6, allowFuzzy: true, preferPrefix: true);
+    scoreProperty(
+      key.subtitle,
+      multiplier: 2,
+      exactMultiplier: 6,
+      allowFuzzy: true,
+      preferPrefix: true,
+    );
     if (score > 0) return score;
     final extras = key.extras;
     if (extras != null) {

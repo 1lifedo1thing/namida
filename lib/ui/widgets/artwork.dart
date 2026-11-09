@@ -607,7 +607,7 @@ class _ArtworkWidgetState extends State<ArtworkWidget> with LoadingItemsDelayMix
 
     if (NamidaFeaturesVisibility.floatingArtworkEffect) {
       if (widget.allowFloating) {
-        if (settings.extra.floatingArtworkEffect.value == true) {
+        if (settings.extra.floatingArtworkEffect.value) {
           artwork = _EncapsulateWithFloatingTilt(
             compressed: widget.compressed,
             child: artwork,
@@ -732,7 +732,12 @@ class MultiArtworks extends StatelessWidget {
       images.add(
         NamidaFullscreenImage(
           imageFile: () => File(imagePath),
-          fetchImage: () => Indexer.inst.getArtwork(imagePath: imagePath, track: tr, compressed: false, checkFileFirst: false),
+          fetchImage: () => Indexer.inst.getArtwork(
+            imagePath: imagePath,
+            track: tr,
+            compressed: false,
+            checkFileFirst: false,
+          ),
           onSave: (_, _) => EditDeleteController.inst.saveTrackArtworkToStorage(tr),
           placeholder: placeholder,
         ),

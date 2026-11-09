@@ -1092,6 +1092,7 @@ class _AnimatingThumnailWidgetState extends State<_AnimatingThumnailWidget> {
                           maxWidth: lyricsMaxSize.width,
                           maxHeight: lyricsMaxSize.height,
                           insideMiniplayerCard: true,
+                          fadesWithMiniplayer: true,
                           canHoldToCopyLine: false,
                           visibilityNotifier: Lyrics.inst.lrcOverlayVisibility,
                         ),
@@ -1433,8 +1434,8 @@ class _TrackImage extends StatelessWidget {
     final artworkKey = isFront ? Key(track.pathToImage) : ObjectKey(backCover);
     final imagePath = isFront ? track.pathToImage : backCover.filePath;
     return _PlaybackGlowOpacity(
-      builder: (glowOpacity) => LayoutWidthProvider(
-        builder: (context, maxWidth) => ArtworkWidget(
+      builder: (glowOpacity) => LayoutWidthHeightProvider(
+        builder: (context, maxWidth, maxHeight) => ArtworkWidget(
           key: artworkKey,
           track: isFront ? track : null,
           path: imagePath,
@@ -1442,6 +1443,8 @@ class _TrackImage extends StatelessWidget {
           extractInternally: isFront,
           fallbackToFolderCover: isFront,
           thumbnailSize: maxWidth,
+          width: maxWidth,
+          height: maxHeight,
           compressed: MiniPlayerController.inst.shouldCompressArtwork,
           borderRadius: 6.0 + 8.0.multipliedRadius * (maxWidth * 0.004),
           fadeMilliSeconds: 0,
@@ -1474,6 +1477,7 @@ class _YoutubeIDImage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _PlaybackGlowOpacity(
+      // -- should pass height like [_TrackImage], skipped cuz yt thumbnails are always wide (shorts too) or square, not portrait
       builder: (glowOpacity) => LayoutWidthProvider(
         builder: (context, maxWidth) => YoutubeThumbnail(
           type: ThumbnailType.video,

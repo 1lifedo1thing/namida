@@ -87,6 +87,9 @@ class _HistoryTracksPageState extends State<HistoryTracksPage>
   @override
   ScrollController? get providedScrollController => HistoryController.inst.scrollController;
 
+  @override
+  bool get showsMatchesInOwnOrder => true;
+
   List<int>? _filteredForResults;
   _FilteredHistory? _filteredHistory;
 
@@ -710,7 +713,12 @@ class _NormalPlaylistTracksPageState extends State<NormalPlaylistTracksPage>
     final index = tracksWithDate.indexWhere((e) => focusTracksSet.contains(e.track));
     if (index < 0) return;
     JumpHighlight.showBriefly(tracksWithDate[index], index, inQueue: false);
-    MainPageFABResumeButton.jumpToItem(index, Dimensions.inst.trackTileItemExtent, widget.route, position: position);
+    MainPageFABResumeButton.jumpToItem(
+      index,
+      Dimensions.inst.trackTileItemExtent,
+      widget.route,
+      position: position,
+    );
   }
 
   @override

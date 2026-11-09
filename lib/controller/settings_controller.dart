@@ -15,11 +15,11 @@ import 'package:namida/base/settings_file_writer.dart';
 import 'package:namida/class/count_per_row.dart';
 import 'package:namida/class/eggs_data.dart';
 import 'package:namida/class/lang.dart';
+import 'package:namida/class/named_presets.dart';
 import 'package:namida/class/player_config_preset.dart';
 import 'package:namida/class/queue_insertion.dart';
 import 'package:namida/class/shortcut_data.dart';
 import 'package:namida/class/sort_chain.dart';
-import 'package:namida/class/named_presets.dart';
 import 'package:namida/controller/directory_index.dart';
 import 'package:namida/controller/file_browser.dart';
 import 'package:namida/controller/platform/shortcuts_manager/shortcuts_manager.dart';
@@ -342,7 +342,8 @@ class _SettingsController extends _SettingsKeysWriter {
   late final stretchLyricsDuration = _key('stretchLyricsDuration', true);
   late final visualDelayMS = _key('visualDelayMS', 0);
   late final lyricsEditorLatencyMS = _key('lyricsEditorLatencyMS', 0, sync: false);
-  late final timeCapsuleYears = _key<int?>('timeCapsuleYears', null);
+  late final lyricsEditorFontScale = _key('lyricsEditorFontScale', 1.0, sync: false);
+  late final timeCapsuleYears = _key('timeCapsuleYears', 0);
 
   late final playlistAddTracksAtBeginning = _key('playlistAddTracksAtBeginning', false);
   late final playlistAddTracksAtBeginningYT = _key('playlistAddTracksAtBeginningYT', false);
@@ -384,14 +385,14 @@ class _SettingsController extends _SettingsKeysWriter {
   late final gradientTiles = _key('gradientTiles', true);
   late final preferredSearchType = _keyEnum('preferredSearchType', SearchType.auto, SearchType.values);
   late final resumeUIEnabled = _key('resumeUIEnabled', true);
-  late final ytStyleButtonSwitcher = _key<bool?>('ytStyleButtonSwitcher', null);
-  late final keepVideoFrameOnSwitch = _key<bool?>('keepVideoFrameOnSwitch', null, sync: false);
-  late final scrollbarThumbLabel = _key<bool?>('scrollbarThumbLabel', null, sync: false);
+  late final ytStyleButtonSwitcher = _key('ytStyleButtonSwitcher', false);
+  late final keepVideoFrameOnSwitch = _key('keepVideoFrameOnSwitch', false, sync: false);
+  late final scrollbarThumbLabel = _key('scrollbarThumbLabel', false, sync: false);
   late final scrollbarTrackMode = _keyEnum('scrollbarTrackMode', ScrollbarTrackMode.dragAnywhere, ScrollbarTrackMode.values, sync: false);
-  late final instantThumbGrab = _key<bool?>('instantThumbGrab', null, sync: false);
-  late final smoothScrolling = _key<bool?>('smoothScrolling', null, sync: false);
-  late final mediaWaveHaptic = _key<bool?>('mediaWaveHaptic', null, sync: false);
-  late final backgroundImages = _key<bool?>('backgroundImages', null, sync: false);
+  late final instantThumbGrab = _key('instantThumbGrab', false, sync: false);
+  late final smoothScrolling = _key('smoothScrolling', true, sync: false);
+  late final mediaWaveHaptic = _key('mediaWaveHaptic', false, sync: false);
+  late final backgroundImages = _key('backgroundImages', false, sync: false);
 
   late final editTagsKeepFileDates = _key('editTagsKeepFileDates', true);
   late final downloadFilesWriteUploadDate = _key('downloadFilesWriteUploadDate', false);
@@ -554,6 +555,7 @@ class _SettingsController extends _SettingsKeysWriter {
   late final webhookUrl = _key('webhookUrl', '', sync: false);
   late final webhookEvents = _keySet<WebhookEvent>('webhookEvents', _kDefaultWebhookEvents, item: WebhookEvent.values.asCodec(), sync: false);
   late final lyricsIntegrations = _keySet<LyricsIntegration>('lyricsIntegrations', const {}, item: LyricsIntegration.values.asCodec(), sync: false);
+  late final proxyUrl = _key('proxyUrl', '', sync: false);
 
   static const _kDefaultWebhookEvents = {WebhookEvent.trackChanged, WebhookEvent.play, WebhookEvent.pause};
 

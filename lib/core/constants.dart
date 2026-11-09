@@ -859,6 +859,7 @@ class AppPaths {
   static final SETTINGS_YOUTUBE = _join(_USER_DATA, 'namida_settings_youtube.json');
   static final SETTINGS_EXTRA = _join(_USER_DATA, 'namida_settings_extra.json');
   static final SETTINGS_SYNC = _join(_USER_DATA, 'namida_settings_sync.json');
+  static final SYNC_PENDING_PATHS = _join(_USER_DATA, 'sync_pending_paths.json');
   static final SETTINGS_PARTY = _join(_USER_DATA, 'namida_settings_party.json');
   static final SETTINGS_TUTORIAL = _join(_USER_DATA, 'namida_settings_tutorial.json');
   static final SETTINGS_SHORTCUTS = _join(_USER_DATA, 'namida_settings_shortcuts.json');
@@ -934,6 +935,13 @@ class AppPaths {
       await youtubeInfoFile.writeAsString(_getYoutubeInfo());
       existingPaths.add(youtubeInfoFile);
     } catch (_) {}
+    if (Platform.isAndroid) {
+      final nativeLogsFile = FileParts.join(tmpDirPath, 'logs_native.txt');
+      try {
+        final didWrite = await _writeNativeLogs(nativeLogsFile);
+        if (didWrite) existingPaths.add(nativeLogsFile);
+      } catch (_) {}
+    }
     final redactor = _LogsRedactor();
     for (final p in [
       AppPaths.LOGS,
@@ -955,6 +963,18 @@ class AppPaths {
       if (settingsFile != null) existingPaths.add(settingsFile);
     }
     return existingPaths;
+  }
+
+  static const _kNativeLogTags = ['UsbDirectManager', 'UsbAudioDevice', 'UsbAudioStream'];
+
+  /// logcat only gives the app its own lines, from a ring buffer, so these cover the recent sessions only.
+  static Future<bool> _writeNativeLogs(File destination) async {
+    final res = await Process.run('logcat', ['-d', '-v', 'threadtime', '-s', ..._kNativeLogTags]);
+    final text = res.stdout as String;
+    final hasEntries = LineSplitter.split(text).any((line) => line.isNotEmpty && !line.startsWith('---------'));
+    if (!hasEntries) return false;
+    await destination.writeAsString(text);
+    return true;
   }
 
   static Future<File?> _writeAllSettingsRedacted(_LogsRedactor redactor, {required String tmpDirPath}) async {

@@ -194,7 +194,10 @@ extension LibraryTabUtils on LibraryTab {
   NamidaRouteWidget toWidget([CountPerRow? gridCount, bool animateTiles = true, bool enableHero = false]) {
     gridCount ??= settings.mediaGridCounts.value.get(this);
     return switch (this) {
-      LibraryTab.tracks || LibraryTab.tracksMusic || LibraryTab.tracksVideos => TracksPage(tab: this, animateTiles: animateTiles),
+      LibraryTab.tracks || LibraryTab.tracksMusic || LibraryTab.tracksVideos => TracksPage(
+        tab: this,
+        animateTiles: animateTiles,
+      ),
       LibraryTab.albums => AlbumsPage(
         countPerRow: gridCount,
         animateTiles: animateTiles,
@@ -245,7 +248,10 @@ extension LibraryTabUtils on LibraryTab {
       LibraryTab.moods => const MoodsPage(),
       LibraryTab.tags => const TagsPage(),
       LibraryTab.rating => const RatingsPage(),
-      LibraryTab.stats => const StatsPage(isYoutube: false, isLibraryTab: true),
+      LibraryTab.stats => const StatsPage(
+        isYoutube: false,
+        isLibraryTab: true,
+      ),
       LibraryTab.party => const NamidaPartyPage(),
     };
   }
@@ -1056,7 +1062,13 @@ extension OnYoutubeLinkOpenActionUtils on OnYoutubeLinkOpenAction {
     switch (this) {
       case OnYoutubeLinkOpenAction.showDownload:
         if (ids.length == 1) {
-          showDownloadVideoBottomSheet(videoId: ids.first, originalIndex: null, totalLength: null, playlistId: null, streamInfoItem: null);
+          showDownloadVideoBottomSheet(
+            videoId: ids.first,
+            originalIndex: null,
+            totalLength: null,
+            playlistId: null,
+            streamInfoItem: null,
+          );
         } else {
           final ptitle = 'External - ${DateTime.now().dateAndClockFormattedOriginal}';
           YTPlaylistDownloadPage(
@@ -1300,6 +1312,13 @@ extension SponsorBlockActionExt on SponsorBlockAction {
   }
 }
 
+extension FeedbackMenuActionTypeUtils on FeedbackMenuActionType {
+  IconData toIcon() => switch (this) {
+    FeedbackMenuActionType.notInterested => Broken.eye_slash,
+    FeedbackMenuActionType.dontRecommendChannel => Broken.user_remove,
+  };
+}
+
 extension RouteUtils on NamidaRoute {
   AlbumIdentifierWrapper? get routeDataAlbumIdentifier => routeData is AlbumIdentifierWrapper ? (routeData as AlbumIdentifierWrapper) : null;
 
@@ -1504,7 +1523,10 @@ extension RouteUtils on NamidaRoute {
   Widget? toTitle(BuildContext context) {
     final textTheme = context.textTheme;
     final routeData = this.routeData;
-    Widget getTextWidget(String t) => Text(t, style: textTheme.titleLarge);
+    Widget getTextWidget(String t) => Text(
+      t,
+      style: textTheme.titleLarge,
+    );
     Widget? finalWidget;
     bool displaySettingSearch = false;
     switch (route) {
@@ -1536,7 +1558,7 @@ extension RouteUtils on NamidaRoute {
       case RouteType.PAGE_queue:
         finalWidget = ObxO(
           rx: QueueController.inst.totalQueuesCount,
-          builder: (context, count) => getTextWidget("${lang.queues} • $count"),
+          builder: (context, count) => getTextWidget(count == null ? lang.queues : "${lang.queues} • $count"),
         );
         break;
       case RouteType.PAGE_smartPlaylists:
@@ -1643,13 +1665,31 @@ extension RouteUtils on NamidaRoute {
       ),
 
       // -- Parsing Json Icon
-      _getAnimatedCrossFade(child: const ParsingJsonPercentage(size: 30.0, hero: false), shouldShow: shouldShowProgressPercentage),
+      _getAnimatedCrossFade(
+        child: const ParsingJsonPercentage(
+          size: 30.0,
+          hero: false,
+        ),
+        shouldShow: shouldShowProgressPercentage,
+      ),
 
       // -- Indexer Icon
-      _getAnimatedCrossFade(child: const IndexingPercentage(size: 30.0, hero: false), shouldShow: shouldShowProgressPercentage),
+      _getAnimatedCrossFade(
+        child: const IndexingPercentage(
+          size: 30.0,
+          hero: false,
+        ),
+        shouldShow: shouldShowProgressPercentage,
+      ),
 
       // -- Videos Icon
-      _getAnimatedCrossFade(child: const VideosExtractingPercentage(size: 30.0, hero: false), shouldShow: shouldShowProgressPercentage),
+      _getAnimatedCrossFade(
+        child: const VideosExtractingPercentage(
+          size: 30.0,
+          hero: false,
+        ),
+        shouldShow: shouldShowProgressPercentage,
+      ),
 
       _getAnimatedCrossFade(
         child: NamidaAppBarIcon(
@@ -3453,6 +3493,7 @@ extension LyricsIntegrationL10n on LyricsIntegration {
     LyricsIntegration.flymeTicker => 'Flyme & Lyricon',
     LyricsIntegration.menuBar => 'macOS menu bar',
     LyricsIntegration.liveActivity => 'Live Activity',
+    LyricsIntegration.mpris => 'MPRIS',
   };
 }
 
@@ -3463,6 +3504,7 @@ extension LyricsIntegrationUtils on LyricsIntegration {
     LyricsIntegration.flymeTicker => Broken.notification_status,
     LyricsIntegration.menuBar => Broken.monitor,
     LyricsIntegration.liveActivity => Broken.lock,
+    LyricsIntegration.mpris => Broken.music_dashboard,
   };
 }
 

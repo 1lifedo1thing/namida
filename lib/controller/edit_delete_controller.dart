@@ -122,6 +122,7 @@ class EditDeleteController {
       Player.audioConfigs.movePaths(oldNewTrack),
       QueueController.inst.replaceTrackInAllQueues(oldNewTrack),
       Player.inst.replaceAllTracksInQueueBulk(oldNewTrack),
+      QueueController.latestPlayedForSourceManager.movePaths(oldNewTrack),
     ]);
 
     if (SelectedTracksController.inst.selectedTracks.value.isNotEmpty) {
@@ -135,9 +136,10 @@ class EditDeleteController {
     }
   }
 
-  Future<void> updateTrackPathInEveryPartOfNamida(Track oldTrack, String newPath) async {
+  /// returns the new track, null when [newPath] couldn't be read.
+  Future<Track?> updateTrackPathInEveryPartOfNamida(Track oldTrack, String newPath) async {
     final newtrlist = await Indexer.inst.convertPathsToTracksAndAddToLists([newPath]);
-    if (newtrlist.isEmpty) return;
+    if (newtrlist.isEmpty) return null;
     final newTrack = newtrlist.first;
     final oldNewMap = {oldTrack: newTrack};
 
@@ -148,11 +150,13 @@ class EditDeleteController {
       Player.audioConfigs.movePaths(oldNewMap),
       QueueController.inst.replaceTrackInAllQueues(oldNewMap),
       Player.inst.replaceAllTracksInQueueBulk(oldNewMap),
+      QueueController.latestPlayedForSourceManager.movePaths(oldNewMap),
     ]);
 
     if (SelectedTracksController.inst.selectedTracks.value.isNotEmpty) {
       SelectedTracksController.inst.replaceThisTrack(oldTrack, newTrack);
     }
+    return newTrack;
   }
 
   Future<void> updateDirectoryInEveryPartOfNamida(

@@ -46,6 +46,7 @@ import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/translations/language.dart';
 import 'package:namida/core/utils.dart';
 import 'package:namida/packages/focused_menu.dart';
+import 'package:namida/packages/lyrics_lrc_parsed_view.dart';
 import 'package:namida/packages/miniplayer_raw.dart';
 import 'package:namida/packages/mp.dart';
 import 'package:namida/packages/three_arched_circle.dart';
@@ -54,15 +55,15 @@ import 'package:namida/ui/pages/sound_control_page.dart';
 import 'package:namida/ui/pages/wide_screen_player_page.dart';
 import 'package:namida/ui/widgets/animated_widgets.dart';
 import 'package:namida/ui/widgets/artwork.dart';
-import 'package:namida/ui/widgets/mascots/mascots.dart';
-import 'package:namida/ui/widgets/seekbar_bookmarks.dart';
-import 'package:namida/ui/widgets/seekbar_chapters.dart';
 import 'package:namida/ui/widgets/creative_animations.dart';
 import 'package:namida/ui/widgets/custom_widgets.dart';
-import 'package:namida/ui/widgets/live_progress.dart';
 import 'package:namida/ui/widgets/effects/effects.dart';
 import 'package:namida/ui/widgets/library/track_tile.dart';
+import 'package:namida/ui/widgets/live_progress.dart';
+import 'package:namida/ui/widgets/mascots/mascots.dart';
 import 'package:namida/ui/widgets/seek_magnet.dart';
+import 'package:namida/ui/widgets/seekbar_bookmarks.dart';
+import 'package:namida/ui/widgets/seekbar_chapters.dart';
 import 'package:namida/ui/widgets/settings/extra_settings.dart';
 import 'package:namida/ui/widgets/settings/playback_settings.dart';
 import 'package:namida/ui/widgets/settings/youtube_settings.dart';
@@ -385,6 +386,8 @@ class _NamidaMiniPlayerBaseState<E, S> extends State<NamidaMiniPlayerBase<E, S>>
 
   static AnimationController get getsAnim => MiniPlayerController.inst.sAnim;
 
+  static LyricsLRCParsedViewState? get _visibleLyricsView => MiniPlayerController.inst.isMinimized ? null : Lyrics.inst.lrcViewKey.currentState;
+
   final leftOpacityAnim = Tween<double>(
     begin: 0.0,
     end: -1.0,
@@ -507,49 +510,6 @@ class _NamidaMiniPlayerBaseState<E, S> extends State<NamidaMiniPlayerBase<E, S>>
       ),
     );
 
-    final seekPositionTextChild = ObxO(
-      rx: MiniPlayerController.inst.seekValue,
-      builder: (context, seekNull) => NamidaAnimatedSwitcher(
-        key: const ValueKey('seek_switcher'),
-        firstChild: Obx(
-          (context) {
-            final seek = seekNull ?? 0;
-            final liveWindow = Player.inst.currentLiveWindow.valueR;
-            if (liveWindow != null && liveWindow.isAtEdge(seek)) {
-              return const Icon(
-                Broken.radar_1,
-                size: 16.0,
-              );
-            }
-            String finalText;
-            if (liveWindow != null) {
-              final behindMS = liveWindow.behindEdgeMS(seek);
-              finalText = '-${behindMS.milliSecondsLabel}';
-            } else if (settings.player.displayActualPositionWhenSeeking.valueR) {
-              final itemDur = Player.inst.currentItemDuration.valueR?.inMilliseconds;
-              int seekClamped = seek;
-              seekClamped = seekClamped.withMinimum(0);
-              if (itemDur != null) seekClamped = seekClamped.withMaximum(itemDur);
-              finalText = seekClamped.milliSecondsLabel;
-            } else {
-              final diffInMs = seek - Player.inst.nowPlayingPositionR;
-              final plusOrMinus = diffInMs < 0 ? '' : '+';
-              final seekText = diffInMs.milliSecondsLabel;
-              finalText = "$plusOrMinus$seekText";
-            }
-            return NamidaText(
-              finalText,
-              style: const NText(.small, size: .s13),
-            );
-          },
-        ),
-        secondChild: const SizedBox(),
-        showFirst: seekNull != null,
-        durationMS: 700,
-        allCurves: Curves.easeInOutQuart,
-      ),
-    );
-
     final positionTextChild = SeekBackwardsDetectorWidget(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12.0),
@@ -593,7 +553,7 @@ class _NamidaMiniPlayerBaseState<E, S> extends State<NamidaMiniPlayerBase<E, S>>
       mainAxisAlignment: MainAxisAlignment.end,
       mainAxisSize: MainAxisSize.max,
       children: [
-        if (widget.videoTileConfigs != null && settings.ytStyleButtonSwitcher.value == true)
+        if (widget.videoTileConfigs != null && settings.ytStyleButtonSwitcher.value)
           MPCustomIconButton(
             tooltipCallback: () => lang.youtubeStyleMiniplayer,
             onPressed: () {
@@ -665,23 +625,19 @@ class _NamidaMiniPlayerBaseState<E, S> extends State<NamidaMiniPlayerBase<E, S>>
 
     final maxQueueHeight = MiniPlayerController.inst.maxOffset - 100.0 - MiniPlayerController.inst.topInset - 12.0;
 
-    final colorScheme = CurrentColor.inst.color;
-
     Widget buildQueueColumn(Widget header, TrackTileProperties? trackTileProperties, VideoTileProperties? videoTileProperties) {
       return Column(
         children: [
           NBuilder(
             builder: (context, colors) {
-              final scaffoldBgColor = Color.alphaBlend(colors.scaffold.withOpacityExt(0.5), context.isDarkMode ? Colors.black : Colors.white);
+              final accentColor = colors.accent ?? CurrentColor.inst.color;
               return DecoratedBox(
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      Color.alphaBlend(scaffoldBgColor.withOpacityExt(0.90), colorScheme).withOpacityExt(0.5),
-                      Color.alphaBlend(scaffoldBgColor.withOpacityExt(0.65), colorScheme).withOpacityExt(0.5),
-                    ],
+                  gradient: NamidaGradients.accentCard(
+                    scaffold: colors.scaffold,
+                    accent: accentColor,
+                    isDarkMode: context.isDarkMode,
+                    opacity: 0.5,
                   ),
                 ),
                 child: Column(
@@ -808,14 +764,7 @@ class _NamidaMiniPlayerBaseState<E, S> extends State<NamidaMiniPlayerBase<E, S>>
                     child: QueueUtilsRow(
                       itemsKeyword: (number) => widget.itemsKeyword(number, _getcurrentItem),
                       onAddItemsTap: () => widget.onAddItemsTap(_getcurrentItem),
-                      scrollQueueWidget: ObxO(
-                        rx: MiniPlayerController.inst.queueFollower.arrowIcon,
-                        builder: (context, arrow) => NamidaButton(
-                          tooltip: () => lang.jump,
-                          onTap: MiniPlayerController.inst.queueFollower.animateToCurrentItem,
-                          icon: arrow,
-                        ),
-                      ),
+                      queueFollower: MiniPlayerController.inst.queueFollower,
                     ),
                   ),
                 ),
@@ -904,7 +853,7 @@ class _NamidaMiniPlayerBaseState<E, S> extends State<NamidaMiniPlayerBase<E, S>>
               currentImage = TapDetector(
                 onTap: () {
                   // -- taps missing a lyrics line (gaps, mid-scroll, faded out) belong to the lyrics
-                  final isShowingLyricsView = Lyrics.inst.lrcViewKey.currentState != null;
+                  final isShowingLyricsView = _visibleLyricsView != null;
                   final hasLyrics = Lyrics.inst.currentLyricsLRC.value != null || Lyrics.inst.currentLyricsText.value.text.isNotEmpty;
                   if (isShowingLyricsView && hasLyrics) return;
                   settings.artworkTapAction.value.executePlayingItem(currentItemAnimationUI);
@@ -915,7 +864,7 @@ class _NamidaMiniPlayerBaseState<E, S> extends State<NamidaMiniPlayerBase<E, S>>
 
             currentImage = LongPressDetector(
               onLongPress: () {
-                final lrcState = Lyrics.inst.lrcViewKey.currentState;
+                final lrcState = _visibleLyricsView;
                 if (lrcState != null) {
                   lrcState.enterFullScreen();
                   return;
@@ -1202,11 +1151,11 @@ class _NamidaMiniPlayerBaseState<E, S> extends State<NamidaMiniPlayerBase<E, S>>
                             child: _ScaleYIfNeeded(
                               alignment: Alignment.bottomCenter,
                               scale: waveformYScale,
-                              child: Align(
+                              child: const Align(
                                 alignment: Alignment.bottomCenter,
                                 child: Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                                  child: seekPositionTextChild,
+                                  padding: EdgeInsets.symmetric(horizontal: 16.0),
+                                  child: _SeekPositionText(),
                                 ),
                               ),
                             ),
@@ -1622,7 +1571,13 @@ class _MiniplayerLayout {
   RRect panelShapeOf(Rect rect) {
     final topRadius = Radius.circular(panelTopRadius);
     final bottomRadius = Radius.circular(panelBottomRadius);
-    return RRect.fromRectAndCorners(rect, topLeft: topRadius, topRight: topRadius, bottomLeft: bottomRadius, bottomRight: bottomRadius);
+    return RRect.fromRectAndCorners(
+      rect,
+      topLeft: topRadius,
+      topRight: topRadius,
+      bottomLeft: bottomRadius,
+      bottomRight: bottomRadius,
+    );
   }
 
   void update(double p, _MiniplayerLayoutInputs inputs) {
@@ -2546,6 +2501,68 @@ class _QueueListChildWrapper extends StatelessWidget {
   }
 }
 
+class _SeekPositionText extends StatefulWidget {
+  const _SeekPositionText();
+
+  @override
+  State<_SeekPositionText> createState() => _SeekPositionTextState();
+}
+
+class _SeekPositionTextState extends State<_SeekPositionText> {
+  Widget _frozenSeekChild = const SizedBox();
+
+  @override
+  Widget build(BuildContext context) {
+    return ObxO(
+      rx: MiniPlayerController.inst.seekValue,
+      builder: (context, seekMS) => NamidaAnimatedSwitcher(
+        key: const ValueKey('seek_switcher'),
+        firstChild: seekMS == null
+            ? _frozenSeekChild
+            : Obx(
+                (context) {
+                  final liveWindow = Player.inst.currentLiveWindow.valueR;
+                  final Widget child;
+                  if (liveWindow != null && liveWindow.isAtEdge(seekMS)) {
+                    child = const Icon(
+                      Broken.radar_1,
+                      size: 16.0,
+                    );
+                  } else {
+                    String finalText;
+                    if (liveWindow != null) {
+                      final behindMS = liveWindow.behindEdgeMS(seekMS);
+                      finalText = '-${behindMS.milliSecondsLabel}';
+                    } else if (settings.player.displayActualPositionWhenSeeking.valueR) {
+                      final itemDur = Player.inst.currentItemDuration.valueR?.inMilliseconds;
+                      int seekClamped = seekMS;
+                      seekClamped = seekClamped.withMinimum(0);
+                      if (itemDur != null) seekClamped = seekClamped.withMaximum(itemDur);
+                      finalText = seekClamped.milliSecondsLabel;
+                    } else {
+                      final diffInMs = seekMS - Player.inst.nowPlayingPositionR;
+                      final plusOrMinus = diffInMs < 0 ? '' : '+';
+                      final seekText = diffInMs.milliSecondsLabel;
+                      finalText = "$plusOrMinus$seekText";
+                    }
+                    child = NamidaText(
+                      finalText,
+                      style: const NText(.small, size: .s13),
+                    );
+                  }
+                  _frozenSeekChild = child;
+                  return child;
+                },
+              ),
+        secondChild: const SizedBox(),
+        showFirst: seekMS != null,
+        durationMS: 700,
+        allCurves: Curves.easeInOutQuart,
+      ),
+    );
+  }
+}
+
 /// Tap seeks backwards, long press rewinds.
 class SeekBackwardsDetectorWidget extends StatelessWidget {
   final Widget child;
@@ -3016,7 +3033,11 @@ class _AnimatedOrPadding extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return animated
-        ? AnimatedPadding(padding: padding, duration: duration, child: child)
+        ? AnimatedPadding(
+            padding: padding,
+            duration: duration,
+            child: child,
+          )
         : Padding(
             padding: padding,
             child: child,
@@ -3173,7 +3194,10 @@ class PlayerVideoAudioChip extends StatelessWidget {
                         ),
 
                       if (audioTracks != null && audioTracks.length > 1) ...[
-                        const NamidaContainerDivider(height: 2.0, margin: EdgeInsets.symmetric(vertical: 4.0)),
+                        const NamidaContainerDivider(
+                          height: 2.0,
+                          margin: EdgeInsets.symmetric(vertical: 4.0),
+                        ),
                         _MPQualityButton(
                           onTap: () => Player.inst.setAudioTrackAndSave(null),
                           icon: Broken.audio_square,
@@ -3206,7 +3230,10 @@ class PlayerVideoAudioChip extends StatelessWidget {
                         ),
                       ],
 
-                      const NamidaContainerDivider(height: 2.0, margin: EdgeInsets.symmetric(vertical: 4.0)),
+                      const NamidaContainerDivider(
+                        height: 2.0,
+                        margin: EdgeInsets.symmetric(vertical: 4.0),
+                      ),
 
                       ...availableVideos.map(
                         (element) {
@@ -3317,7 +3344,10 @@ class PlayerVideoAudioChip extends StatelessWidget {
                                   Widget getTextWidget(IconData icon, String title, double value) {
                                     return Row(
                                       children: [
-                                        NIcon(icon, color: NColors.defaultIcon(mainColor: CurrentColor.inst.miniplayerColor)),
+                                        NIcon(
+                                          icon,
+                                          color: NColors.defaultIcon(mainColor: CurrentColor.inst.miniplayerColor),
+                                        ),
                                         const SizedBox(width: 12.0),
                                         NamidaButtonText(
                                           title,

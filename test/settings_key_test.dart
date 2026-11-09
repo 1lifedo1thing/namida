@@ -1191,7 +1191,7 @@ void main() {
       settings.extra.addRecentSearch('c');
       settings.extra.setRecentSearchesEnabled(false);
       expect(settings.extra.recentSearches.value, isEmpty);
-      expect(settings.extra.buildJson(), {'_v': 2, 'recentSearchesEnabled': false});
+      expect(settings.extra.buildJson(), {'_v': 2});
     });
 
     test('extra: window bounds round trip, broken bounds are dropped', () async {
@@ -1221,7 +1221,13 @@ void main() {
       final bassPreset = EqualizerPreset.allDefaults[1];
       final night = PlayerConfigPreset(
         name: 'Night',
-        config: defaults.copyWith(equalizerEnabled: true, equalizer: bassPreset.equalizer, preset: bassPreset, volume: 0.5, loudnessEnhancer: 2.5),
+        config: defaults.copyWith(
+          equalizerEnabled: true,
+          equalizer: bassPreset.equalizer,
+          preset: bassPreset,
+          volume: 0.5,
+          loudnessEnhancer: 2.5,
+        ),
       );
       final slowed = PlayerConfigPreset(name: 'Slowed', config: defaults.copyWith(speed: 0.85, pitch: 0.85));
       settings.equalizer.putConfigPreset(slowed);
@@ -1301,5 +1307,42 @@ void main() {
       settings.sync.updateManualServerAddress('s', '2');
       expect(settings.sync.manualServerAddresses.value, {'s': '2'});
     });
+  });
+
+  test('keys that were nullable load old values like their old read site fallbacks', () async {
+    final oldFallbacks = <SettingsFileWriter, Map<SettingsKey<Object?>, Object>>{
+      settings: {
+        settings.timeCapsuleYears: 0, settings.ytStyleButtonSwitcher: false, settings.keepVideoFrameOnSwitch: false, //
+        settings.scrollbarThumbLabel: false, settings.instantThumbGrab: false, settings.smoothScrolling: true,
+        settings.mediaWaveHaptic: false, settings.backgroundImages: false,
+      },
+      settings.extra: {
+        settings.extra.recentSearchesEnabled: false, settings.extra.floatingArtworkEffect: false, settings.extra.tiltingCardsEffect: false, //
+        settings.extra.reduceAnimations: false, settings.extra.jellysPalette: false, settings.extra.artistAlbumsExpanded: true,
+        settings.extra.artistSinglesExpanded: false, settings.extra.artistEpsExpanded: false, settings.extra.artistsMapGraphLayout: true,
+        settings.extra.audioConfigPageIndex: 0,
+      },
+    };
+    Object flipped(Object fallback) => fallback is bool ? !fallback : 3;
+    final storedVariants = <Object? Function(Object fallback)>[(_) => null, (fallback) => fallback, flipped];
+
+    for (final e in oldFallbacks.entries) {
+      final writer = e.key;
+      final fallbacks = e.value;
+      await loadFile(writer, {'_v': 2});
+      for (final k in fallbacks.entries) {
+        expect(k.key.value, k.value, reason: '${k.key.name} missing');
+      }
+      for (final storedOf in storedVariants) {
+        await loadFile(writer, {'_v': 2, for (final k in fallbacks.entries) k.key.name: storedOf(k.value)});
+        for (final k in fallbacks.entries) {
+          final key = k.key;
+          final oldFallback = k.value;
+          final stored = storedOf(oldFallback);
+          final expected = stored ?? oldFallback;
+          expect(key.value, expected, reason: '${key.name} = $stored');
+        }
+      }
+    }
   });
 }

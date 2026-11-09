@@ -17,7 +17,9 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.util.Rational
+import android.view.animation.DecelerateInterpolator
 import android.widget.Toast
+import android.window.SplashScreenView
 import androidx.annotation.NonNull
 import androidx.annotation.RequiresApi
 import androidx.core.app.ActivityCompat
@@ -40,6 +42,7 @@ class NamidaMainActivity : FlutterActivity() {
     var currentLifecycle: Lifecycle? = null
     var currentApplicationContext : Context? = null
     private var pipAspectRatio: Rational? = null
+    private const val SPLASH_EXIT_DURATION_MS = 300L
   }
 
 
@@ -198,6 +201,16 @@ class NamidaMainActivity : FlutterActivity() {
           } catch (e: Exception) {
             result.error("MULTICAST_LOCK", e.message, null)
           }
+        }
+        "getSystemProxy" -> result.success(NetworkProxyManager.getSystemProxy(context))
+        "listenSystemProxy" -> {
+          val engineChannel = channel
+          NetworkProxyManager.listenSystemProxy(context) { engineChannel.invokeMethod("onSystemProxyChanged", null) }
+          result.success(null)
+        }
+        "setAppProxy" -> {
+          NetworkProxyManager.setAppProxy(call.arguments as Map<*, *>?)
+          result.success(null)
         }
         "setUsbDacHandlerEnabled" -> {
           val enabled = call.argument<Boolean>("enabled") ?: false
@@ -551,11 +564,33 @@ class NamidaMainActivity : FlutterActivity() {
     ProcessExitReporter.installJavaCrashRecorder(applicationContext)
 
     super.onCreate(savedInstanceState)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      splashScreen.setOnExitAnimationListener { animateSplashExit(it) }
+    }
     if (intent?.action == NamidaConstants.BABE_WAKE_UP) {
       moveTaskToBack(true)
     }
     DisplayRefreshRate.applyMax(this)
     LauncherIconController.tryFixLauncherIconIfNeeded();
+  }
+
+  @RequiresApi(Build.VERSION_CODES.S)
+  private fun animateSplashExit(splashView: SplashScreenView) {
+    val interpolator = DecelerateInterpolator()
+    // -- the icon can be its own surface, the parent alpha doesnt reach it
+    splashView.iconView?.animate()
+      ?.alpha(0f)
+      ?.setDuration(SPLASH_EXIT_DURATION_MS)
+      ?.setInterpolator(interpolator)
+    splashView.animate()
+      .alpha(0f)
+      .setDuration(SPLASH_EXIT_DURATION_MS)
+      .setInterpolator(interpolator)
+      .withEndAction {
+        splashView.remove()
+        // -- remove() resets the system bars to the theme ones
+        updateSystemUiOverlays()
+      }
   }
 
   override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -597,6 +632,9 @@ class NamidaMainActivity : FlutterActivity() {
     channel.invokeMethod("onNewIntent", null)
     super.onNewIntent(intent)
   }
+
+  // -- links are handled by namida, not as flutter routes. not the manifest flag cuz flutter reads it from the launching icon alias
+  override fun shouldHandleDeeplinking(): Boolean = false
 
   // ------- PIP -------
 

@@ -96,6 +96,11 @@ class YoutubeMiniPlayerState extends State<YoutubeMiniPlayer> {
     _canScrollQueue.value = can;
   }
 
+  void _onDismiss() {
+    MiniPlayerController.inst.snapToMini(haptic: false);
+    Player.inst.clearQueue();
+  }
+
   final _scrollController = NamidaScrollController.create();
 
   void resetGlowUnderVideo() => _shouldShowGlowUnderVideo.value = false;
@@ -325,6 +330,7 @@ class YoutubeMiniPlayerState extends State<YoutubeMiniPlayer> {
                                   blurColorMaskOpacity: 0.75,
                                   useSafeArea: false,
                                   isFullScreenView: true,
+                                  fadesWithMiniplayer: true,
                                   canShowToggleFullscreenButton: false,
                                   verticalPadding: 64.0,
                                   bottomPadding: const SizedBox(height: kYTQueueSheetMinHeight),
@@ -478,11 +484,11 @@ class YoutubeMiniPlayerState extends State<YoutubeMiniPlayer> {
                   maxHeight: context.height,
                   bgColor: miniplayerBGColor,
                   displayBottomBGLayer: !enableBottomNavBar,
-                  onDismiss: dismissibleMiniplayer ? Player.inst.clearQueue : null,
+                  onDismiss: dismissibleMiniplayer ? _onDismiss : null,
                   onDismissing: (dismissPercentage) {
                     if (Player.inst.isPlaying.value) {
                       final maxVolume = Player.inst.userPlayerVolumeForItem;
-                      Player.inst.setVolume((dismissPercentage * maxVolume).clampDouble(0.0, maxVolume));
+                      Player.inst.setTemporaryVolume((dismissPercentage * maxVolume).clampDouble(0.0, maxVolume));
                     }
                   },
                   onHeightChange: (percentage) {
@@ -1458,8 +1464,13 @@ class _YTPlayerInnerPage extends StatelessWidget {
                               //         identity: currentId,
                               //       )
                               //     : null,
-                              onLongPress: () async =>
-                                  await showDownloadVideoBottomSheet(videoId: currentId, originalIndex: null, totalLength: null, playlistId: null, streamInfoItem: null),
+                              onLongPress: () async => await showDownloadVideoBottomSheet(
+                                videoId: currentId,
+                                originalIndex: null,
+                                totalLength: null,
+                                playlistId: null,
+                                streamInfoItem: null,
+                              ),
                               onPressed: () async {
                                 if (isDownloading) {
                                   YoutubeController.inst.pauseDownloadTask(
@@ -1473,7 +1484,13 @@ class _YTPlayerInnerPage extends StatelessWidget {
                                     groupName: const DownloadTaskGroupName.defaulty(),
                                   );
                                 } else {
-                                  await showDownloadVideoBottomSheet(videoId: currentId, originalIndex: null, totalLength: null, playlistId: null, streamInfoItem: null);
+                                  await showDownloadVideoBottomSheet(
+                                    videoId: currentId,
+                                    originalIndex: null,
+                                    totalLength: null,
+                                    playlistId: null,
+                                    streamInfoItem: null,
+                                  );
                                 }
                               },
                             );
@@ -2039,7 +2056,10 @@ class _VideoFeather extends StatelessWidget {
     return IgnorePointer(
       child: DecoratedBox(
         decoration: _decorationFor(color),
-        child: SizedBox(height: height, width: double.infinity),
+        child: SizedBox(
+          height: height,
+          width: double.infinity,
+        ),
       ),
     );
   }

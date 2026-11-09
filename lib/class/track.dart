@@ -76,6 +76,15 @@ class TrackWithDate extends Selectable<Map<String, dynamic>> with ItemWithDate, 
   @override
   int get dateAddedMS => dateAdded;
 
+  TrackWithDate copyWithTrack(Track track) {
+    return TrackWithDate(
+      dateAdded: dateAdded,
+      track: track,
+      queueSource: queueSource,
+      source: sourceNull,
+    );
+  }
+
   @override
   bool operator ==(other) {
     if (other is! TrackWithDate) return false;
@@ -135,6 +144,19 @@ class TrackStats extends PlayableItemStats {
       lastPositionInMs: track.lastPlayedPositionInMs ?? 0,
       audioTrackId: track.effectiveAudioTrackId,
       bookmarks: track.statsRaw?.bookmarks,
+    );
+  }
+
+  TrackStats copyWithTrack(Track track) {
+    return TrackStats(
+      track: track,
+      rating: rating,
+      tags: tags,
+      moods: moods,
+      lastPositionInMs: lastPositionInMs,
+      audioTrackId: audioTrackId,
+      bookmarks: bookmarks,
+      modifiedDate: modifiedDate,
     );
   }
 
@@ -667,7 +689,12 @@ class TrackExtended {
     return TrackExtended(
       title: title,
       originalArtist: originalArtist,
-      artistsList: Indexer.splitArtist(title: title, originalArtist: originalArtist, tagged: multiValues?.artists, config: artistsConfig),
+      artistsList: Indexer.splitArtist(
+        title: title,
+        originalArtist: originalArtist,
+        tagged: multiValues?.artists,
+        config: artistsConfig,
+      ),
       originalAlbum: originalAlbum,
       albumsList: albumsList,
       albumArtist: albumArtist,

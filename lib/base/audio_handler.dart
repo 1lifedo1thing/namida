@@ -710,7 +710,9 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> w
     await super.onQueueChanged();
     if (currentQueue.value.isEmpty) {
       CurrentColor.inst.resetCurrentPlayingTrack();
-      if (MiniPlayerController.inst.isInQueue) MiniPlayerController.inst.snapToMini();
+      // -- party clears etc dont snap the player back by themselves
+      final miniplayer = MiniPlayerController.inst;
+      miniplayer.snapToMini(haptic: miniplayer.isInQueue);
       // await pause();
       await [
         onDispose(),
@@ -797,10 +799,11 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> w
     void Function(List<Q> finalizedQueue, List<int>? originalIndices)? onQueueDifferent,
     void Function(Q currentItem)? onAssigningCurrentItem,
     bool Function(Q? currentItem, Q itemToPlay)? canRestructureQueueOnly,
-    void Function()? onRestructuringQueue,
+    void Function(QueueSnapshot<Q>? previousQueue)? onRestructuringQueue,
     Id Function(Q currentItem)? duplicateRemover,
   }) async {
     await beforeQueueAddOrInsert(queue);
+    final wasPlayWhenReady = playWhenReady.value;
     setPlayWhenReady(startPlaying);
     await super.assignNewQueue(
       playAtIndex: playAtIndex,
@@ -809,13 +812,19 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> w
       shuffle: shuffle,
       shuffleKeepingItem: shuffleKeepingItem,
       originalIndices: originalIndices,
-      onIndexAndQueueSame: onIndexAndQueueSame,
+      onIndexAndQueueSame: () {
+        // -- nothing new started, the current item keeps its play state
+        setPlayWhenReady(wasPlayWhenReady);
+        onIndexAndQueueSame?.call();
+      },
       onQueueDifferent: onQueueDifferent,
       onQueueEmpty: onQueueEmpty,
       onAssigningCurrentItem: onAssigningCurrentItem,
-      onRestructuringQueue: () {
+      onRestructuringQueue: (previousQueue) {
+        if (!startPlaying) setPlayWhenReady(wasPlayWhenReady);
         if (playWhenReady.value && !isPlaying.value) play();
         VibratorController.light();
+        onRestructuringQueue?.call(previousQueue);
       },
       canRestructureQueueOnly:
           canRestructureQueueOnly ??
@@ -1007,8 +1016,7 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> w
     playErrorRemainingSecondsToSkip.value = 0;
   }
 
-  void _onTrackPlayError(Track tr, Object e, StackTrace st, Function skipItem) {
-    onPauseRaw();
+  void _startPlayErrorSkipCountdown(void Function() onCountdownEnd) {
     cancelPlayErrorSkipTimer();
     playErrorRemainingSecondsToSkip.value = 7;
 
@@ -1017,12 +1025,19 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> w
       (timer) {
         playErrorRemainingSecondsToSkip.value--;
         if (playErrorRemainingSecondsToSkip.value <= 0) {
-          NamidaNavigator.inst.closeDialog();
-          if (currentQueue.value.length > 1) skipItem();
+          onCountdownEnd();
           timer.cancel();
         }
       },
     );
+  }
+
+  void _onTrackPlayError(Track tr, Object e, StackTrace st, Function skipItem) {
+    onPauseRaw();
+    _startPlayErrorSkipCountdown(() {
+      NamidaNavigator.inst.closeDialog();
+      if (currentQueue.value.length > 1) skipItem();
+    });
     NamidaDialogs.inst.showTrackDialog(
       tr,
       errorPlayingTrack: e,
@@ -1031,20 +1046,64 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> w
     logger.error('Error playing file', e: e, st: st);
   }
 
+  ({int loadId, int positionMS})? _ytPlayErrorLastRetry;
+
+  // -- mid-play errors are mostly expired urls or network drops, a reload usually fixes them
+  Future<void> _onYoutubePlayError(YoutubeID item, Object e, StackTrace st) async {
+    logger.error('Error playing video', e: e, st: st);
+    final loadId = _latestItemLoadId;
+    final positionMS = currentPositionMS.value;
+    final lastRetry = _ytPlayErrorLastRetry;
+    final canRetry = lastRetry == null || lastRetry.loadId != loadId || positionMS > lastRetry.positionMS;
+    if (canRetry) {
+      _ytPlayErrorLastRetry = (loadId: loadId, positionMS: positionMS);
+      final didReload = await onItemPlayYoutubeIDSetAudio(
+        mainStreams: YoutubeInfoController.current.currentYTStreams.value,
+        stream: currentAudioStream.value,
+        cachedFile: null,
+        useCache: true,
+        videoId: item.id,
+      ).catchError((_) => false);
+      if (didReload || loadId != _latestItemLoadId) return;
+    }
+
+    _pauseAndSkipYTAfterCountdown('$e');
+  }
+
+  void _pauseAndSkipYTAfterCountdown(String reason) {
+    onPauseRaw();
+    _startPlayErrorSkipCountdown(() {
+      if (currentQueue.value.length > 1) skipToNext();
+    });
+    snackyy(
+      title: 'Error playing video, skipping...',
+      message: 'Reason: $reason',
+      top: false,
+      isError: true,
+      displayDuration: SnackDisplayDuration.tutorial,
+      button: SnackbarButton(
+        text: lang.cancel,
+        function: cancelPlayErrorSkipTimer,
+      ),
+    );
+  }
+
   @override
   void onPlaybackError(Object e, StackTrace st) {
     // -- no skipping, every item would fail the same
     if (e is AudioOutputUnavailableException) {
-      snackyy(title: lang.error, message: lang.outputDeviceUnavailable, top: false, isError: true);
+      snackyy(
+        title: lang.error,
+        message: lang.outputDeviceUnavailable,
+        top: false,
+        isError: true,
+      );
       return;
     }
     final item = currentItem.value;
     item?.execute(
       selectable: (finalItem) => _onTrackPlayError(finalItem.track, e, st, skipToNext),
-      youtubeID: (_) {
-        snackyy(title: lang.error, message: '$e', top: false, isError: true);
-        logger.error('Error playing video', e: e, st: st);
-      },
+      youtubeID: (finalItem) => _onYoutubePlayError(finalItem, e, st),
     );
   }
 
@@ -1136,7 +1195,14 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> w
       // -- we check if it exists to avoid refreshing notification redundently.
       // -- otherwise `getArtwork` already handles duplications.
       if (!exists) {
-        Indexer.inst.getArtwork(imagePath: imagePath, track: tr, compressed: false, checkFileFirst: false).then((value) => refreshNotification());
+        Indexer.inst
+            .getArtwork(
+              imagePath: imagePath,
+              track: tr,
+              compressed: false,
+              checkFileFirst: false,
+            )
+            .then((value) => refreshNotification());
       }
     });
 
@@ -1434,7 +1500,8 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> w
     if (_willPlayWhenReady) onPlayRaw();
   }
 
-  Future<void> onItemPlayYoutubeIDSetAudio({
+  /// returns whether the new source got set.
+  Future<bool> onItemPlayYoutubeIDSetAudio({
     required VideoStreamsResult? mainStreams,
     required AudioStream? stream,
     required File? cachedFile,
@@ -1449,6 +1516,7 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> w
 
     final cachedAudio = await stream?.getCachedFile(videoId);
 
+    bool didSetSource = false;
     if (useCache && cachedAudio != null && await cachedAudio.exists()) {
       final positionToRestore = currentPositionMS.value.milliseconds;
       await setSource(
@@ -1460,6 +1528,7 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> w
         cachedAudioPath: cachedAudio.path,
       );
       refreshNotification();
+      didSetSource = true;
     } else if (stream != null) {
       bool checkInterrupted() {
         final curr = currentItem.value;
@@ -1470,7 +1539,7 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> w
       isFetchingInfo.value = true;
 
       mainStreams ??= await YoutubeInfoController.video.fetchVideoStreams(videoId, forceRequest: false) ?? YoutubeInfoController.current.currentYTStreams.value;
-      if (checkInterrupted()) return;
+      if (checkInterrupted()) return false;
 
       final bool expired = mainStreams?.hasExpired() ?? true;
 
@@ -1494,7 +1563,7 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> w
 
       if (!YoutubeInfoController.video.jsPreparedIfRequired) {
         await YoutubeInfoController.video.ensureJSPlayerInitialized();
-        if (checkInterrupted()) return;
+        if (checkInterrupted()) return false;
       }
 
       final positionToRestore = currentPositionMS.value.milliseconds;
@@ -1502,25 +1571,28 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> w
       try {
         if (expired) throw Exception('expired streams');
         await setAudioLockCache(stream, positionToRestore);
+        didSetSource = true;
       } catch (_) {
         // ==== if the url got outdated.
         final newStreams = await YoutubeInfoController.video.fetchVideoStreams(videoId);
 
-        if (checkInterrupted()) return;
+        if (checkInterrupted()) return false;
         if (newStreams != null) YoutubeInfoController.current.currentYTStreams.value = newStreams;
         final sameStream = YoutubeController.matchAudioStreamOrSimilar(newStreams?.audioStreams, stream) ?? YoutubeController.getPreferredAudioStream(newStreams?.audioStreams);
 
         if (sameStream != null) {
           try {
             await setAudioLockCache(sameStream, positionToRestore);
+            didSetSource = true;
           } catch (_) {}
         }
       }
-      if (checkInterrupted()) return;
+      if (checkInterrupted()) return false;
       isFetchingInfo.value = false;
     }
 
     if (_willPlayWhenReady) onPlayRaw();
+    return didSetSource;
   }
 
   _NextSeekCachedFileData? _nextSeekSetAudioCache;
@@ -1638,8 +1710,8 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> w
 
   /// Shows error if [marked] failed & saved as pending.
   void _onVideoMarkWatchResultError(YTMarkVideoWatchedResult marked) {
-    if (marked == YTMarkVideoWatchedResult.addedAsPending) {
-      snackyy(message: 'Failed to mark video as watched, saved as pending.', top: false, isError: true);
+    if (marked == YTMarkVideoWatchedResult.failedAddedAsPending) {
+      snackyy(message: 'Failed to mark video as watched, will retry later.', top: false, isError: true);
     }
   }
 
@@ -1686,7 +1758,12 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> w
           final playabilty = streamsResult.playability;
           final extraReasons = [playabilty.reason, ...?playabilty.messages].whereType<String>();
           final extraReasonsText = extraReasons.isEmpty ? '' : ' | ${extraReasons.join(' | ')}';
-          snackyy(title: lang.error, message: 'Empty audio streams. playabilty: `${playabilty.status.name}`$extraReasonsText', top: false, isError: true);
+          snackyy(
+            title: lang.error,
+            message: 'Empty audio streams. playabilty: `${playabilty.status.name}`$extraReasonsText',
+            top: false,
+            isError: true,
+          );
         }
         return null;
       } else {
@@ -2273,7 +2350,7 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> w
       isFetchingInfo.value = false;
       if (checkInterrupted()) return;
       if (!okaySetFromCache) {
-        void showSnackError({required String nextAction}) {
+        void onPlayError({required bool skipAfterCountdown}) {
           if (item == currentItem.value) {
             final hasConnection = ConnectivityController.inst.hasConnection;
             bool shouldLogError = true;
@@ -2284,15 +2361,22 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> w
                 reasonMsg = lang.noNetworkAvailableToFetchData;
               }
             }
-            snackyy(title: 'Error playing video, $nextAction...', message: 'Reason: $reasonMsg', top: false, isError: true);
+            if (skipAfterCountdown) {
+              _pauseAndSkipYTAfterCountdown(reasonMsg);
+            } else {
+              snackyy(
+                title: 'Error playing video',
+                message: 'Reason: $reasonMsg',
+                top: false,
+                isError: true,
+              );
+            }
 
             if (shouldLogError) {
-              logger.error('Error playing video, $nextAction... (hasConnection: $hasConnection)', e: e, st: st);
+              logger.error('Error playing video (hasConnection: $hasConnection)', e: e, st: st);
             }
           }
         }
-
-        // showSnackError(nextAction: 'trying again');
 
         final playedFromCacheDetails = await _trySetYTVideoWithoutConnection(
           item: item,
@@ -2312,8 +2396,7 @@ class NamidaAudioVideoHandler<Q extends Playable> extends BasicAudioHandler<Q> w
         currentCachedVideo.value = playedFromCacheDetails.video;
         generateWaveform();
         if (playedFromCacheDetails.audio == null) {
-          showSnackError(nextAction: 'skipping');
-          if (_willPlayWhenReady) skipItem();
+          onPlayError(skipAfterCountdown: _willPlayWhenReady);
           return;
         }
         if (ConnectivityController.inst.hasConnection) fetchFullVideoPage();

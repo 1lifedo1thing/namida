@@ -364,6 +364,7 @@ extension SettingsControllerDebugKeys on _SettingsController {
     stretchLyricsDuration,
     visualDelayMS,
     lyricsEditorLatencyMS,
+    lyricsEditorFontScale,
     timeCapsuleYears,
     playlistAddTracksAtBeginning,
     playlistAddTracksAtBeginningYT,
@@ -444,6 +445,7 @@ extension SettingsControllerDebugKeys on _SettingsController {
     webhookUrl,
     webhookEvents,
     lyricsIntegrations,
+    proxyUrl,
     eggs,
   ];
 }
