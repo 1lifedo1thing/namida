@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter/services.dart';
 
 import 'package:audio_service/audio_service.dart';
@@ -198,6 +198,9 @@ class Indexer<T extends Track> {
     int? size,
   }) async {
     if (imagePath == null && track == null) return FArtwork.dummy();
+
+    // -- custom artwork paths must never get the track art written into them
+    if (track != null && imagePath != null && imagePath != track.pathToImage) track = null;
 
     final strategy = _getArtworkStrategy(
       imagePath: imagePath,
@@ -599,7 +602,8 @@ class Indexer<T extends Track> {
       FileStatsAdv? fileStat;
       try {
         fileStat = stats ?? FileStatsAdv.fromFileStat(await File(trackPath).stat());
-        if (minSize > 0 && (fileStat.size ?? 0) < minSize) {
+        final size = fileStat.size;
+        if (minSize > 0 && size != null && size < minSize) {
           return onMinSizeTrigger();
         }
       } catch (_) {}
@@ -659,6 +663,7 @@ class Indexer<T extends Track> {
         releaseType: '',
         bpm: 0,
         musicalKey: '',
+        explicitStatus: null,
         rating: 0.0,
         originalTags: null,
         tagsList: const [],
@@ -671,6 +676,7 @@ class Indexer<T extends Track> {
         hashKey: null,
         server: server,
         serverFolder: null,
+        serverVideos: null,
         hasNoEmbeddedArtwork: hasNoEmbeddedArtwork,
       );
 
@@ -687,6 +693,13 @@ class Indexer<T extends Track> {
   }
 
   static final _emptyTags = FTags.edit(path: '', artwork: FArtwork.dummy());
+
+  @visibleForTesting
+  static bool isIndexedTrackFiltered({required int sizeInB, required int durationMS, required int minSize, required int minDurMS}) {
+    final isTooSmall = sizeInB != 0 && sizeInB < minSize;
+    final isTooShort = durationMS != 0 && durationMS < minDurMS;
+    return isTooSmall || isTooShort;
+  }
 
   Future<TrackExtended?> getTrackInfo({
     required String trackPath,
@@ -869,10 +882,6 @@ class Indexer<T extends Track> {
       TrackTileManager.rebuildTrackInfo(tr);
     }
 
-    if (updateArtwork) {
-      Indexer.clearMemoryImageCache();
-    }
-
     for (var _ in tracksMissing) {
       onProgress(false);
     }
@@ -913,6 +922,11 @@ class Indexer<T extends Track> {
       _addTrackToLists(trext, artwork);
     }
 
+    if (updateArtwork) {
+      final imagePaths = extracted.map((e) => e.$1.pathToImage).toFixedList();
+      Indexer.refreshArtworkFiles(imagePaths);
+    }
+
     _addTheseTracksToAlbumGenreArtistEtc(finalNewOldTracks);
     Player.inst.refreshNotification();
     _sortAndRefreshTracks();
@@ -928,7 +942,8 @@ class Indexer<T extends Track> {
     final newTracks = <T>[];
 
     if (artworkWasEdited) {
-      Indexer.clearMemoryImageCache();
+      final imagePaths = tracksMap.keys.map((e) => e.pathToImage).toFixedList();
+      Indexer.refreshArtworkFiles(imagePaths);
     }
 
     final finalNewOldTracks = <TrackExtended, TrackExtended?>{};
@@ -1300,9 +1315,10 @@ class Indexer<T extends Track> {
       final newAudios = audioFiles.toList();
       await extractAll(newAudios, isModified: false);
       if (modifiedFiles.isNotEmpty) {
-        Indexer.clearMemoryImageCache();
         final modifiedAudios = modifiedFiles.toList();
         await extractAll(modifiedAudios, isModified: true);
+        final modifiedImagePaths = modifiedAudios.map((path) => Track.orVideo(path).pathToImage).toFixedList();
+        Indexer.refreshArtworkFiles(modifiedImagePaths);
       }
 
       // -- after modified files, so kept tracks are checked with their new tags
@@ -1317,8 +1333,14 @@ class Indexer<T extends Track> {
     /// removes tracks after changing `duration` or `size`.
     final replacedDuplicatePaths = duplicatesResolver?.replacedPaths;
     int networkTracksRemoved = 0;
+    final minDurMS = minDur * 1000;
     tracksInfoList.removeWhere((tr) {
-      final isFiltered = (tr.durationMS != 0 && tr.durationMS < minDur * 1000) || tr.size < minSize;
+      final isFiltered = isIndexedTrackFiltered(
+        sizeInB: tr.size,
+        durationMS: tr.durationMS,
+        minSize: minSize,
+        minDurMS: minDurMS,
+      );
       final isReplacedDuplicate = replacedDuplicatePaths?.contains(tr.path) == true;
       final remove = isFiltered || isReplacedDuplicate || networkTrackMapsToRemove.any((map) => map.containsKey(tr.path));
       if (remove) {
@@ -2275,7 +2297,8 @@ class Indexer<T extends Track> {
   Future<DirsFileFilterResult> _listAudioFiles({bool strictNoMedia = true, required bool withStats}) async {
     tracksExcludedByNoMedia.value = 0;
 
-    final extensions = _includeVideosAsTracks ? NamidaFileExtensionsWrapper.audioAndVideo : NamidaFileExtensionsWrapper.audio;
+    final includeVideos = _includeVideosAsTracks;
+    final extensions = includeVideos ? NamidaFileExtensionsWrapper.audioAndVideo : NamidaFileExtensionsWrapper.audio;
     final m3uExtensions = settings.enableM3USyncStartup.value ? NamidaFileExtensionsWrapper.m3u : null;
     final dirsFilterer = DirsFileFilter(
       extensions: extensions,
@@ -2284,6 +2307,7 @@ class Indexer<T extends Track> {
       blacklistExtensions: settings.extensionsBlacklist.value,
       strictNoMedia: strictNoMedia,
       withStats: withStats,
+      skipSameNameVideos: includeVideos,
     );
     final result = await dirsFilterer.filter();
     if (m3uExtensions != null) unawaited(PlaylistController.inst.importListedM3UFiles(result.m3uPaths));
@@ -2363,6 +2387,7 @@ class Indexer<T extends Track> {
         releaseType: '',
         bpm: 0,
         musicalKey: '',
+        explicitStatus: null,
         rating: 0.0,
         originalTags: tag,
         gainData: null,
@@ -2373,6 +2398,7 @@ class Indexer<T extends Track> {
         hashKey: TrackExtended.generateHashKeyIfEnabled(null, path, null),
         server: null,
         serverFolder: null,
+        serverVideos: null,
         hasNoEmbeddedArtwork: false,
       );
       tracks.add(trext);
@@ -2471,9 +2497,14 @@ class Indexer<T extends Track> {
     return SplitArtistGenreConfigsWrapper.settings();
   }
 
-  static void clearMemoryImageCache() {
-    imageCache.clear();
-    imageCache.clearLiveImages();
+  /// call after artwork files were written or deleted, every place showing them reloads.
+  static void refreshArtworkFiles(List<String> imagePaths) {
+    final indexer = Indexer.inst;
+    for (final imagePath in imagePaths) {
+      indexer.artworksBytesMap.remove(imagePath);
+      indexer.artworksFilesMap.remove(imagePath);
+    }
+    ArtworkWidget.refreshImageFiles(imagePaths);
     if (Platform.isAndroid) AudioService.evictArtworkCache();
   }
 }

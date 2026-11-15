@@ -92,6 +92,19 @@ abstract class NamidaChannel {
   /// lets android offer namida as a plugged usb dac's default app.
   Future<void> setUsbDacHandlerEnabled(bool enabled) async {}
 
+  /// android 12+: the wallpaper color. desktop: the accent color of the system settings.
+  Future<Color?> getSystemAccentColor() async => null;
+
+  /// [onChanged] re-reads [getSystemAccentColor], called only by native change events. null stops listening.
+  /// android needs none, the system recreates the activity when its palette changes.
+  void setSystemAccentColorListener(void Function()? onChanged) {}
+
+  static Future<Color?> _getSystemAccentColorFromChannel(MethodChannel channel) async {
+    final argb = await channel.invokeMethod<int>('getSystemAccentColor');
+    if (argb == null) return null;
+    return Color(argb);
+  }
+
   /// the proxy set in the system settings. env proxies are read for every platform by [NetworkProxyController].
   Future<NetworkProxy?> getSystemProxy() async => null;
 
@@ -121,10 +134,11 @@ abstract class NamidaChannel {
 
   Future<void> logPreviousAbnormalExits() async {}
 
-  /// wether the media command (play, next, etc) that woke the app was sent by us (home widget/quick settings tile).
+  /// wether the media command (play, next, etc) that woke the app was sent by us (home widget/quick settings tile)
+  /// or by an app browsing the library (android auto, wear).
   /// external commands (bluetooth, system media resumption, etc) can be sent without user intention,
   /// so they shouldn't start playback on a cold start.
-  Future<bool> consumeSelfSentMediaCommand() async => true;
+  Future<bool> consumeTrustedMediaCommand() async => true;
 
   final _onResume = <FutureOr<void> Function()>[];
   final _onSuspending = <FutureOr<void> Function()>[];
@@ -187,9 +201,13 @@ enum NamidaAppIcons {
   namida("assets/namida_icon.png", [AuthorInfo("شاكور", null, AuthorPlatform.discord, null), AuthorInfo("MSOB7YY", "MSOB7YY", AuthorPlatform.github, null)]),
   cutsie("assets/namida_icon_cutsie.webp", [AuthorInfo("smilez", null, AuthorPlatform.discord, AuthorAIModel.gpt4)]),
   jellyda("assets/namida_icon_jellyda.webp", [AuthorInfo("Tsuune", "tsuuneki", AuthorPlatform.discord, null), AuthorInfo("Tsuune", "TsunekiHouse", AuthorPlatform.telegram, null)]),
+  cutsieda("assets/namida_icon_cutsieda.webp", [AuthorInfo("Tsuune", "tsuuneki", AuthorPlatform.discord, null), AuthorInfo("Tsuune", "TsunekiHouse", AuthorPlatform.telegram, null)]),
+  kyunda("assets/namida_icon_kyunda.webp", [AuthorInfo("Tsuune", "tsuuneki", AuthorPlatform.discord, null), AuthorInfo("Tsuune", "TsunekiHouse", AuthorPlatform.telegram, null)]),
+  dokida("assets/namida_icon_dokida.webp", [AuthorInfo("Tsuune", "tsuuneki", AuthorPlatform.discord, null), AuthorInfo("Tsuune", "TsunekiHouse", AuthorPlatform.telegram, null)]),
   namiween("assets/namida_icon_namiween.webp", [AuthorInfo("Tsuune", "tsuuneki", AuthorPlatform.discord, null), AuthorInfo("Tsuune", "TsunekiHouse", AuthorPlatform.telegram, null)]),
   eddy("assets/namida_icon_eddy.webp", [AuthorInfo(":𝟛𝓗𝓪𝓹𝓹𝔂", null, AuthorPlatform.discord, null)]),
   namichin("assets/namida_icon_namichin.webp", [AuthorInfo("Scarecloud", null, AuthorPlatform.discord, null)]),
+  tetoda("assets/namida_icon_tetoda.webp", [AuthorInfo("𝙆𝙖𝙢𝙨𝙘", null, AuthorPlatform.discord, AuthorAIModel.unknown)]),
   space("assets/namida_icon_space.webp", [AuthorInfo(":𝟛𝓗𝓪𝓹𝓹𝔂", null, AuthorPlatform.discord, null)]),
   retro("assets/namida_icon_retro.png", [AuthorInfo("sgfreak", null, AuthorPlatform.discord, null)]),
   ookami("assets/namida_icon_ookami.webp", [AuthorInfo("神 ᴛᴀᴋᴜᴍɪ", null, AuthorPlatform.discord, AuthorAIModel.unknown)]),

@@ -128,6 +128,7 @@ class _SettingsController extends _SettingsKeysWriter {
   late final cacheArtworks = _key('cacheArtworks', true, sync: false);
   late final displayTrackNumberinAlbumPage = _key('displayTrackNumberinAlbumPage', true);
   late final albumCardTopRightDate = _key('albumCardTopRightDate', true);
+  late final albumQuickPlayMode = _keyEnum('albumQuickPlayMode', QuickPlayMode.play, QuickPlayMode.values);
   late final forceSquaredTrackThumbnail = _key('forceSquaredTrackThumbnail', false);
   late final forceSquaredAlbumThumbnail = _key('forceSquaredAlbumThumbnail', false);
   late final useAlbumStaggeredGridView = _key('useAlbumStaggeredGridView', false);
@@ -557,7 +558,7 @@ class _SettingsController extends _SettingsKeysWriter {
   late final lyricsIntegrations = _keySet<LyricsIntegration>('lyricsIntegrations', const {}, item: LyricsIntegration.values.asCodec(), sync: false);
   late final proxyUrl = _key('proxyUrl', '', sync: false);
 
-  static const _kDefaultWebhookEvents = {WebhookEvent.trackChanged, WebhookEvent.play, WebhookEvent.pause};
+  static const _kDefaultWebhookEvents = {WebhookEvent.trackChanged, WebhookEvent.play, WebhookEvent.pause, WebhookEvent.favouriteChanged};
 
   bool didSupportNamida = false;
   late final eggs = _keyObject<EggsData>('eggs', const EggsData(), EggsData.fromJson, (v) => v.toJson());

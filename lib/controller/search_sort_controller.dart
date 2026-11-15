@@ -2,12 +2,14 @@ import 'dart:async';
 import 'dart:isolate';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:history_manager/history_manager.dart';
 import 'package:intl/intl.dart';
 import 'package:namico_db_wrapper/namico_db_wrapper.dart';
 import 'package:playlist_manager/playlist_manager.dart';
 
 import 'package:namida/base/tracks_search_wrapper.dart';
+import 'package:namida/class/faudiomodel.dart';
 import 'package:namida/class/folder.dart';
 import 'package:namida/class/library_group.dart';
 import 'package:namida/class/library_item_map.dart';
@@ -406,9 +408,10 @@ class SearchSortController extends SearchPortsProvider {
     return switch (type) {
       GroupSortType.album => encapsulateSortCanIgnorePrefix(TrackSearchFilter.album, (e) => normalize(e.value.first.albumsList.join())),
       GroupSortType.albumArtist => encapsulateSortCanIgnorePrefix(TrackSearchFilter.albumartist, (e) => normalize(e.value.albumArtist)),
-      GroupSortType.year => (e) => e.value.yearPreferyyyyMMdd,
+      GroupSortType.year => (e) => e.value.yearOldestPreferyyyyMMdd(),
       GroupSortType.artistsList => encapsulateSortCanIgnorePrefix(TrackSearchFilter.artist, (e) => normalize(e.value.first.artistsList.join())),
       GroupSortType.genresList => encapsulateSortCanIgnorePrefix(TrackSearchFilter.genre, (e) => normalize(e.value.first.genresList.join())),
+      GroupSortType.stylesList => encapsulateSortCanIgnorePrefix(TrackSearchFilter.style, (e) => normalize(e.value.first.stylesList.join())),
       GroupSortType.composer => encapsulateSortCanIgnorePrefix(TrackSearchFilter.composer, (e) => normalize(e.value.composer)),
       GroupSortType.label => (e) => normalize(e.value.recordLabel),
       GroupSortType.releaseType => (e) => e.value.releaseType.toLowerCase(),
@@ -447,6 +450,8 @@ class SearchSortController extends SearchPortsProvider {
 
   static QueueSource Function(String name) _genreQueueSourceOf(MediaType genreType) => genreType == MediaType.style ? QueueSource.style : QueueSource.genre;
 
+  static TrackSearchFilter _genreSearchFilterOf(MediaType genreType) => genreType == MediaType.style ? TrackSearchFilter.style : TrackSearchFilter.genre;
+
   static QueueSource Function(String name) _moodsTagsQueueSourceOf(MediaType type) => type == MediaType.tag ? QueueSource.tags : QueueSource.moods;
 
   static Comparable Function(MapEntry<String, List<Track>>) _createLastPlayedComparable(QueueSource Function(String name) sourceOf) {
@@ -467,7 +472,9 @@ class SearchSortController extends SearchPortsProvider {
 
   Comparable Function(MapEntry<String, List<Track>>)? _getGenresSortingComparable(MediaType genreType, GroupSortType sortBy) {
     if (sortBy == GroupSortType.lastPlayed) return _createLastPlayedComparable(_genreQueueSourceOf(genreType));
-    return _getMediaSortingComparable(sortBy, overrideKey: GroupSortType.genresList, filter: TrackSearchFilter.genre);
+    final nameSort = GroupSortType.genresNameOf(genreType);
+    final filter = _genreSearchFilterOf(genreType);
+    return _getMediaSortingComparable(sortBy, overrideKey: nameSort, filter: filter);
   }
 
   Comparable Function(MapEntry<String, List<Track>>)? _getLanguagesSortingComparable(GroupSortType sortBy) {
@@ -507,6 +514,7 @@ class SearchSortController extends SearchPortsProvider {
       SortType.year => (e) => e.yearPreferyyyyMMdd,
       SortType.artistsList => encapsulateSortCanIgnorePrefix(TrackSearchFilter.artist, (e) => normalize(e.artistsList.join())),
       SortType.genresList => encapsulateSortCanIgnorePrefix(TrackSearchFilter.genre, (e) => normalize(e.genresList.join())),
+      SortType.stylesList => encapsulateSortCanIgnorePrefix(TrackSearchFilter.style, (e) => normalize(e.stylesList.join())),
       SortType.dateAdded => (e) => e.dateAdded,
       SortType.dateModified => (e) => e.dateModified,
       SortType.bitrate => (e) => e.bitrate,
@@ -595,6 +603,7 @@ class SearchSortController extends SearchPortsProvider {
     GroupSortType.releaseType => (tracks) => tracks.releaseType,
     GroupSortType.bpm => (tracks) => tracks.getAverageBpmFormatted(),
     GroupSortType.genresList => (tracks) => tracks.originalGenre,
+    GroupSortType.stylesList => (tracks) => tracks.originalStyle,
     GroupSortType.numberOfTracks => (tracks) => tracks.length.toString(),
     GroupSortType.duration => (tracks) => tracks.totalDurationFormatted,
     GroupSortType.albumsCount => (tracks) => tracks.toUniqueAlbums().length.toString(),
@@ -669,6 +678,7 @@ class SearchSortController extends SearchPortsProvider {
     GroupSortType.releaseType => (p) => p.tracks.firstOrNull?.track.releaseType,
     GroupSortType.bpm => (p) => p.tracks.getAverageBpmFormatted(),
     GroupSortType.genresList => (p) => p.tracks.firstOrNull?.track.originalGenre,
+    GroupSortType.stylesList => (p) => p.tracks.firstOrNull?.track.originalStyle,
     GroupSortType.numberOfTracks => (p) => p.tracks.length.toString(),
     GroupSortType.duration => (p) => p.tracks.totalDurationFormatted,
     GroupSortType.albumsCount => (p) => p.tracks.toTracks().toUniqueAlbums().length.toString(),
@@ -703,6 +713,7 @@ class SearchSortController extends SearchPortsProvider {
       SortType.albumArtist ||
       SortType.artistsList ||
       SortType.genresList ||
+      SortType.stylesList ||
       SortType.composer ||
       SortType.filename ||
       SortType.titleSort ||
@@ -822,6 +833,7 @@ class SearchSortController extends SearchPortsProvider {
     GroupSortType.albumArtist ||
     GroupSortType.artistsList ||
     GroupSortType.genresList ||
+    GroupSortType.stylesList ||
     GroupSortType.composer ||
     GroupSortType.label ||
     GroupSortType.releaseType ||
@@ -1051,8 +1063,12 @@ class SearchSortController extends SearchPortsProvider {
         final albumsMap = Indexer.inst.mainMapAlbums.value;
         final albumsTracks = albumsMap.values.toFixedList();
         final weights = _keysSearchWeightsOf(albumsTracks);
+        final albumSorts = _groupsSortTagsOf(_singleAlbumOf, (sortInfo) => sortInfo.album);
+        final albumArtistSorts = _groupsSortTagsOf(_singleAlbumOf, (sortInfo) => sortInfo.albumArtist);
         final params = (
           keys: albumsMap.keys.toFixedList(),
+          albumSorts: albumSorts,
+          albumArtistSorts: albumArtistSorts,
           weights: weights,
           cleanup: _shouldCleanup,
           sendPort: itemsSendPort,
@@ -1093,8 +1109,10 @@ class SearchSortController extends SearchPortsProvider {
         final entries = _getMediaEntries(type).toFixedList();
         final entriesTracks = entries.map((e) => e.value).toFixedList();
         final weights = _keysSearchWeightsOf(entriesTracks);
+        final sortTags = _mediaSortTagsOf(type);
         final params = (
           keys: entries.map((e) => e.key).toFixedList(),
+          sortTags: sortTags,
           weights: weights,
           cleanup: _shouldCleanup,
           keyIsPath: type == MediaType.folderMusic || type == MediaType.folderVideo || type == MediaType.folder,
@@ -1126,6 +1144,45 @@ class SearchSortController extends SearchPortsProvider {
   static KeysSearchWeights _keysSearchWeightsOf(List<List<Selectable>> groups) {
     return KeysSearchWrapper.createWeights(groups, listensCount: (tracks) => tracks.getTotalListenCount(), tracksCount: (tracks) => tracks.length);
   }
+
+  static Map<String, String>? _mediaSortTagsOf(MediaType type) {
+    return switch (type) {
+      MediaType.artist => _groupsSortTagsOf(_singleArtistOf, (sortInfo) => sortInfo.artist),
+      MediaType.albumArtist => _groupsSortTagsOf(_singleAlbumArtistOf, (sortInfo) => sortInfo.albumArtist),
+      MediaType.composer => _groupsSortTagsOf(_singleComposerOf, (sortInfo) => sortInfo.composer),
+      MediaType.genre ||
+      MediaType.style ||
+      MediaType.language ||
+      MediaType.folder ||
+      MediaType.folderMusic ||
+      MediaType.folderVideo ||
+      MediaType.mood ||
+      MediaType.tag ||
+      MediaType.rating ||
+      MediaType.track ||
+      MediaType.album ||
+      MediaType.playlist => null,
+    };
+  }
+
+  /// sort tag of each group, taken only from tracks that belong to one group, since a tag like `Choko & Someone` can't be split per name.
+  static Map<K, String> _groupsSortTagsOf<K>(K? Function(TrackExtended trExt) singleKeyOf, String? Function(FTagsSortInfo sortInfo) sortTagOf) {
+    final sortTags = <K, String>{};
+    for (final trExt in Indexer.inst.allTracksMappedByPath.values) {
+      final sortInfo = trExt.sortInfo;
+      if (sortInfo == null) continue;
+      final sortTag = sortTagOf(sortInfo);
+      if (sortTag == null || sortTag.isEmpty) continue;
+      final key = singleKeyOf(trExt);
+      if (key != null) sortTags[key] ??= sortTag;
+    }
+    return sortTags;
+  }
+
+  static String? _singleArtistOf(TrackExtended trExt) => trExt.artistsList.length == 1 ? trExt.artistsList[0] : null;
+  static String? _singleAlbumArtistOf(TrackExtended trExt) => trExt.albumArtistsList.length == 1 ? trExt.albumArtistsList[0] : null;
+  static String? _singleComposerOf(TrackExtended trExt) => trExt.composersList.length == 1 ? trExt.composersList[0] : null;
+  static AlbumIdentifierWrapper? _singleAlbumOf(TrackExtended trExt) => trExt.albumsIdentifiersWrappers.length == 1 ? trExt.albumsIdentifiersWrappers[0].modifiedOnly() : null;
 
   void searchTracks(String text, {bool temp = false}) {
     if (text == '') {
@@ -1481,6 +1538,7 @@ class SearchSortController extends SearchPortsProvider {
       SortType.albumArtist => MediaType.albumArtist,
       SortType.artistsList => MediaType.artist,
       SortType.genresList => MediaType.genre,
+      SortType.stylesList => MediaType.style,
       SortType.title ||
       SortType.year ||
       SortType.dateAdded ||
@@ -1611,7 +1669,8 @@ class SearchSortController extends SearchPortsProvider {
 
   /// Sorts Genres and Saves automatically to settings
   void _sortGenresCurrent({required MediaType genreType, SortChain<GroupSortType>? sorting, bool? reverse}) {
-    final effectiveSorting = _effectiveGroupSorting(genreType, sorting, reverse);
+    final baseSorting = _effectiveGroupSorting(genreType, sorting, reverse);
+    final effectiveSorting = withGenresNameSort(genreType, baseSorting);
 
     final finalMap = Indexer.inst.getGenreMapFor(genreType);
     final genresList = finalMap.value.entries.toFixedList();
@@ -1629,11 +1688,22 @@ class SearchSortController extends SearchPortsProvider {
     _searchMediaType(type: genreType, text: LibraryTab.genres.textSearchController?.text ?? '');
   }
 
+  /// genres and styles share one sorting, its name entry follows [genreType].
+  @visibleForTesting
+  static SortChain<GroupSortType> withGenresNameSort(MediaType genreType, SortChain<GroupSortType> sorting) {
+    final nameSort = GroupSortType.genresNameOf(genreType);
+    final otherNameSort = nameSort == GroupSortType.stylesList ? GroupSortType.genresList : GroupSortType.stylesList;
+    if (!sorting.hasType(otherNameSort)) return sorting;
+    final entries = sorting.entries.map((e) => e.type == otherNameSort ? SortEntry(nameSort, reverse: e.reverse) : e).toFixedList();
+    return sorting.copyWith(entries: entries);
+  }
+
   SortChainComparables<MapEntry<String, List<Track>>> _getGenresComparables(MediaType genreType, SortChain<GroupSortType> sorting) {
+    final nameSort = GroupSortType.genresNameOf(genreType);
     return SortChainComparables.of(
       sorting,
       (sort) => _getGenresSortingComparable(genreType, sort),
-      fallbacks: const [GroupSortType.genresList, GroupSortType.year, GroupSortType.dateModified],
+      fallbacks: [nameSort, GroupSortType.year, GroupSortType.dateModified],
     );
   }
 
@@ -1841,6 +1911,7 @@ class SearchSortController extends SearchPortsProvider {
           GroupSortType.year ||
           GroupSortType.artistsList ||
           GroupSortType.genresList ||
+          GroupSortType.stylesList ||
           GroupSortType.dateAdded ||
           GroupSortType.dateModified ||
           GroupSortType.composer ||
@@ -1857,8 +1928,20 @@ class SearchSortController extends SearchPortsProvider {
     }
   }
 
-  static void _searchAlbumsIsolate(({List<AlbumIdentifierWrapper> keys, KeysSearchWeights weights, bool cleanup, SendPort sendPort}) parameters) {
+  static void _searchAlbumsIsolate(
+    ({
+      List<AlbumIdentifierWrapper> keys,
+      Map<AlbumIdentifierWrapper, String> albumSorts,
+      Map<AlbumIdentifierWrapper, String> albumArtistSorts,
+      KeysSearchWeights weights,
+      bool cleanup,
+      SendPort sendPort,
+    })
+    parameters,
+  ) {
     final sendPort = parameters.sendPort;
+    final albumSorts = parameters.albumSorts;
+    final albumArtistSorts = parameters.albumArtistSorts;
 
     final receivePort = ReceivePort();
     sendPort.send(receivePort.sendPort);
@@ -1867,6 +1950,8 @@ class SearchSortController extends SearchPortsProvider {
       parameters.keys,
       title: (key) => key.displayAlbumName,
       subtitle: (key) => key.albumArtist,
+      titleSort: (key) => albumSorts[key],
+      subtitleSort: (key) => albumArtistSorts[key],
       weights: parameters.weights,
       cleanup: parameters.cleanup,
     );
@@ -1892,9 +1977,10 @@ class SearchSortController extends SearchPortsProvider {
     sendPort.send(PortsProviderMessages.prepared);
   }
 
-  static void _generalSearchIsolate(({List<String> keys, KeysSearchWeights weights, bool cleanup, bool keyIsPath, SendPort sendPort}) parameters) {
+  static void _generalSearchIsolate(({List<String> keys, Map<String, String>? sortTags, KeysSearchWeights weights, bool cleanup, bool keyIsPath, SendPort sendPort}) parameters) {
     final keyIsPath = parameters.keyIsPath;
     final sendPort = parameters.sendPort;
+    final sortTags = parameters.sortTags;
 
     final receivePort = ReceivePort();
     sendPort.send(receivePort.sendPort);
@@ -1902,6 +1988,7 @@ class SearchSortController extends SearchPortsProvider {
     final searchWrapper = KeysSearchWrapper.init(
       parameters.keys,
       title: (key) => keyIsPath ? Folder.explicit(key).folderNameRaw : key,
+      titleSort: sortTags == null ? null : (key) => sortTags[key],
       weights: parameters.weights,
       cleanup: parameters.cleanup,
     );

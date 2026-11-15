@@ -50,6 +50,9 @@ class _NamidaChannelAndroid extends NamidaChannel {
   }
 
   @override
+  Future<Color?> getSystemAccentColor() => NamidaChannel._getSystemAccentColorFromChannel(_channel);
+
+  @override
   Future<NetworkProxy?> getSystemProxy() async {
     final map = await _channel.invokeMapMethod<Object?, Object?>('getSystemProxy');
     return NetworkProxy.fromPlatformMap(map);
@@ -119,12 +122,11 @@ class _NamidaChannelAndroid extends NamidaChannel {
   }
 
   @override
-  Future<bool> consumeSelfSentMediaCommand() async {
+  Future<bool> consumeTrustedMediaCommand() async {
     try {
-      final res = await _channel.invokeMethod<bool?>('consumeSelfSentMediaCommand');
+      final res = await _channel.invokeMethod<bool?>('consumeTrustedMediaCommand');
       return res ?? false;
     } catch (_) {
-      // -- no activity (ex: service started by external command)
       return false;
     }
   }

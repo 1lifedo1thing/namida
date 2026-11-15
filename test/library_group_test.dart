@@ -86,6 +86,7 @@ void main() {
       releaseType: '',
       bpm: null,
       musicalKey: '',
+      explicitStatus: null,
       rating: 0.0,
       originalTags: null,
       gainData: null,
@@ -97,6 +98,7 @@ void main() {
       isVideo: path.endsWith('.mp4'),
       server: null,
       serverFolder: null,
+      serverVideos: null,
       hasNoEmbeddedArtwork: false,
     );
   }

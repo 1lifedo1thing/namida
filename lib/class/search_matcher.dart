@@ -1,5 +1,6 @@
 import 'package:dart_extensions/dart_extensions.dart';
 
+import 'package:namida/core/constants.dart';
 import 'package:namida/core/enums.dart';
 
 class FilePathMatcher extends SearchMatcher {
@@ -89,30 +90,79 @@ class FilePathMatcher extends SearchMatcher {
     return matched;
   }
 
-  static final _trailingBracketsRegex = RegExp(r'\s*[\(\[\{][^\(\)\[\]\{\}]*[\)\]\}]\s*$');
-
-  /// videos that surely belong to the track: the name is the track's filename (bracket parts like `(480p)` can follow), or it has the track's youtube id.
+  /// videos that surely belong to the track: the name is the track's filename (see [SameNameVideosMatcher]), or it has the track's youtube id.
   static Set<String> getSureTrackVideos({required Iterable<String> videoPaths, required String trackFilenameWOExt, required String trackYTID}) {
     final hasYTID = trackYTID.length == 11;
-    final trackWordsText = _PhrasesQuery.toWordsText(trackFilenameWOExt);
+    final sameNameMatcher = SameNameVideosMatcher<bool>();
+    sameNameMatcher.addTrack(trackFilenameWOExt, true);
 
     bool isSureTrackVideo(String videoPath) {
-      var videoName = videoPath.getFilenameWOExt;
+      final videoName = videoPath.getFilenameWOExt;
       if (hasYTID) {
         final ytIDMatches = _ytIDCandidateRegex.allMatches(videoName);
         if (ytIDMatches.any((m) => m[1] == trackYTID)) return true;
       }
-      while (true) {
-        final videoWordsText = _PhrasesQuery.toWordsText(videoName);
-        if (videoWordsText == trackWordsText) return true;
-        final trailingBrackets = _trailingBracketsRegex.firstMatch(videoName);
-        if (trailingBrackets == null) return false;
-        videoName = videoName.substring(0, trailingBrackets.start);
-      }
+      return sameNameMatcher.matchVideo(videoName) != null;
     }
 
     return videoPaths.where(isSureTrackVideo).toSet();
   }
+}
+
+/// videos named like a track, bracket parts like `(480p)` can follow the name. they play as that track's video.
+class SameNameVideosMatcher<T> {
+  final _tracksByWordsText = <String, T>{};
+
+  bool get isEmpty => _tracksByWordsText.isEmpty;
+
+  void addTrack(String trackFilenameWOExt, T track) {
+    final trackWordsText = _PhrasesQuery.toWordsText(trackFilenameWOExt);
+    _tracksByWordsText[trackWordsText] = track;
+  }
+
+  /// the longest name wins, `Song (Live)` goes to a `Song (Live)` track before a `Song` one.
+  T? matchVideo(String videoFilenameWOExt) {
+    var videoName = videoFilenameWOExt;
+    while (true) {
+      final videoWordsText = _PhrasesQuery.toWordsText(videoName);
+      final track = _tracksByWordsText[videoWordsText];
+      if (track != null) return track;
+      final trailingBrackets = _trailingBracketsRegex.firstMatch(videoName);
+      if (trailingBrackets == null) return null;
+      videoName = videoName.substring(0, trailingBrackets.start);
+    }
+  }
+
+  static final _trailingBracketsRegex = RegExp(r'\s*[\(\[\{][^\(\)\[\]\{\}]*[\)\]\}]\s*$');
+
+  /// the videos in one folder's [files] mapped to the track they're named after. tracks are the non video files with [trackExtensions].
+  /// hidden files are never matched. null when no video matched.
+  static Map<E, E>? matchFolder<E>(Iterable<E> files, String Function(E file) pathOf, {required NamidaFileExtensionsWrapper trackExtensions}) {
+    List<E>? videos;
+    for (final file in files) {
+      final path = pathOf(file);
+      if (path.isVideo() && !_isHidden(path)) (videos ??= []).add(file);
+    }
+    if (videos == null) return null;
+
+    final matcher = SameNameVideosMatcher<E>();
+    for (final file in files) {
+      final path = pathOf(file);
+      if (path.isVideo() || !trackExtensions.isPathValid(path) || _isHidden(path)) continue;
+      matcher.addTrack(path.getFilenameWOExt, file);
+    }
+    if (matcher.isEmpty) return null;
+
+    Map<E, E>? trackByVideo;
+    for (final video in videos) {
+      final videoNameWOExt = pathOf(video).getFilenameWOExt;
+      final track = matcher.matchVideo(videoNameWOExt);
+      if (track != null) (trackByVideo ??= {})[video] = track;
+    }
+    return trackByVideo;
+  }
+
+  static bool _isHidden(String path) => path.getFilename.startsWith('.');
 }
 
 abstract class SearchMatcher {
@@ -226,20 +276,28 @@ class ReverseSearchMatcher<T> {
     entries.add((item, tokens));
   }
 
-  /// items whose tokens are all inside [haystackTokens], built by [SearchMatcher.tokenizeHaystack].
-  List<T> matchContainedIn(Set<String> haystackTokens) {
-    final matched = <T>[];
+  /// every item passing [test] whose tokens are all inside [haystackTokens] (built by [SearchMatcher.tokenizeHaystack]) and that has the most tokens.
+  List<T> matchMostSpecificAll(Set<String> haystackTokens, bool Function(T item) test) {
+    final mostSpecific = <T>[];
+    int mostTokensCount = 0;
     for (final token in haystackTokens) {
       final entries = _entriesByAnchorToken[token];
       if (entries == null) continue;
       for (final (item, tokens) in entries) {
-        if (haystackTokens.containsAll(tokens)) matched.add(item);
+        final tokensCount = tokens.length;
+        if (tokensCount < mostTokensCount) continue;
+        if (!haystackTokens.containsAll(tokens) || !test(item)) continue;
+        if (tokensCount > mostTokensCount) {
+          mostSpecific.clear();
+          mostTokensCount = tokensCount;
+        }
+        mostSpecific.add(item);
       }
     }
-    return matched;
+    return mostSpecific;
   }
 
-  /// the [matchContainedIn] item passing [test] with the most tokens, ties keep the first.
+  /// the first of [matchMostSpecificAll].
   T? matchMostSpecific(Set<String> haystackTokens, bool Function(T item) test) {
     T? mostSpecific;
     int mostTokensCount = 0;

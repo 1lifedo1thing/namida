@@ -37,6 +37,7 @@ import 'package:namida/core/icon_fonts/broken_icons.dart';
 import 'package:namida/core/ntheme.dart';
 import 'package:namida/core/translations/language.dart';
 import 'package:namida/core/utils.dart';
+import 'package:namida/ui/widgets/artwork.dart';
 import 'package:namida/ui/widgets/custom_widgets.dart';
 import 'package:namida/youtube/class/download_task_base.dart';
 
@@ -432,7 +433,7 @@ class PlaylistController extends PlaylistManager<TrackWithDate, Track, SortEntry
       }
     }
     if (namesToRemove.isNotEmpty) {
-      super.removePlaylists(namesToRemove); // -- keeps their metadata, the file could come back
+      super.removePlaylists(namesToRemove, deleteFiles: false); // -- keeps their metadata and artwork, the file could come back
     }
   }
 
@@ -1045,6 +1046,18 @@ class PlaylistController extends PlaylistManager<TrackWithDate, Track, SortEntry
     return await super.writePlaylistToStorage(playlist);
   }
 
+  /// m3u playlists stay bound to their file by path, saving under [newName] writes the new properties.
+  @override
+  Future<bool> renamePlaylistInStorage(LocalPlaylist playlist, String newName) async {
+    final m3uPath = playlist.m3uPath;
+    final isM3U = m3uPath != null && m3uPath.isNotEmpty;
+    if (isM3U) {
+      _m3uProperties.remove(playlist.name);
+      return true;
+    }
+    return await super.renamePlaylistInStorage(playlist, newName);
+  }
+
   @override
   Future<void> removePlaylist(LocalPlaylist playlist) async {
     await super.removePlaylist(playlist);
@@ -1052,7 +1065,7 @@ class PlaylistController extends PlaylistManager<TrackWithDate, Track, SortEntry
   }
 
   @override
-  Future<void> removePlaylists(List<String> names, {bool deleteM3UFiles = false}) async {
+  Future<void> removePlaylists(List<String> names, {bool deleteFiles = true, bool deleteM3UFiles = false}) async {
     final m3uPaths = <String>[];
     if (deleteM3UFiles) {
       for (final name in names) {
@@ -1060,7 +1073,7 @@ class PlaylistController extends PlaylistManager<TrackWithDate, Track, SortEntry
         if (m3uPath != null) m3uPaths.add(m3uPath);
       }
     }
-    await super.removePlaylists(names);
+    await super.removePlaylists(names, deleteFiles: deleteFiles);
     names.loop(_m3uProperties.remove);
     for (final m3uPath in m3uPaths) {
       await File(m3uPath).deleteIfExists();
@@ -1070,6 +1083,9 @@ class PlaylistController extends PlaylistManager<TrackWithDate, Track, SortEntry
 
   @override
   void onTagsFilterChanged() => SearchSortController.inst.refreshPlaylistsTagsFilter();
+
+  @override
+  void onArtworkFileChanged(String artworkPath) => ArtworkWidget.refreshImageFiles([artworkPath]);
 
   @override
   void onReadOnlyPlaylistError() {

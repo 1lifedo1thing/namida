@@ -406,6 +406,7 @@ extension FAudioModelExtensions on FAudioModel {
         releaseType: original.tags.releaseType ?? this.tags.releaseType,
         bpm: original.tags.bpm ?? this.tags.bpm,
         musicalKey: original.tags.musicalKey ?? this.tags.musicalKey,
+        itunesAdvisory: original.tags.itunesAdvisory ?? this.tags.itunesAdvisory,
         mbAlbumId: original.tags.mbAlbumId ?? this.tags.mbAlbumId,
         mbAlbumArtistId: original.tags.mbAlbumArtistId ?? this.tags.mbAlbumArtistId,
         ratingPercentage: original.tags.ratingPercentage ?? this.tags.ratingPercentage,
@@ -468,6 +469,7 @@ extension MediaInfoToFAudioModel on MediaInfo {
         releaseType: info?.releaseType,
         bpm: info?.bpm,
         musicalKey: info?.musicalKey,
+        itunesAdvisory: info?.itunesAdvisory,
         mbAlbumId: info?.mbAlbumId,
         mbAlbumArtistId: info?.mbAlbumArtistId,
         gainData: info?.gainData,
@@ -2269,6 +2271,7 @@ extension SortTypeL10n on SortType {
     SortType.path => lang.path,
     SortType.duration => lang.duration,
     SortType.genresList => lang.genres,
+    SortType.stylesList => lang.styles,
     SortType.sampleRate => lang.sampleRate,
     SortType.bitDepth => lang.bitDepth,
     SortType.bpm => 'BPM',
@@ -2294,6 +2297,7 @@ extension SortTypeL10n on SortType {
     SortType.artistsList => MediaType.artist.toIcon(),
     SortType.albumArtist => MediaType.albumArtist.toIcon(),
     SortType.genresList => MediaType.genre.toIcon(),
+    SortType.stylesList => MediaType.style.toIcon(),
     SortType.composer => MediaType.composer.toIcon(),
     SortType.trackNo => Broken.hashtag,
     SortType.discNo => Broken.hashtag,
@@ -2366,6 +2370,7 @@ extension GroupSortTypeL10n on GroupSortType {
     GroupSortType.albumArtist => lang.albumArtist,
     GroupSortType.artistsList => lang.artist,
     GroupSortType.genresList => lang.genres,
+    GroupSortType.stylesList => lang.styles,
     GroupSortType.composer => lang.composer,
     GroupSortType.label => lang.recordLabel,
     GroupSortType.releaseType => lang.releaseType,
@@ -2397,6 +2402,7 @@ extension GroupSortTypeL10n on GroupSortType {
     GroupSortType.artistsList => MediaType.artist.toIcon(),
     GroupSortType.albumArtist => MediaType.albumArtist.toIcon(),
     GroupSortType.genresList => MediaType.genre.toIcon(),
+    GroupSortType.stylesList => MediaType.style.toIcon(),
     GroupSortType.composer => MediaType.composer.toIcon(),
     GroupSortType.numberOfTracks => Broken.hashtag,
     GroupSortType.year => Broken.calendar,
@@ -2596,6 +2602,7 @@ extension TagFieldL10n on TagField {
     TagField.musicalKey => lang.musicalKey,
     TagField.rating => lang.rating,
     TagField.tags => lang.tags,
+    TagField.explicit => lang.explicit,
     TagField.titleSort => '${lang.title} (${lang.sortBy})',
     TagField.albumSort => '${lang.album} (${lang.sortBy})',
     TagField.albumArtistSort => '${lang.albumArtist} (${lang.sortBy})',
@@ -2631,11 +2638,19 @@ extension TagFieldL10n on TagField {
     TagField.musicalKey => Broken.musicnote,
     TagField.rating => MediaType.rating.toIcon(),
     TagField.tags => MediaType.tag.toIcon(),
+    TagField.explicit => Icons.explicit_rounded,
     TagField.titleSort => Broken.music,
     TagField.albumSort => MediaType.album.toIcon(),
     TagField.albumArtistSort => MediaType.albumArtist.toIcon(),
     TagField.artistSort => MediaType.artist.toIcon(),
     TagField.composerSort => MediaType.composer.toIcon(),
+  };
+}
+
+extension ExplicitStatusL10n on ExplicitStatus {
+  String toText() => switch (this) {
+    ExplicitStatus.explicit => lang.explicit,
+    ExplicitStatus.clean => lang.clean,
   };
 }
 
@@ -3066,16 +3081,49 @@ extension FABTypeL10n on FABType {
   String toText() => switch (this) {
     FABType.none => lang.none,
     FABType.search => lang.search,
-    FABType.shuffle => lang.shuffle,
-    FABType.play => lang.play,
+    FABType.play || FABType.shuffle || FABType.playNext || FABType.playLast => quickPlayMode!.toText(),
   };
 
   IconData toIcon() => switch (this) {
     FABType.none => Broken.status,
     FABType.search => Broken.search_normal,
-    FABType.shuffle => Broken.shuffle,
-    FABType.play => Broken.play_cricle,
+    FABType.play || FABType.shuffle || FABType.playNext || FABType.playLast => quickPlayMode!.toIcon(),
   };
+}
+
+extension QuickPlayModeL10n on QuickPlayMode {
+  String toText() => switch (this) {
+    QuickPlayMode.play => lang.play,
+    QuickPlayMode.shuffle => lang.shuffle,
+    QuickPlayMode.playNext => lang.playNext,
+    // QuickPlayMode.playAfter => lang.playAfter,
+    QuickPlayMode.playLast => lang.playLast,
+  };
+
+  IconData toIcon() => switch (this) {
+    QuickPlayMode.play => Broken.play,
+    QuickPlayMode.shuffle => Broken.shuffle,
+    QuickPlayMode.playNext => Broken.next,
+    // QuickPlayMode.playAfter => Broken.hierarchy_square,
+    QuickPlayMode.playLast => Broken.play_cricle,
+  };
+}
+
+extension QuickPlayModeUtils on QuickPlayMode {
+  Future<void> execute(List<Selectable> tracks, QueueSourceBase source, {HomePageItems? homePageItem}) async {
+    switch (this) {
+      case QuickPlayMode.play:
+        await Player.inst.playOrPause(0, tracks, source, homePageItem: homePageItem);
+      case QuickPlayMode.shuffle:
+        await Player.inst.playOrPause(0, tracks, source, shuffle: true, homePageItem: homePageItem);
+      case QuickPlayMode.playNext:
+        await Player.inst.addToQueue(tracks, insertNext: true);
+      // case QuickPlayMode.playAfter:
+      //   await Player.inst.addToQueue(tracks, insertAfterLatest: true);
+      case QuickPlayMode.playLast:
+        await Player.inst.addToQueue(tracks);
+    }
+  }
 }
 
 extension YTHomeSourceL10n on YTHomeSource {
@@ -3450,6 +3498,7 @@ extension WebhookEventL10n on WebhookEvent {
     WebhookEvent.trackChanged => 'Track changed',
     WebhookEvent.play => lang.play,
     WebhookEvent.pause => lang.pause,
+    WebhookEvent.favouriteChanged => lang.favourite,
   };
 }
 
@@ -3458,6 +3507,7 @@ extension WebhookEventUtils on WebhookEvent {
     WebhookEvent.trackChanged => Broken.music,
     WebhookEvent.play => Broken.play,
     WebhookEvent.pause => Broken.pause,
+    WebhookEvent.favouriteChanged => Broken.heart,
   };
 }
 
