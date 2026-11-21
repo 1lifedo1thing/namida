@@ -283,11 +283,16 @@ Everything you might expect from a music player, in addition to the following:
 
 <tr>
 <td align="center"><b>Linux</b> <sub><code>new</code></sub></td>
-<td align="center"><i>Soon</i></td>
+<td align="center" width="200">
+  <div style="display:flex; flex-direction:column; align-items:center;">
+    <a href="https://github.com/namidaco/namida/releases/latest"><img src="./some stuff/badge_github.png" height="50"></a>
+    <a href="https://aur.archlinux.org/packages/namida-bin"><img src="./some%20stuff/summaries/pm_aur.svg" height="50" alt="AUR"></a>
+  </div>
+</td>
 <td align="center" width="200">
   <div style="display:flex; flex-direction:column; align-items:center;">
     <a href="https://github.com/namidaco/namida-snapshots/releases/latest"><img src="./some stuff/badge_github_beta.png" height="50"></a>
-    <a href="https://aur.archlinux.org/packages/namida-bin"><img src="./some%20stuff/summaries/pm_aur.svg" height="50" alt="AUR"></a>
+    <a href="https://aur.archlinux.org/packages/namida-beta-bin"><img src="./some%20stuff/summaries/pm_aur.svg" height="50" alt="AUR Beta"></a>
   </div>
 </td>
 <td align="center"><a href="https://docs.namida.app/installation/#linux-install"><picture><source media="(prefers-color-scheme: dark)" srcset="./some%20stuff/summaries/install_guide_dark.svg"><img src="./some%20stuff/summaries/install_guide_light.svg" width="150" align="absmiddle" alt="Install guide"></picture></a></td>
@@ -353,6 +358,9 @@ Full installation steps for every platform (which file to pick, dependencies and
 > - `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` (requested when needed): improve downloads.
 > - `WRITE_SETTINGS` (requested when needed): to set audio as ringtone/etc.
 > - `QUERY_ALL_PACKAGES`: to allow opening custom equalizer apps.
+> - `MODIFY_AUDIO_SETTINGS`: allow bit-perfect to set the output format of usb dacs (Android 14+).
+> - `ACCESS_NETWORK_STATE`: online / offline and wifi / mobile data / etc (for youtube data saver).
+> - `RECEIVE_BOOT_COMPLETED`: used by WorkManager (in the home widget library).
 
 </details>
 
